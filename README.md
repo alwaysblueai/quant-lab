@@ -106,6 +106,9 @@ for the canonical timestamp, merge, and storage rules.
 - `alpha_lab.splits.time_split`
 - `alpha_lab.splits.walk_forward_split`
 - `alpha_lab.experiment.run_factor_experiment`
+- `alpha_lab.reporting.summarise_experiment_result`
+- `alpha_lab.reporting.export_summary_csv`
+- `alpha_lab.reporting.to_obsidian_markdown`
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
@@ -144,6 +147,32 @@ while train-period rows are excluded. Labels at test date `t` still use strictly
 future prices (`close[t+horizon]/close[t]-1`) — that is by construction, not
 lookahead, because the label value is stored at `t` for alignment with factor
 values observed at `t`.
+
+## Reporting
+
+Turn any `ExperimentResult` into a summary record, CSV, or Obsidian note:
+
+```python
+from alpha_lab.reporting import (
+    export_summary_csv,
+    summarise_experiment_result,
+    to_obsidian_markdown,
+)
+
+# One-row summary DataFrame (stackable across experiments)
+summary = summarise_experiment_result(
+    result,
+    n_quantiles=5,
+    train_end="2022-12-31",
+    test_start="2023-01-01",
+)
+
+# Export to CSV (parent directories created automatically)
+export_summary_csv(summary, "output/reports/momentum_5d.csv")
+
+# Obsidian-friendly markdown note
+md = to_obsidian_markdown(result, title="Momentum 5d — OOS", notes="Needs decay analysis.")
+```
 
 ## Current Limitations
 
