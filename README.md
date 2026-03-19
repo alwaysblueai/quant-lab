@@ -117,6 +117,11 @@ for the canonical timestamp, merge, and storage rules.
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
+- `alpha_lab.comparison.compare_experiments`
+- `alpha_lab.comparison.rank_experiments`
+- `alpha_lab.registry.register_experiment`
+- `alpha_lab.registry.load_registry`
+- `alpha_lab.registry.append_to_registry`
 
 ## Running an Experiment
 
@@ -205,7 +210,42 @@ cost model is `adjusted_return = return - cost_rate × turnover` with a
 user-supplied flat one-way rate.  It does not model market impact, bid-ask
 spread variation, short-borrow fees, or execution timing.
 
+## Comparison and Registry
+
+Run multiple experiments, compare them side-by-side, and persist results to a
+lightweight CSV registry:
+
+```python
+from alpha_lab.comparison import compare_experiments, rank_experiments
+from alpha_lab.registry import load_registry, register_experiment
+from alpha_lab.reporting import summarise_experiment_result
+
+# --- 1. Run experiments and summarise ---
+result_a = run_factor_experiment(prices, lambda p: momentum(p, window=20), horizon=5)
+result_b = run_factor_experiment(prices, lambda p: momentum(p, window=5), horizon=5)
+
+summary_a = summarise_experiment_result(result_a)
+summary_b = summarise_experiment_result(result_b)
+
+# --- 2. Compare side-by-side ---
+comparison = compare_experiments([summary_a, summary_b])
+ranked = rank_experiments(comparison, metric="ic_ir")
+
+# --- 3. Register to the CSV log ---
+register_experiment("momentum_20d_5h", summary_a)
+register_experiment("momentum_5d_5h",  summary_b)
+
+# --- 4. Reload the registry ---
+registry = load_registry()
+```
+
+The registry is stored at `data/processed/experiment_registry.csv` by default.
+Each call to `register_experiment` appends one row; the file is created on
+first use.  The registry is an append-only log — duplicate experiment names
+are permitted.  Schema consistency is checked on every append and load.
+
 ## Current Limitations
 
 - no portfolio construction or backtest engine
 - no execution simulation or realistic transaction-cost model
+- no database, dashboard, or experiment tracking framework
