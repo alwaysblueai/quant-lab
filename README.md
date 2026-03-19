@@ -210,6 +210,52 @@ cost model is `adjusted_return = return - cost_rate × turnover` with a
 user-supplied flat one-way rate.  It does not model market impact, bid-ask
 spread variation, short-borrow fees, or execution timing.
 
+## CLI
+
+A thin command-line wrapper over the existing pipeline lives at
+`scripts/run_experiment.py`.  It does not redesign the pipeline — it parses
+arguments and delegates to the same modules used in notebook workflows.
+
+**Input CSV** must contain at least the columns `date`, `asset`, and `close`.
+Extra columns are ignored.
+
+```bash
+# Minimal run — writes a summary CSV to output/
+uv run python scripts/run_experiment.py \
+    --input-path data/raw/prices.csv \
+    --factor momentum \
+    --label-horizon 5 \
+    --quantiles 5
+
+# Full run: split, cost rate, Obsidian note, registry entry
+uv run python scripts/run_experiment.py \
+    --input-path data/raw/prices.csv \
+    --factor momentum \
+    --momentum-window 20 \
+    --label-horizon 5 \
+    --quantiles 5 \
+    --train-end 2022-12-31 \
+    --test-start 2023-01-01 \
+    --cost-rate 0.001 \
+    --experiment-name momentum_20d_5q_oos_2023 \
+    --output-dir output/reports \
+    --obsidian-markdown-path notes/momentum_20d_5q_oos_2023.md \
+    --append-registry
+
+# Write the note into a directory — filename is auto-generated as
+# YYYY-MM-DD_{experiment_name}.md
+uv run python scripts/run_experiment.py \
+    --input-path data/raw/prices.csv \
+    --factor momentum \
+    --label-horizon 5 \
+    --quantiles 5 \
+    --obsidian-markdown-path notes/
+```
+
+`--experiment-name` must contain only letters, digits, hyphens, underscores,
+and dots — path separators are rejected to prevent accidental file writes
+outside `--output-dir`.
+
 ## Comparison and Registry
 
 Run multiple experiments, compare them side-by-side, and persist results to a

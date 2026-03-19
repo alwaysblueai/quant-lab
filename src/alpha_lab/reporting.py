@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import math
 from pathlib import Path
 
@@ -147,6 +148,8 @@ def to_obsidian_markdown(
     title: str | None = None,
     cost_rate: float | None = None,
     notes: str | None = None,
+    horizon: int | None = None,
+    tags: list[str] | None = None,
 ) -> str:
     """Render an experiment result as Obsidian-friendly markdown.
 
@@ -166,11 +169,16 @@ def to_obsidian_markdown(
         friction estimate only.
     notes:
         Optional free-text appended under a ``## Notes`` section.
+    horizon:
+        Forward-return horizon in per-asset rows.  When provided, included in
+        the YAML frontmatter.
+    tags:
+        YAML frontmatter tags.  Defaults to ``["quant", "factor"]``.
 
     Returns
     -------
     str
-        Markdown text ending with a single newline.
+        Markdown text with YAML frontmatter, ending with a single newline.
     """
     summary_df = summarise_experiment_result(result, cost_rate=cost_rate)
     row = summary_df.iloc[0]
@@ -180,9 +188,26 @@ def to_obsidian_markdown(
     split_desc = str(row["split_description"])
     n_dates = int(row["n_dates_used"])  # type: ignore[arg-type]
     nq_str = str(int(row["n_quantiles"]))  # type: ignore[arg-type]
+    n_quantiles = int(row["n_quantiles"])  # type: ignore[arg-type]
 
     if title is None:
         title = f"Experiment: {factor_name}"
+
+    resolved_tags = tags if tags is not None else ["quant", "factor"]
+    tag_lines = "\n".join(f"  - {t}" for t in resolved_tags)
+    frontmatter_lines = [
+        "---",
+        f"factor: {factor_name}",
+        f"label: {label_name}",
+        f"quantiles: {n_quantiles}",
+    ]
+    if horizon is not None:
+        frontmatter_lines.append(f"horizon: {horizon}")
+    frontmatter_lines += [
+        f"date: {datetime.date.today().isoformat()}",
+        f"tags:\n{tag_lines}",
+        "---",
+    ]
 
     s = result.summary
     metrics_rows = [
@@ -200,6 +225,8 @@ def to_obsidian_markdown(
         )
 
     lines = [
+        *frontmatter_lines,
+        "",
         f"# {title}",
         "",
         "## Experiment",
