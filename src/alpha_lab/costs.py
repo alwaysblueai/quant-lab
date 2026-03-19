@@ -126,7 +126,7 @@ def cost_adjusted_long_short(
         return pd.DataFrame(columns=list(_COST_ADJUSTED_COLUMNS))
 
     merged = merged.sort_values(["date", "factor"]).reset_index(drop=True)
-    merged["adjusted_return"] = (
-        merged["long_short_return"] - cost_rate * merged["turnover"]
+    merged["adjusted_return"] = apply_linear_cost(
+        merged["long_short_return"], merged["turnover"], cost_rate=cost_rate
     )
     return merged[list(_COST_ADJUSTED_COLUMNS)].reset_index(drop=True)

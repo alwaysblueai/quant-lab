@@ -57,6 +57,13 @@ def quantile_turnover(assignments: pd.DataFrame) -> pd.DataFrame:
     _check_assignment_columns(assignments)
     factor_name = _single_name(assignments["factor"], "assignments")
 
+    dupes = assignments.duplicated(subset=["date", "asset"])
+    if dupes.any():
+        raise ValueError(
+            "assignments contains duplicate (date, asset) rows; "
+            "each asset must appear at most once per date"
+        )
+
     df = assignments.copy()
     df["date"] = pd.to_datetime(df["date"])
 

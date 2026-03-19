@@ -232,7 +232,14 @@ def run_factor_experiment(
     lsto_df = long_short_turnover(qto_df)
 
     # --- Step 6: summary ----------------------------------------------------
-    summary = _summarise(ic_df, rank_ic_df, ls_df, lsto_df)
+    # Restrict turnover to dates present in long_short_df so that
+    # mean_long_short_turnover is averaged over the same universe as
+    # mean_long_short_return and cost-adjusted returns.
+    ls_dates = set(ls_df["date"].unique()) if not ls_df.empty else set()
+    lsto_for_summary = (
+        lsto_df[lsto_df["date"].isin(ls_dates)] if not lsto_df.empty else lsto_df
+    )
+    summary = _summarise(ic_df, rank_ic_df, ls_df, lsto_for_summary)
 
     return ExperimentResult(
         factor_df=factor_df,

@@ -165,12 +165,8 @@ from alpha_lab.reporting import (
 )
 
 # One-row summary DataFrame (stackable across experiments)
-summary = summarise_experiment_result(
-    result,
-    n_quantiles=5,
-    train_end="2022-12-31",
-    test_start="2023-01-01",
-)
+# n_quantiles, train_end, and test_start are carried on result automatically
+summary = summarise_experiment_result(result)
 
 # Export to CSV (parent directories created automatically)
 export_summary_csv(summary, "output/reports/momentum_5d.csv")

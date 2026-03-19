@@ -188,6 +188,27 @@ def test_summary_mean_long_short_return_matches_long_short_df():
     assert math.isclose(result.summary.mean_long_short_return, expected)
 
 
+def test_summary_mean_long_short_turnover_aligned_to_return_universe():
+    """mean_long_short_turnover must be averaged over the same date universe as
+    long_short_df, not the broader quantile_assignment universe.
+
+    With horizon > 1, the last `horizon - 1` factor dates have no valid label,
+    so long_short_df has fewer dates than long_short_turnover_df.  The summary
+    scalar must exclude those trailing dates.
+    """
+    result = run_factor_experiment(_make_prices(n_days=40), _momentum_fn, horizon=5)
+    ls_dates = set(result.long_short_df["date"].unique())
+    lsto_restricted = result.long_short_turnover_df[
+        result.long_short_turnover_df["date"].isin(ls_dates)
+    ]
+    expected_vals = lsto_restricted["long_short_turnover"].dropna()
+    if len(expected_vals) == 0:
+        assert math.isnan(result.summary.mean_long_short_turnover)
+    else:
+        expected = float(expected_vals.mean())
+        assert math.isclose(result.summary.mean_long_short_turnover, expected)
+
+
 def test_summary_long_short_hit_rate_matches_long_short_df():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     ls_vals = result.long_short_df["long_short_return"].dropna()

@@ -148,6 +148,16 @@ def test_quantile_turnover_rejects_missing_columns():
         quantile_turnover(bad)
 
 
+def test_quantile_turnover_rejects_duplicate_asset_rows():
+    """Duplicate (date, asset) rows must raise rather than silently collapsing."""
+    rows = [
+        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "factor": "f", "quantile": 1},
+        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "factor": "f", "quantile": 1},
+    ]
+    with pytest.raises(ValueError, match="duplicate"):
+        quantile_turnover(pd.DataFrame(rows))
+
+
 def test_quantile_turnover_rejects_multiple_factor_names():
     rows = [
         {"date": pd.Timestamp("2024-01-01"), "asset": "A", "factor": "f1", "quantile": 1},
