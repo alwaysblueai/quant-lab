@@ -166,18 +166,10 @@ def test_summarise_split_description_encodes_both_dates():
         train_end="2024-01-22",
         test_start="2024-01-25",
     )
-    df = summarise_experiment_result(result, train_end="2024-01-22", test_start="2024-01-25")
+    df = summarise_experiment_result(result)
     desc = df["split_description"].iloc[0]
     assert "2024-01-22" in desc
     assert "2024-01-25" in desc
-
-
-def test_summarise_split_description_full_sample_when_only_train_end():
-    """Caller may forget test_start; summarise must not raise — it just uses what's given."""
-    result = _standard_result()
-    df = summarise_experiment_result(result, train_end="2024-01-22")
-    # Only one date provided → falls through to full_sample
-    assert df["split_description"].iloc[0] == "full_sample"
 
 
 # ---------------------------------------------------------------------------
@@ -185,36 +177,26 @@ def test_summarise_split_description_full_sample_when_only_train_end():
 # ---------------------------------------------------------------------------
 
 
-def test_summarise_n_quantiles_explicit_parameter():
-    result = _standard_result()
-    df = summarise_experiment_result(result, n_quantiles=5)
+def test_summarise_n_quantiles_matches_runner_parameter():
+    """n_quantiles must reflect the exact runner parameter, not the max occupied bucket."""
+    result = run_factor_experiment(_make_prices(), _momentum_fn, n_quantiles=7)
+    df = summarise_experiment_result(result)
+    assert int(df["n_quantiles"].iloc[0]) == 7
+
+
+def test_summarise_n_quantiles_default_is_five():
+    result = _standard_result()  # n_quantiles default = 5
+    df = summarise_experiment_result(result)
     assert int(df["n_quantiles"].iloc[0]) == 5
 
 
-def test_summarise_n_quantiles_inferred_from_quantile_returns_df():
-    result = _standard_result()
-    df_no_param = summarise_experiment_result(result)
-    expected_max = int(result.quantile_returns_df["quantile"].max())
-    assert int(df_no_param["n_quantiles"].iloc[0]) == expected_max
-
-
-def test_summarise_n_quantiles_none_when_quantile_df_empty():
-    """When quantile_returns_df is empty and n_quantiles not provided, field is None/NaN."""
-    result = run_factor_experiment(_make_prices(n_assets=1, n_days=15), _momentum_fn)
-    # single asset → quantile_returns_df may or may not be empty; test the empty path explicitly
-    # by constructing a result-like object with an empty quantile_returns_df
-
-    empty_result = ExperimentResult(
-        factor_df=result.factor_df,
-        label_df=result.label_df,
-        ic_df=result.ic_df,
-        rank_ic_df=result.rank_ic_df,
-        quantile_returns_df=pd.DataFrame(columns=["date", "factor", "quantile", "mean_return"]),
-        long_short_df=result.long_short_df,
-        summary=result.summary,
-    )
-    df = summarise_experiment_result(empty_result)
-    assert df["n_quantiles"].iloc[0] is None or pd.isna(df["n_quantiles"].iloc[0])
+def test_summarise_n_quantiles_independent_of_occupied_buckets():
+    """A degenerate cross-section may leave some buckets empty, but n_quantiles
+    must still report the configured parameter, not max(quantile)."""
+    # 2-asset cross-section with n_quantiles=5: only buckets 1 and 5 are occupied
+    result = run_factor_experiment(_make_prices(n_assets=2, n_days=20), _momentum_fn, n_quantiles=5)
+    df = summarise_experiment_result(result)
+    assert int(df["n_quantiles"].iloc[0]) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +220,27 @@ def test_summarise_stackable_multiple_results():
     )
     assert len(stacked) == 2
     assert list(stacked.columns) == list(SUMMARY_COLUMNS)
+
+
+def test_summarise_split_description_sourced_from_result():
+    """split_description must come from result.train_end/test_start, not caller kwargs."""
+    result = run_factor_experiment(
+        _make_prices(n_days=40),
+        _momentum_fn,
+        train_end="2024-01-22",
+        test_start="2024-01-25",
+    )
+    # Call with no extra arguments — split info lives on the result
+    df = summarise_experiment_result(result)
+    desc = str(df["split_description"].iloc[0])
+    assert "2024-01-22" in desc
+    assert "2024-01-25" in desc
+
+
+def test_summarise_split_is_full_sample_when_no_split_used():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    assert df["split_description"].iloc[0] == "full_sample"
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +297,13 @@ def test_export_summary_csv_rejects_non_dataframe(tmp_path: Path) -> None:
 def test_export_summary_csv_rejects_empty_dataframe(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="empty"):
         export_summary_csv(pd.DataFrame(), tmp_path / "x.csv")
+
+
+def test_export_summary_csv_rejects_dataframe_with_wrong_columns(tmp_path: Path) -> None:
+    """Exporting an unrelated DataFrame that happens to be non-empty must fail."""
+    unrelated = pd.DataFrame([{"foo": 1, "bar": 2}])
+    with pytest.raises(ValueError, match="missing expected columns"):
+        export_summary_csv(unrelated, tmp_path / "x.csv")
 
 
 def test_export_summary_csv_accepts_path_string(tmp_path: Path) -> None:
@@ -355,7 +365,7 @@ def test_obsidian_markdown_contains_split_description():
         train_end="2024-01-22",
         test_start="2024-01-25",
     )
-    md = to_obsidian_markdown(result, train_end="2024-01-22", test_start="2024-01-25")
+    md = to_obsidian_markdown(result)
     assert "2024-01-22" in md
     assert "2024-01-25" in md
 

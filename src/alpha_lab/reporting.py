@@ -22,38 +22,22 @@ SUMMARY_COLUMNS: tuple[str, ...] = (
 )
 
 
-def summarise_experiment_result(
-    result: ExperimentResult,
-    *,
-    n_quantiles: int | None = None,
-    train_end: str | pd.Timestamp | None = None,
-    test_start: str | pd.Timestamp | None = None,
-) -> pd.DataFrame:
+def summarise_experiment_result(result: ExperimentResult) -> pd.DataFrame:
     """Produce a compact one-row summary DataFrame from an ExperimentResult.
 
-    The returned DataFrame has exactly one row and the columns listed in
+    All metadata (factor name, label name, quantile count, split boundaries)
+    is read directly from ``result`` — nothing is inferred from heuristics or
+    supplied by the caller.  Metric values are taken from ``result.summary``
+    without re-computation.
+
+    The returned DataFrame has exactly one row and columns in
     :data:`SUMMARY_COLUMNS`.  Multiple rows can be stacked with
     ``pd.concat([row1, row2], ignore_index=True)``.
-
-    Metric values are taken directly from ``result.summary``; no re-computation
-    is performed.  Fields that are NaN in ``result.summary`` remain NaN here.
 
     Parameters
     ----------
     result:
         Output of :func:`~alpha_lab.experiment.run_factor_experiment`.
-    n_quantiles:
-        Number of quantile buckets used in the experiment.  When ``None``
-        (default) the value is inferred from
-        ``result.quantile_returns_df["quantile"].max()``.  Pass it explicitly
-        when that DataFrame is empty or when the exact runner parameter is
-        important to preserve.
-    train_end:
-        Last date of the training period, if a split was requested.  Used
-        only to build the ``split_description`` field.
-    test_start:
-        First date of the evaluation period, if a split was requested.  Used
-        only to build the ``split_description`` field.
 
     Returns
     -------
@@ -71,22 +55,12 @@ def summarise_experiment_result(
         else "unknown"
     )
 
-    # Derive n_quantiles from the max occupied bucket when not provided.
-    n_quantiles_val: int | None
-    if n_quantiles is not None:
-        n_quantiles_val = n_quantiles
-    elif not result.quantile_returns_df.empty:
-        q_max = result.quantile_returns_df["quantile"].max()
-        n_quantiles_val = int(q_max)
-    else:
-        n_quantiles_val = None
-
     s = result.summary
     row: dict[str, object] = {
         "factor_name": factor_name,
         "label_name": label_name,
-        "n_quantiles": n_quantiles_val,
-        "split_description": _split_description(train_end, test_start),
+        "n_quantiles": result.n_quantiles,
+        "split_description": _split_description(result.train_end, result.test_start),
         "mean_ic": s.mean_ic,
         "mean_rank_ic": s.mean_rank_ic,
         "ic_ir": s.ic_ir,
@@ -106,7 +80,8 @@ def export_summary_csv(
     Parameters
     ----------
     summary:
-        Non-empty DataFrame, typically the output of
+        Non-empty DataFrame whose columns must include all of
+        :data:`SUMMARY_COLUMNS`.  Typically the output of
         :func:`summarise_experiment_result` or a vertical stack of such rows.
     output_path:
         Destination file path.  Parent directories are created if they do
@@ -117,7 +92,7 @@ def export_summary_csv(
     TypeError
         If ``summary`` is not a :class:`pandas.DataFrame`.
     ValueError
-        If ``summary`` is empty.
+        If ``summary`` is empty or is missing expected columns.
     """
     if not isinstance(summary, pd.DataFrame):
         raise TypeError(
@@ -125,6 +100,11 @@ def export_summary_csv(
         )
     if summary.empty:
         raise ValueError("summary DataFrame is empty; nothing to export")
+    missing = set(SUMMARY_COLUMNS) - set(summary.columns)
+    if missing:
+        raise ValueError(
+            f"summary is missing expected columns: {sorted(missing)}"
+        )
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,17 +115,13 @@ def to_obsidian_markdown(
     result: ExperimentResult,
     *,
     title: str | None = None,
-    n_quantiles: int | None = None,
-    train_end: str | pd.Timestamp | None = None,
-    test_start: str | pd.Timestamp | None = None,
     notes: str | None = None,
 ) -> str:
     """Render an experiment result as Obsidian-friendly markdown.
 
-    The output is plain UTF-8 markdown with no external dependencies.  It is
-    suitable for pasting directly into an Obsidian note.  No scientific
-    conclusions are generated; the interpretation and next-step sections are
-    left as explicit placeholders for the researcher.
+    All metadata is sourced from ``result`` directly.  No scientific
+    conclusions are generated; interpretation and next-step sections are
+    explicit placeholders for the researcher.
 
     Parameters
     ----------
@@ -153,12 +129,6 @@ def to_obsidian_markdown(
         Output of :func:`~alpha_lab.experiment.run_factor_experiment`.
     title:
         H1 heading for the note.  Defaults to ``"Experiment: {factor_name}"``.
-    n_quantiles:
-        Passed through to :func:`summarise_experiment_result`.
-    train_end:
-        Used to build the split description.
-    test_start:
-        Used to build the split description.
     notes:
         Optional free-text appended under a ``## Notes`` section.
 
@@ -167,20 +137,14 @@ def to_obsidian_markdown(
     str
         Markdown text ending with a single newline.
     """
-    summary_df = summarise_experiment_result(
-        result,
-        n_quantiles=n_quantiles,
-        train_end=train_end,
-        test_start=test_start,
-    )
+    summary_df = summarise_experiment_result(result)
     row = summary_df.iloc[0]
 
     factor_name = str(row["factor_name"])
     label_name = str(row["label_name"])
     split_desc = str(row["split_description"])
     n_dates = int(row["n_dates_used"])  # type: ignore[arg-type]
-    nq = row["n_quantiles"]
-    nq_str = str(int(nq)) if nq is not None else "—"  # type: ignore[arg-type]
+    nq_str = str(int(row["n_quantiles"]))  # type: ignore[arg-type]
 
     if title is None:
         title = f"Experiment: {factor_name}"
@@ -235,19 +199,17 @@ def to_obsidian_markdown(
 
 
 def _split_description(
-    train_end: str | pd.Timestamp | None,
-    test_start: str | pd.Timestamp | None,
+    train_end: pd.Timestamp | None,
+    test_start: pd.Timestamp | None,
 ) -> str:
-    """Return a concise human-readable split label."""
+    """Return a concise human-readable split label sourced from the result."""
     if train_end is not None and test_start is not None:
-        te = pd.Timestamp(train_end).date()
-        ts = pd.Timestamp(test_start).date()
-        return f"train<={te} / test>={ts}"
+        return f"train<={train_end.date()} / test>={test_start.date()}"
     return "full_sample"
 
 
 def _fmt_float(value: float, precision: int = 4) -> str:
-    """Format a float for display; NaN renders as '—'."""
+    """Format a float for display; NaN renders as '\u2014' (em dash)."""
     if math.isnan(value):
-        return "\u2014"  # em dash
+        return "\u2014"
     return f"{value:.{precision}f}"

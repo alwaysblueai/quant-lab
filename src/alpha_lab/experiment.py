@@ -49,6 +49,11 @@ class ExperimentResult:
     caller can inspect the complete time-series.  All other DataFrames and
     ``summary`` are restricted to the **evaluation period** (test split when
     a split is requested, full sample otherwise).
+
+    ``n_quantiles``, ``train_end``, and ``test_start`` carry the exact
+    parameters used to produce this result so downstream consumers (e.g.
+    reporting utilities) can label results accurately without the caller
+    repeating them.
     """
 
     factor_df: pd.DataFrame
@@ -71,6 +76,15 @@ class ExperimentResult:
 
     summary: ExperimentSummary
     """Scalar summary metrics for the evaluation period."""
+
+    n_quantiles: int
+    """Number of quantile buckets requested in the experiment."""
+
+    train_end: pd.Timestamp | None
+    """Last date (inclusive) of the training period, or None when no split was requested."""
+
+    test_start: pd.Timestamp | None
+    """First date (inclusive) of the evaluation period, or None when no split was requested."""
 
 
 def run_factor_experiment(
@@ -188,6 +202,9 @@ def run_factor_experiment(
         quantile_returns_df=qr_df,
         long_short_df=ls_df,
         summary=summary,
+        n_quantiles=n_quantiles,
+        train_end=pd.Timestamp(train_end) if train_end is not None else None,
+        test_start=pd.Timestamp(test_start) if test_start is not None else None,
     )
 
 
