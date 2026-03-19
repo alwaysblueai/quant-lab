@@ -101,12 +101,51 @@ for the canonical timestamp, merge, and storage rules.
 - `alpha_lab.labels.forward_return`
 - `alpha_lab.evaluation.compute_ic`
 - `alpha_lab.evaluation.compute_rank_ic`
+- `alpha_lab.quantile.quantile_returns`
+- `alpha_lab.quantile.long_short_return`
+- `alpha_lab.splits.time_split`
+- `alpha_lab.splits.walk_forward_split`
+- `alpha_lab.experiment.run_factor_experiment`
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
 
+## Running an Experiment
+
+`run_factor_experiment` connects all evaluation modules into a single call:
+
+```python
+import pandas as pd
+from alpha_lab.experiment import run_factor_experiment
+from alpha_lab.factors.momentum import momentum
+
+prices: pd.DataFrame  # long-form [date, asset, close]
+
+result = run_factor_experiment(
+    prices,
+    lambda p: momentum(p, window=20),
+    horizon=5,          # forward-return look-ahead in per-asset rows
+    n_quantiles=5,
+    train_end="2022-12-31",
+    test_start="2023-01-01",
+)
+
+print(result.summary)
+# ExperimentSummary(mean_ic=..., mean_rank_ic=..., ic_ir=...,
+#                   mean_long_short_return=..., long_short_hit_rate=..., n_dates=...)
+```
+
+`result.factor_df` and `result.label_df` always cover the full sample.
+`result.ic_df`, `result.rank_ic_df`, `result.quantile_returns_df`, and
+`result.long_short_df` are restricted to the evaluation period.
+
+The split is date-based: every row sharing a test-period date enters evaluation,
+while train-period rows are excluded. Labels at test date `t` still use strictly
+future prices (`close[t+horizon]/close[t]-1`) — that is by construction, not
+lookahead, because the label value is stored at `t` for alignment with factor
+values observed at `t`.
+
 ## Current Limitations
 
-- no reusable train/validation/test split utilities yet
 - no transaction-cost or slippage model implementation yet
 - no portfolio construction or backtest engine
