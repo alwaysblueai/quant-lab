@@ -25,12 +25,14 @@ There must be at most one row per (`date`, `asset`, `factor`).
 
 ### Labels / Forward Returns
 
-Labels must be stored separately from factor outputs. A forward-return table should use:
+Labels must be stored separately from feature outputs, but should use the same
+canonical long-form schema:
 
-| date | asset | label | value |
-|------|-------|-------|-------|
+| date | asset | factor | value |
+|------|-------|--------|-------|
 
-This prevents accidental leakage from mixing features and targets in the same table.
+This keeps merge and validation rules consistent while still preventing
+accidental leakage from mixing features and targets in the same reusable table.
 
 ## Time Alignment Rules
 

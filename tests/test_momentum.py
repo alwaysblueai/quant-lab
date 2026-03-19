@@ -181,7 +181,7 @@ def test_min_periods_tolerates_nan_gaps():
     result_strict = momentum(df, window=20)
     assert result_strict["value"].iloc[20] != result_strict["value"].iloc[20]
 
-    # Relaxed (min_periods=16): rolling window has exactly 16 valid values →
+    # Relaxed (min_periods=16): rolling window has exactly 16 valid values ->
     # value should be emitted
     result_relaxed = momentum(df, window=20, min_periods=16)
     val = result_relaxed["value"].iloc[20]

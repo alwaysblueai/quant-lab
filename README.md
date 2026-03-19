@@ -98,13 +98,15 @@ for the canonical timestamp, merge, and storage rules.
 ## Current Reusable Components
 
 - `alpha_lab.factors.momentum.momentum`
+- `alpha_lab.labels.forward_return`
+- `alpha_lab.evaluation.compute_ic`
+- `alpha_lab.evaluation.compute_rank_ic`
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
 
 ## Current Limitations
 
-- no label-generation module yet
 - no reusable train/validation/test split utilities yet
 - no transaction-cost or slippage model implementation yet
 - no portfolio construction or backtest engine
