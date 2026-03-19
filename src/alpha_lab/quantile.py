@@ -5,8 +5,62 @@ import pandas as pd
 
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 
+_QUANTILE_ASSIGNMENT_COLUMNS = ("date", "asset", "factor", "quantile")
 _QUANTILE_RETURN_COLUMNS = ("date", "factor", "quantile", "mean_return")
 _LONG_SHORT_COLUMNS = ("date", "factor", "long_short_return")
+
+
+def quantile_assignments(
+    factors: pd.DataFrame,
+    n_quantiles: int = 5,
+) -> pd.DataFrame:
+    """Compute per-asset quantile bucket assignments from factor values alone.
+
+    Unlike :func:`quantile_returns`, no label DataFrame is required.  The
+    assignment universe is all ``(date, asset)`` pairs where the factor value
+    is non-NaN.  Dates with fewer than 2 non-NaN assets are excluded entirely
+    (matching the :func:`~alpha_lab.quantile._assign_quantile` convention).
+
+    **Universe note:** On the last ``horizon`` dates of a price series, factor
+    values may be valid while forward-return labels are NaN.  Those dates *do*
+    appear in the assignments output because a rebalancing decision would still
+    be made at that date.  They are excluded from IC and quantile-return metrics
+    but correctly captured by the turnover calculation.
+
+    Parameters
+    ----------
+    factors:
+        Canonical long-form DataFrame with columns ``[date, asset, factor,
+        value]``.  Must contain exactly one factor name.
+    n_quantiles:
+        Number of quantile buckets.  Must be >= 2.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``[date, asset, factor, quantile]``.  One row per
+        ``(date, asset)`` with a non-NaN factor value and a valid quantile
+        assignment.  ``quantile`` is an integer in ``[1, n_quantiles]``.
+    """
+    if n_quantiles < 2:
+        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+    if factors.empty:
+        return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
+
+    _validate_canonical(factors, "factors")
+    factor_name = _single_factor_name(factors, "factors")
+
+    df = factors[["date", "asset", "value"]].dropna(subset=["value"]).copy()
+    if df.empty:
+        return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
+
+    df["quantile"] = df.groupby("date", sort=True)["value"].transform(
+        lambda s: _assign_quantile(s, n_quantiles)
+    )
+    df = df.dropna(subset=["quantile"])
+    df["quantile"] = df["quantile"].astype(int)
+    df["factor"] = factor_name
+    return df[list(_QUANTILE_ASSIGNMENT_COLUMNS)].reset_index(drop=True)
 
 
 def quantile_returns(

@@ -109,6 +109,11 @@ for the canonical timestamp, merge, and storage rules.
 - `alpha_lab.reporting.summarise_experiment_result`
 - `alpha_lab.reporting.export_summary_csv`
 - `alpha_lab.reporting.to_obsidian_markdown`
+- `alpha_lab.quantile.quantile_assignments`
+- `alpha_lab.turnover.quantile_turnover`
+- `alpha_lab.turnover.long_short_turnover`
+- `alpha_lab.costs.apply_linear_cost`
+- `alpha_lab.costs.cost_adjusted_long_short`
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
@@ -174,7 +179,37 @@ export_summary_csv(summary, "output/reports/momentum_5d.csv")
 md = to_obsidian_markdown(result, title="Momentum 5d — OOS", notes="Needs decay analysis.")
 ```
 
+## Turnover and Cost Estimation
+
+`ExperimentResult` now includes portfolio turnover outputs computed alongside
+the IC and quantile-return metrics:
+
+```python
+# Turnover is already computed inside run_factor_experiment
+result.quantile_turnover_df      # (date, factor, quantile, turnover)
+result.long_short_turnover_df    # (date, factor, long_short_turnover)
+result.summary.mean_long_short_turnover
+
+# Apply a cost rate manually
+from alpha_lab.costs import cost_adjusted_long_short
+adj = cost_adjusted_long_short(
+    result.long_short_df,
+    result.long_short_turnover_df,
+    cost_rate=0.001,  # 10 bps one-way
+)
+
+# Or include in the summary / markdown report
+summary = summarise_experiment_result(result, cost_rate=0.001)
+md = to_obsidian_markdown(result, cost_rate=0.001)
+```
+
+**Important:** This is a minimal research friction estimate only.  Turnover
+uses a one-way entry-rate definition on calendar-rebalance portfolios.  The
+cost model is `adjusted_return = return - cost_rate × turnover` with a
+user-supplied flat one-way rate.  It does not model market impact, bid-ask
+spread variation, short-borrow fees, or execution timing.
+
 ## Current Limitations
 
-- no transaction-cost or slippage model implementation yet
 - no portfolio construction or backtest engine
+- no execution simulation or realistic transaction-cost model

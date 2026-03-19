@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from alpha_lab.costs import cost_adjusted_long_short
 from alpha_lab.experiment import ExperimentResult
 
 # Ordered column names for summary DataFrames produced by this module.
@@ -19,16 +20,23 @@ SUMMARY_COLUMNS: tuple[str, ...] = (
     "mean_long_short_return",
     "long_short_hit_rate",
     "n_dates_used",
+    "mean_long_short_turnover",
+    "cost_rate",
+    "mean_cost_adjusted_long_short_return",
 )
 
 
-def summarise_experiment_result(result: ExperimentResult) -> pd.DataFrame:
+def summarise_experiment_result(
+    result: ExperimentResult,
+    *,
+    cost_rate: float | None = None,
+) -> pd.DataFrame:
     """Produce a compact one-row summary DataFrame from an ExperimentResult.
 
-    All metadata (factor name, label name, quantile count, split boundaries)
-    is read directly from ``result`` — nothing is inferred from heuristics or
-    supplied by the caller.  Metric values are taken from ``result.summary``
-    without re-computation.
+    All metadata (factor name, label name, quantile count, split boundaries,
+    turnover) is read directly from ``result`` — nothing is inferred from
+    heuristics or supplied by the caller.  Metric values are taken from
+    ``result.summary`` without re-computation.
 
     The returned DataFrame has exactly one row and columns in
     :data:`SUMMARY_COLUMNS`.  Multiple rows can be stacked with
@@ -38,6 +46,12 @@ def summarise_experiment_result(result: ExperimentResult) -> pd.DataFrame:
     ----------
     result:
         Output of :func:`~alpha_lab.experiment.run_factor_experiment`.
+    cost_rate:
+        Optional one-way transaction cost rate (e.g., 0.001 for 10 bps).
+        When provided, ``mean_cost_adjusted_long_short_return`` is computed
+        via :func:`~alpha_lab.costs.cost_adjusted_long_short`.  When
+        ``None``, that column is NaN.  This is a minimal research friction
+        estimate only; see :mod:`alpha_lab.costs` for the full disclaimer.
 
     Returns
     -------
@@ -55,6 +69,19 @@ def summarise_experiment_result(result: ExperimentResult) -> pd.DataFrame:
         else "unknown"
     )
 
+    # Cost-adjusted return — only computed when cost_rate is provided.
+    mean_cost_adj: float
+    if cost_rate is not None:
+        adj_df = cost_adjusted_long_short(
+            result.long_short_df,
+            result.long_short_turnover_df,
+            cost_rate=cost_rate,
+        )
+        adj_vals = adj_df["adjusted_return"].dropna()
+        mean_cost_adj = float(adj_vals.mean()) if len(adj_vals) > 0 else float("nan")
+    else:
+        mean_cost_adj = float("nan")
+
     s = result.summary
     row: dict[str, object] = {
         "factor_name": factor_name,
@@ -67,6 +94,9 @@ def summarise_experiment_result(result: ExperimentResult) -> pd.DataFrame:
         "mean_long_short_return": s.mean_long_short_return,
         "long_short_hit_rate": s.long_short_hit_rate,
         "n_dates_used": s.n_dates,
+        "mean_long_short_turnover": s.mean_long_short_turnover,
+        "cost_rate": cost_rate if cost_rate is not None else float("nan"),
+        "mean_cost_adjusted_long_short_return": mean_cost_adj,
     }
     return pd.DataFrame([row], columns=list(SUMMARY_COLUMNS))
 
@@ -115,6 +145,7 @@ def to_obsidian_markdown(
     result: ExperimentResult,
     *,
     title: str | None = None,
+    cost_rate: float | None = None,
     notes: str | None = None,
 ) -> str:
     """Render an experiment result as Obsidian-friendly markdown.
@@ -129,6 +160,10 @@ def to_obsidian_markdown(
         Output of :func:`~alpha_lab.experiment.run_factor_experiment`.
     title:
         H1 heading for the note.  Defaults to ``"Experiment: {factor_name}"``.
+    cost_rate:
+        Optional one-way cost rate.  When provided, a cost-adjusted return
+        row is added to the metrics table.  This is a minimal research
+        friction estimate only.
     notes:
         Optional free-text appended under a ``## Notes`` section.
 
@@ -137,7 +172,7 @@ def to_obsidian_markdown(
     str
         Markdown text ending with a single newline.
     """
-    summary_df = summarise_experiment_result(result)
+    summary_df = summarise_experiment_result(result, cost_rate=cost_rate)
     row = summary_df.iloc[0]
 
     factor_name = str(row["factor_name"])
@@ -150,6 +185,20 @@ def to_obsidian_markdown(
         title = f"Experiment: {factor_name}"
 
     s = result.summary
+    metrics_rows = [
+        f"| Mean IC | {_fmt_float(s.mean_ic)} |",
+        f"| Mean Rank IC | {_fmt_float(s.mean_rank_ic)} |",
+        f"| IC IR | {_fmt_float(s.ic_ir)} |",
+        f"| Mean L/S Return | {_fmt_float(s.mean_long_short_return)} |",
+        f"| L/S Hit Rate | {_fmt_float(s.long_short_hit_rate)} |",
+        f"| Mean L/S Turnover (one-way) | {_fmt_float(s.mean_long_short_turnover)} |",
+    ]
+    if cost_rate is not None:
+        adj = float(row["mean_cost_adjusted_long_short_return"])  # type: ignore[arg-type]
+        metrics_rows.append(
+            f"| Mean L/S Return (cost-adj, rate={cost_rate}) | {_fmt_float(adj)} |"
+        )
+
     lines = [
         f"# {title}",
         "",
@@ -167,11 +216,7 @@ def to_obsidian_markdown(
         "",
         "| Metric | Value |",
         "|---|---|",
-        f"| Mean IC | {_fmt_float(s.mean_ic)} |",
-        f"| Mean Rank IC | {_fmt_float(s.mean_rank_ic)} |",
-        f"| IC IR | {_fmt_float(s.ic_ir)} |",
-        f"| Mean L/S Return | {_fmt_float(s.mean_long_short_return)} |",
-        f"| L/S Hit Rate | {_fmt_float(s.long_short_hit_rate)} |",
+        *metrics_rows,
         "",
         "## Interpretation",
         "",

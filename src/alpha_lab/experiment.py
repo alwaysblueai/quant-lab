@@ -9,8 +9,9 @@ import pandas as pd
 from alpha_lab.evaluation import compute_ic, compute_rank_ic
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
-from alpha_lab.quantile import long_short_return, quantile_returns
+from alpha_lab.quantile import long_short_return, quantile_assignments, quantile_returns
 from alpha_lab.splits import time_split
+from alpha_lab.turnover import long_short_turnover, quantile_turnover
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,14 @@ class ExperimentSummary:
 
     n_dates: int
     """Number of distinct evaluation dates that produced a finite IC value."""
+
+    mean_long_short_turnover: float
+    """Average one-way long-short turnover across evaluation dates.
+
+    Defined as the mean of :func:`~alpha_lab.turnover.long_short_turnover`
+    over all dates with a finite value.  NaN when no finite turnover values
+    are available (e.g. fewer than two evaluation dates).
+    """
 
 
 @dataclass
@@ -85,6 +94,29 @@ class ExperimentResult:
 
     test_start: pd.Timestamp | None
     """First date (inclusive) of the evaluation period, or None when no split was requested."""
+
+    quantile_assignments_df: pd.DataFrame
+    """Per-asset quantile bucket assignments over the evaluation period.
+
+    Columns: ``[date, asset, factor, quantile]``.  Universe is all
+    ``(date, asset)`` pairs with a non-NaN factor value, which may extend
+    slightly beyond the :attr:`quantile_returns_df` universe (the latter
+    excludes dates where forward-return labels are NaN).
+    """
+
+    quantile_turnover_df: pd.DataFrame
+    """Period-to-period one-way turnover per quantile bucket.
+
+    Columns: ``[date, factor, quantile, turnover]``.  First evaluation date
+    is always NaN (no prior portfolio state).
+    """
+
+    long_short_turnover_df: pd.DataFrame
+    """Long-short one-way turnover by date.
+
+    Columns: ``[date, factor, long_short_turnover]``.  Average of top and
+    bottom bucket turnover; NaN on the first evaluation date.
+    """
 
 
 def run_factor_experiment(
@@ -191,8 +223,16 @@ def run_factor_experiment(
     qr_df = quantile_returns(eval_factor, eval_label, n_quantiles=n_quantiles)
     ls_df = long_short_return(qr_df)
 
+    # --- Step 5b: portfolio assignments and turnover ------------------------
+    # Assignments are computed from eval_factor only (no label required).
+    # The universe may include the last `horizon` dates where labels are NaN —
+    # those dates still represent real rebalancing events.
+    asgn_df = quantile_assignments(eval_factor, n_quantiles=n_quantiles)
+    qto_df = quantile_turnover(asgn_df)
+    lsto_df = long_short_turnover(qto_df)
+
     # --- Step 6: summary ----------------------------------------------------
-    summary = _summarise(ic_df, rank_ic_df, ls_df)
+    summary = _summarise(ic_df, rank_ic_df, ls_df, lsto_df)
 
     return ExperimentResult(
         factor_df=factor_df,
@@ -205,6 +245,9 @@ def run_factor_experiment(
         n_quantiles=n_quantiles,
         train_end=pd.Timestamp(train_end) if train_end is not None else None,
         test_start=pd.Timestamp(test_start) if test_start is not None else None,
+        quantile_assignments_df=asgn_df,
+        quantile_turnover_df=qto_df,
+        long_short_turnover_df=lsto_df,
     )
 
 
@@ -217,6 +260,7 @@ def _summarise(
     ic_df: pd.DataFrame,
     rank_ic_df: pd.DataFrame,
     ls_df: pd.DataFrame,
+    ls_turnover_df: pd.DataFrame,
 ) -> ExperimentSummary:
     """Compute scalar summary metrics from per-date evaluation DataFrames."""
     ic_vals = ic_df["ic"].dropna() if not ic_df.empty else pd.Series(dtype=float)
@@ -228,6 +272,11 @@ def _summarise(
     ls_vals = (
         ls_df["long_short_return"].dropna()
         if not ls_df.empty
+        else pd.Series(dtype=float)
+    )
+    ls_turn_vals = (
+        ls_turnover_df["long_short_turnover"].dropna()
+        if not ls_turnover_df.empty
         else pd.Series(dtype=float)
     )
 
@@ -249,6 +298,9 @@ def _summarise(
         if not ic_df.empty
         else 0
     )
+    mean_ls_turnover = (
+        float(ls_turn_vals.mean()) if len(ls_turn_vals) > 0 else float("nan")
+    )
 
     return ExperimentSummary(
         mean_ic=mean_ic,
@@ -257,4 +309,5 @@ def _summarise(
         mean_long_short_return=mean_ls,
         long_short_hit_rate=hit_rate,
         n_dates=n_dates,
+        mean_long_short_turnover=mean_ls_turnover,
     )
