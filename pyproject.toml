@@ -28,8 +28,10 @@ build-backend = "hatchling.build"
 packages = ["src/alpha_lab"]
 
 [tool.pytest.ini_options]
+addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+xfail_strict = true
 
 [tool.ruff]
 line-length = 100
@@ -42,6 +44,6 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = false
+disallow_untyped_defs = true
 check_untyped_defs = true
 ignore_missing_imports = true
