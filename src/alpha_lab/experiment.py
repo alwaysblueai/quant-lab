@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -11,6 +12,7 @@ from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
 from alpha_lab.quantile import long_short_return, quantile_assignments, quantile_returns
 from alpha_lab.splits import time_split
+from alpha_lab.strategy import StrategySpec
 from alpha_lab.turnover import long_short_turnover, quantile_turnover
 
 
@@ -48,6 +50,41 @@ class ExperimentSummary:
     over all dates with a finite value.  NaN when no finite turnover values
     are available (e.g. fewer than two evaluation dates).
     """
+
+
+@dataclass(frozen=True)
+class PortfolioSummary:
+    """Scalar summary of the portfolio simulation path inside one experiment.
+
+    Populated only when ``holding_period`` and ``rebalance_frequency`` are
+    provided to :func:`run_factor_experiment`.  All fields are NaN when the
+    corresponding series is empty or all-NaN.
+
+    This is a companion to :class:`ExperimentSummary`: the latter covers the
+    IC / quantile / long-short evaluation path; this covers the portfolio
+    weight / staggered-return / turnover path.
+    """
+
+    mean_portfolio_return: float
+    """Mean of :attr:`ExperimentResult.portfolio_return_df` over all evaluation
+    dates with a finite value."""
+
+    portfolio_hit_rate: float
+    """Fraction of evaluation dates on which ``portfolio_return > 0``."""
+
+    mean_portfolio_turnover: float
+    """Mean two-way portfolio turnover across active rebalance dates (NaN
+    entries — the first rebalance date — are excluded from the average)."""
+
+    mean_cost_adjusted_return: float
+    """Mean of ``adjusted_return`` from
+    :attr:`ExperimentResult.portfolio_cost_adjusted_return_df`.  NaN when
+    ``portfolio_cost_rate`` was not supplied to :func:`run_factor_experiment`
+    or all adjusted returns are NaN.
+    """
+
+    n_portfolio_dates: int
+    """Number of evaluation dates with a finite ``portfolio_return``."""
 
 
 @dataclass
@@ -118,6 +155,50 @@ class ExperimentResult:
     bottom bucket turnover; NaN on the first evaluation date.
     """
 
+    portfolio_weights_df: pd.DataFrame | None = None
+    """Portfolio weights by date and asset when portfolio parameters are
+    provided to :func:`run_factor_experiment`.
+
+    Columns: ``[date, asset, weight]``.  ``None`` when ``holding_period`` and
+    ``rebalance_frequency`` are not supplied.
+    """
+
+    portfolio_return_df: pd.DataFrame | None = None
+    """Simulated portfolio return by date when portfolio parameters are
+    provided to :func:`run_factor_experiment`.
+
+    Columns: ``[date, portfolio_return]``.  ``None`` when ``holding_period``
+    and ``rebalance_frequency`` are not supplied.
+    """
+
+    portfolio_turnover_df: pd.DataFrame | None = None
+    """Portfolio two-way turnover on **active rebalance dates** only.
+
+    Columns: ``[date, portfolio_turnover]``.  Restricted to the same
+    active rebalance schedule used by
+    :func:`~alpha_lab.portfolio_research.simulate_portfolio_returns`
+    (i.e. every ``rebalance_frequency``-th weight date).  First active
+    rebalance date is always NaN (no prior portfolio state).  ``None``
+    when ``holding_period`` and ``rebalance_frequency`` are not supplied.
+    """
+
+    portfolio_cost_adjusted_return_df: pd.DataFrame | None = None
+    """Cost-adjusted portfolio returns when ``portfolio_cost_rate`` is provided.
+
+    Columns: ``[date, portfolio_return, adjusted_return]``.  ``adjusted_return``
+    deducts ``portfolio_cost_rate × turnover`` on each active rebalance date
+    and is NaN on the first rebalance date.  ``None`` when
+    ``portfolio_cost_rate`` is not supplied or portfolio simulation is not
+    enabled.
+    """
+
+    portfolio_summary: PortfolioSummary | None = None
+    """Scalar summary of the portfolio simulation path.
+
+    Populated whenever ``holding_period`` and ``rebalance_frequency`` are
+    supplied to :func:`run_factor_experiment`.  ``None`` otherwise.
+    """
+
 
 def run_factor_experiment(
     prices: pd.DataFrame,
@@ -128,6 +209,11 @@ def run_factor_experiment(
     train_end: str | pd.Timestamp | None = None,
     test_start: str | pd.Timestamp | None = None,
     val_start: str | pd.Timestamp | None = None,
+    holding_period: int | None = None,
+    rebalance_frequency: int | None = None,
+    weighting_method: str = "equal",
+    portfolio_cost_rate: float | None = None,
+    strategy: StrategySpec | None = None,
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -166,12 +252,71 @@ def run_factor_experiment(
     val_start:
         Optional start of a validation window between ``train_end`` and
         ``test_start``; passed through to :func:`~alpha_lab.splits.time_split`.
+    holding_period:
+        Optional number of rebalance periods to hold each portfolio position.
+        Must be provided together with ``rebalance_frequency``.  When both are
+        provided, :func:`~alpha_lab.portfolio_research.portfolio_weights` and
+        :func:`~alpha_lab.portfolio_research.simulate_portfolio_returns` are
+        called and results are attached to
+        :attr:`ExperimentResult.portfolio_weights_df` and
+        :attr:`ExperimentResult.portfolio_return_df`.
+    rebalance_frequency:
+        Optional rebalance interval in dates.  Must be provided together with
+        ``holding_period``.
+    weighting_method:
+        Weight method passed to :func:`~alpha_lab.portfolio_research.portfolio_weights`.
+        One of ``"equal"``, ``"rank"``, ``"score"``.  Ignored unless both
+        ``holding_period`` and ``rebalance_frequency`` are provided.
+    portfolio_cost_rate:
+        Optional one-way transaction cost rate for portfolio simulation
+        (e.g. ``0.001`` for 10 bps).  When provided together with
+        ``holding_period`` / ``rebalance_frequency``, populates
+        :attr:`ExperimentResult.portfolio_cost_adjusted_return_df`.
+        Must be >= 0.  Ignored when portfolio simulation is not enabled.
+    strategy:
+        Optional :class:`~alpha_lab.strategy.StrategySpec` that explicitly
+        specifies portfolio construction intent.  When provided, it overrides
+        ``holding_period``, ``rebalance_frequency``, and ``weighting_method``
+        (a ``UserWarning`` is raised if those are also passed explicitly); it
+        also supplies ``long_top_k`` and ``short_bottom_k`` to
+        :func:`~alpha_lab.portfolio_research.portfolio_weights` so that asset
+        selection is explicit rather than implicit.  ``n_quantiles`` and
+        ``portfolio_cost_rate`` are not part of the strategy spec — they remain
+        separate parameters.
 
     Returns
     -------
     ExperimentResult
     """
-    # --- Step 0: validate split arguments -----------------------------------
+    # --- Step 0: resolve strategy overrides ---------------------------------
+    # StrategySpec is the explicit domain boundary between the factor research
+    # layer and the portfolio research layer.  When provided it overrides all
+    # individual portfolio construction parameters so that construction intent
+    # is expressed in one place rather than scattered across call sites.
+    if strategy is not None:
+        if holding_period is not None or rebalance_frequency is not None:
+            warnings.warn(
+                "holding_period and rebalance_frequency are ignored when strategy is "
+                "provided.  Set them via StrategySpec instead.",
+                UserWarning,
+                stacklevel=2,
+            )
+        holding_period = strategy.holding_period
+        rebalance_frequency = strategy.rebalance_frequency
+        weighting_method = strategy.weighting_method
+
+    # --- Step 0b: validate portfolio arguments --------------------------------
+    if (holding_period is None) != (rebalance_frequency is None):
+        raise ValueError(
+            "holding_period and rebalance_frequency must both be provided or "
+            "both be omitted."
+        )
+    if holding_period is not None and holding_period < 1:
+        raise ValueError("holding_period must be >= 1")
+    if rebalance_frequency is not None and rebalance_frequency < 1:
+        raise ValueError("rebalance_frequency must be >= 1")
+
+    # --- Step 0b: validate split arguments ----------------------------------
     # Require both or neither.  A lone train_end / test_start, or a val_start
     # without a complete split, silently evaluates on the full sample — that is
     # a dangerous misuse path and must be an explicit error.
@@ -214,6 +359,7 @@ def run_factor_experiment(
     else:
         eval_factor = factor_df.copy()
         eval_label = label_df.copy()
+        eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
 
     # --- Step 4: IC / RankIC -----------------------------------------------
     ic_df = compute_ic(eval_factor, eval_label)
@@ -241,6 +387,30 @@ def run_factor_experiment(
     )
     summary = _summarise(ic_df, rank_ic_df, ls_df, lsto_for_summary)
 
+    # --- Step 7: optional portfolio simulation ------------------------------
+    port_weights_df: pd.DataFrame | None = None
+    port_return_df: pd.DataFrame | None = None
+    port_turnover_df: pd.DataFrame | None = None
+    port_cost_adj_df: pd.DataFrame | None = None
+    port_summary: PortfolioSummary | None = None
+
+    if holding_period is not None and rebalance_frequency is not None:
+        port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df = (
+            _run_portfolio_block(
+                eval_factor=eval_factor,
+                prices=prices,
+                eval_date_index=eval_date_index,
+                holding_period=holding_period,
+                rebalance_frequency=rebalance_frequency,
+                weighting_method=weighting_method,
+                portfolio_cost_rate=portfolio_cost_rate,
+                strategy=strategy,
+            )
+        )
+        port_summary = _summarise_portfolio(
+            port_return_df, port_turnover_df, port_cost_adj_df
+        )
+
     return ExperimentResult(
         factor_df=factor_df,
         label_df=label_df,
@@ -255,6 +425,11 @@ def run_factor_experiment(
         quantile_assignments_df=asgn_df,
         quantile_turnover_df=qto_df,
         long_short_turnover_df=lsto_df,
+        portfolio_weights_df=port_weights_df,
+        portfolio_return_df=port_return_df,
+        portfolio_turnover_df=port_turnover_df,
+        portfolio_cost_adjusted_return_df=port_cost_adj_df,
+        portfolio_summary=port_summary,
     )
 
 
@@ -318,3 +493,124 @@ def _summarise(
         n_dates=n_dates,
         mean_long_short_turnover=mean_ls_turnover,
     )
+
+
+def _summarise_portfolio(
+    portfolio_return_df: pd.DataFrame,
+    portfolio_turnover_df: pd.DataFrame,
+    portfolio_cost_adjusted_df: pd.DataFrame | None,
+) -> PortfolioSummary:
+    """Compute scalar portfolio summary metrics from per-date simulation output."""
+    ret_vals = portfolio_return_df["portfolio_return"].dropna()
+    mean_return = float(ret_vals.mean()) if len(ret_vals) > 0 else float("nan")
+    hit_rate = float((ret_vals > 0).mean()) if len(ret_vals) > 0 else float("nan")
+    n_dates = len(ret_vals)
+
+    turn_vals = portfolio_turnover_df["portfolio_turnover"].dropna()
+    mean_turnover = float(turn_vals.mean()) if len(turn_vals) > 0 else float("nan")
+
+    if portfolio_cost_adjusted_df is not None:
+        adj_vals = portfolio_cost_adjusted_df["adjusted_return"].dropna()
+        mean_cost_adj: float = float(adj_vals.mean()) if len(adj_vals) > 0 else float("nan")
+    else:
+        mean_cost_adj = float("nan")
+
+    return PortfolioSummary(
+        mean_portfolio_return=mean_return,
+        portfolio_hit_rate=hit_rate,
+        mean_portfolio_turnover=mean_turnover,
+        mean_cost_adjusted_return=mean_cost_adj,
+        n_portfolio_dates=n_dates,
+    )
+
+
+def _run_portfolio_block(
+    eval_factor: pd.DataFrame,
+    prices: pd.DataFrame,
+    eval_date_index: pd.DatetimeIndex,
+    holding_period: int,
+    rebalance_frequency: int,
+    weighting_method: str,
+    portfolio_cost_rate: float | None,
+    strategy: StrategySpec | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    """Run the optional portfolio simulation block inside :func:`run_factor_experiment`.
+
+    Keeps portfolio weight, return, turnover, and cost-adjusted return
+    computation isolated from the main experiment pipeline so that
+    :func:`run_factor_experiment` does not grow further as new portfolio
+    metrics are added.
+
+    When ``strategy`` is provided, asset selection (``long_top_k`` /
+    ``short_bottom_k``) and weight method are taken from the spec via
+    :func:`~alpha_lab.strategy.portfolio_weights_from_strategy`, making
+    construction intent explicit.  When ``strategy`` is ``None``, the
+    existing ``weighting_method`` parameter is used with no asset-count
+    constraints (all assets in the long leg, no short leg) — the same
+    default behaviour as before the strategy layer was introduced.
+
+    Returns
+    -------
+    tuple of (weights_df, return_df, turnover_df, cost_adjusted_df | None)
+        - ``weights_df``: ``[date, asset, weight]``
+        - ``return_df``: ``[date, portfolio_return]``
+        - ``turnover_df``: ``[date, portfolio_turnover]`` on active rebalance dates only
+        - ``cost_adjusted_df``: ``[date, portfolio_return, adjusted_return]`` or ``None``
+    """
+    from alpha_lab.portfolio_research import (
+        portfolio_cost_adjusted_returns,
+        portfolio_turnover,
+        portfolio_weights,
+        simulate_portfolio_returns,
+    )
+
+    if strategy is not None:
+        from alpha_lab.strategy import portfolio_weights_from_strategy
+
+        port_weights_df = portfolio_weights_from_strategy(eval_factor, strategy)
+    else:
+        port_weights_df = portfolio_weights(eval_factor, method=weighting_method)
+
+    # Use 1-period step returns for the simulation so that each position held
+    # for ``holding_period`` periods contributes one period's P&L per step.
+    # H-period forward returns (used for IC/quantile evaluation) would
+    # incorrectly compound in the staggered-portfolio model when
+    # holding_period > 1.
+    one_period_labels = forward_return(prices, horizon=1)
+    eval_1p = one_period_labels[
+        one_period_labels["date"].isin(eval_date_index)
+    ].reset_index(drop=True)
+
+    port_return_df = simulate_portfolio_returns(
+        port_weights_df,
+        eval_1p,
+        holding_period=holding_period,
+        rebalance_frequency=rebalance_frequency,
+    )
+
+    # Restrict turnover to the active rebalance schedule — the same subset of
+    # dates used by simulate_portfolio_returns().  When rebalance_frequency > 1,
+    # computing turnover on all weight dates would include non-trade dates and
+    # overstate transaction costs.
+    all_weight_dates = (
+        pd.to_datetime(port_weights_df["date"])
+        .drop_duplicates()
+        .sort_values()
+        .reset_index(drop=True)
+    )
+    active_rebal_dates = set(all_weight_dates.iloc[::rebalance_frequency])
+    port_weights_active = port_weights_df[
+        pd.to_datetime(port_weights_df["date"]).isin(active_rebal_dates)
+    ].reset_index(drop=True)
+    port_turnover_df = portfolio_turnover(port_weights_active)
+
+    if portfolio_cost_rate is not None:
+        port_cost_adj_df: pd.DataFrame | None = portfolio_cost_adjusted_returns(
+            port_return_df,
+            port_turnover_df,
+            cost_rate=portfolio_cost_rate,
+        )
+    else:
+        port_cost_adj_df = None
+
+    return port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df

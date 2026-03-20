@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.reporting import SUMMARY_COLUMNS
 
-DEFAULT_REGISTRY_PATH: Path = Path("data/processed/experiment_registry.csv")
+DEFAULT_REGISTRY_PATH: Path = PROCESSED_DATA_DIR / "experiment_registry.csv"
 
 REGISTRY_COLUMNS: tuple[str, ...] = (
     "experiment_name",
@@ -51,7 +52,8 @@ def register_experiment(
         :func:`~alpha_lab.reporting.summarise_experiment_result`.
     registry_path:
         Path to the registry CSV file.  Defaults to
-        ``data/processed/experiment_registry.csv``.
+        ``<project_root>/data/processed/experiment_registry.csv``
+        (resolved from :data:`~alpha_lab.config.PROCESSED_DATA_DIR`).
     obsidian_path:
         Optional path to an associated Obsidian markdown note.
 

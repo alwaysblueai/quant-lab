@@ -11,7 +11,50 @@ This repository is intentionally small. It supports:
 - documented data conventions for auditable research
 
 It does not currently provide a full backtesting engine, production data ingestion
-pipeline, or portfolio simulation framework.
+pipeline, realistic execution simulation, or broker integration.
+
+## Architecture
+
+The repository is structured around three research layers.  Each layer has a
+well-defined scope and does **not** model execution, order routing, or position
+accounting.
+
+```
+Factor Research Layer
+  alpha_lab.factors.*          — factor computation (e.g. momentum)
+  alpha_lab.labels             — forward-return label generation
+  alpha_lab.evaluation         — IC / Rank-IC computation
+  alpha_lab.quantile           — quantile bucket returns and long-short
+  alpha_lab.turnover           — quantile / long-short turnover
+  alpha_lab.preprocess         — winsorize, z-score
+
+Strategy Construction Intent Layer
+  alpha_lab.strategy.StrategySpec   — explicit portfolio construction spec:
+                                      long_top_k, short_bottom_k,
+                                      weighting_method, holding_period,
+                                      rebalance_frequency
+                                      (n_quantiles is a factor-evaluation
+                                       param, not part of StrategySpec)
+
+Portfolio Research Layer
+  alpha_lab.portfolio_research — portfolio_weights, simulate_portfolio_returns,
+                                 portfolio_turnover,
+                                 portfolio_cost_adjusted_returns
+
+Orchestration
+  alpha_lab.experiment         — run_factor_experiment (single split)
+  alpha_lab.walk_forward       — run_walk_forward_experiment (rolling OOS)
+```
+
+`StrategySpec` is the explicit boundary between the factor research layer and
+the portfolio research layer.  It answers: which assets to include in each leg,
+how to weight them, and how often to rebalance.  Passing a `StrategySpec` to
+`run_factor_experiment` or `run_walk_forward_experiment` makes all portfolio
+construction intent visible in one place rather than spread across call sites.
+
+**This is still NOT a full trading system or execution simulator.**  There is no
+order routing, market impact model, position accounting, broker integration, or
+portfolio optimiser.  All portfolio outputs are research-level approximations.
 
 ## Setup
 
@@ -90,13 +133,17 @@ Example:
 | 2024-01-02 | AAPL | momentum_20d | 0.031 |
 | 2024-01-02 | MSFT | momentum_20d | -0.008 |
 
-## Data Conventions
+## Documentation
 
-See [docs/data_conventions.md](/home/yukun_zhao/quant/projects/alpha-lab/docs/data_conventions.md)
-for the canonical timestamp, merge, and storage rules.
+- [docs/architecture.md](docs/architecture.md) — layer contracts, data flow, path/config
+- [docs/system_manual.md](docs/system_manual.md) — API reference and usage patterns
+- [docs/developer_guide.md](docs/developer_guide.md) — how to extend the codebase
+- [docs/data_conventions.md](docs/data_conventions.md) — canonical timestamp, merge, and storage rules
 
 ## Current Reusable Components
 
+- `alpha_lab.strategy.StrategySpec`
+- `alpha_lab.strategy.portfolio_weights_from_strategy`
 - `alpha_lab.factors.momentum.momentum`
 - `alpha_lab.labels.forward_return`
 - `alpha_lab.evaluation.compute_ic`
@@ -122,6 +169,48 @@ for the canonical timestamp, merge, and storage rules.
 - `alpha_lab.registry.register_experiment`
 - `alpha_lab.registry.load_registry`
 - `alpha_lab.registry.append_to_registry`
+
+## Strategy Construction Intent
+
+Use `StrategySpec` to make portfolio construction intent explicit before
+passing it to the experiment runner:
+
+```python
+from alpha_lab.strategy import StrategySpec
+
+# Long-only: top 10 assets, rank-weighted, rebalance every date, hold 1 period
+spec = StrategySpec(
+    long_top_k=10,
+    weighting_method="rank",
+    holding_period=1,
+    rebalance_frequency=1,
+)
+
+# Long-short: top 5 long / bottom 5 short, equal-weighted
+ls_spec = StrategySpec(
+    long_top_k=5,
+    short_bottom_k=5,
+    weighting_method="equal",
+    holding_period=2,
+    rebalance_frequency=1,
+)
+
+result = run_factor_experiment(
+    prices,
+    lambda p: momentum(p, window=20),
+    horizon=5,
+    strategy=spec,
+    portfolio_cost_rate=0.001,
+)
+print(result.portfolio_summary)
+```
+
+When `strategy` is provided it overrides `holding_period`, `rebalance_frequency`,
+and `weighting_method` (a `UserWarning` is raised if those are also passed
+explicitly).  `n_quantiles` governs the factor-evaluation path (IC, quantile
+returns) and is **not** part of `StrategySpec` — pass it directly to
+`run_factor_experiment`.  `portfolio_cost_rate` is intentionally not part of
+`StrategySpec` — it is a cost assumption, not a construction decision.
 
 ## Running an Experiment
 
@@ -290,8 +379,160 @@ Each call to `register_experiment` appends one row; the file is created on
 first use.  The registry is an append-only log — duplicate experiment names
 are permitted.  Schema consistency is checked on every append and load.
 
+## Walk-Forward Evaluation and Portfolio Research
+
+### Walk-Forward Evaluation
+
+A single train/test split can overfit to the test period: the researcher may
+consciously or unconsciously choose factor parameters that happen to look good
+on that one window.  Walk-forward evaluation forces every evaluation date to
+be strictly out-of-sample by rolling the train and test windows forward
+through time.
+
+`run_walk_forward_experiment` wraps `run_factor_experiment` over all folds
+produced by `walk_forward_split`.  Each fold receives only the prices visible
+up to its own test-end date — no future data can leak into the factor
+computation.  Evaluation metrics (IC, L/S return, turnover) are computed on
+the test window only.
+
+```python
+from alpha_lab.walk_forward import run_walk_forward_experiment
+from alpha_lab.factors.momentum import momentum
+
+wf = run_walk_forward_experiment(
+    prices,
+    lambda p: momentum(p, window=20),
+    train_size=252,   # 1-year training window (trading days)
+    test_size=63,     # 1-quarter test window
+    step=63,          # advance by one quarter between folds
+    horizon=5,
+    n_quantiles=5,
+    cost_rate=0.001,
+)
+
+print(wf.aggregate_summary)
+# WalkForwardAggregate(n_folds=4, mean_ic=..., std_ic=...,
+#   pooled_ic_mean=..., pooled_ic_ir=...,
+#   mean_portfolio_return=..., pooled_portfolio_return_mean=...,
+#   pooled_cost_adjusted_return_mean=..., ...)
+
+# Per-fold breakdown
+print(wf.fold_summary_df[["fold_id", "start_date", "end_date", "mean_ic", "ic_ir"]])
+
+# Each fold's full ExperimentResult is also available
+first_fold = wf.per_fold_results[0]
+
+# Pooled OOS observation DataFrames (all folds concatenated, test window only)
+wf.pooled_ic_df                              # [fold_id, date, ic]
+wf.pooled_portfolio_return_df               # [fold_id, date, portfolio_return]
+wf.pooled_portfolio_turnover_df             # [fold_id, date, portfolio_turnover]
+wf.pooled_cost_adjusted_portfolio_return_df # [fold_id, date, portfolio_return, adjusted_return]
+```
+
+**Why walk-forward reduces overfitting risk**: the aggregate `mean_ic` and
+`std_ic` reflect the factor's consistency across multiple independent test
+windows.  A high `std_ic` relative to `mean_ic` signals that performance is
+unstable and may not generalise.  The `best_fold` / `worst_fold` fields
+identify the most and least favourable periods for deeper investigation.
+
+**Single split vs. walk-forward**: `run_factor_experiment` with a single
+`train_end` / `test_start` evaluates on one contiguous test window.
+Walk-forward provides multiple independent windows of the same total span,
+giving a distribution of outcomes rather than a point estimate.
+
+### Portfolio Research Layer
+
+`alpha_lab.portfolio_research` provides research-level portfolio construction
+and simulation tools.  These are designed for signal evaluation, not live
+execution.
+
+#### Computing weights
+
+```python
+from alpha_lab.portfolio_research import portfolio_weights
+
+# Long-only: top 20 assets, weights proportional to factor rank
+weights = portfolio_weights(
+    factor_df,
+    method="rank",   # or "equal", "score"
+    top_k=20,
+)
+
+# Long-short: top 10 long (+weight sums to 1),
+#             bottom 10 short (weight sums to -1, net = 0)
+ls_weights = portfolio_weights(
+    factor_df,
+    method="equal",
+    top_k=10,
+    bottom_k=10,
+)
+```
+
+Weight methods:
+- `"equal"`: uniform weight across selected assets.
+- `"rank"`: weight proportional to cross-sectional factor rank.
+- `"score"`: weight proportional to `value − min(value)` across the selection.
+
+#### Simulating returns with overlapping holdings
+
+```python
+from alpha_lab.portfolio_research import simulate_portfolio_returns
+from alpha_lab.labels import forward_return
+
+# 1-period returns (pass result.label_df or compute fresh)
+labels = forward_return(prices, horizon=1)
+
+port_returns = simulate_portfolio_returns(
+    weights,
+    labels,
+    holding_period=5,       # hold each position for 5 rebalance periods
+    rebalance_frequency=1,  # rebalance at every available date
+)
+# Returns: DataFrame[date, portfolio_return]
+```
+
+When `holding_period > rebalance_frequency`, multiple overlapping positions
+are active simultaneously.  The portfolio return on each date is the mean
+across all currently active positions — the standard staggered-portfolio
+model used in academic factor research.
+
+#### Portfolio turnover
+
+```python
+from alpha_lab.portfolio_research import portfolio_turnover
+
+to = portfolio_turnover(weights)
+# Returns: DataFrame[date, portfolio_turnover]
+# turnover(t) = 0.5 × Σ|w_new_i − w_old_i|  (two-way, fraction traded)
+# First date is always NaN (no prior state).
+```
+
+#### Integrating into run_factor_experiment
+
+Pass `holding_period` and `rebalance_frequency` to attach portfolio
+outputs to the standard `ExperimentResult`:
+
+```python
+result = run_factor_experiment(
+    prices,
+    lambda p: momentum(p, window=20),
+    horizon=5,
+    n_quantiles=5,
+    holding_period=1,
+    rebalance_frequency=1,
+    weighting_method="rank",
+)
+
+result.portfolio_weights_df   # DataFrame[date, asset, weight]
+result.portfolio_return_df    # DataFrame[date, portfolio_return]
+```
+
+**Research disclaimer**: this is a minimal friction estimate for signal
+evaluation only.  It does not model market impact, intraday slippage,
+short-borrow costs, execution timing, or partial fills.
+
 ## Current Limitations
 
-- no portfolio construction or backtest engine
-- no execution simulation or realistic transaction-cost model
+- no full backtesting engine or realistic execution simulation
+- no transaction-cost model beyond linear flat-rate research approximation
 - no database, dashboard, or experiment tracking framework
