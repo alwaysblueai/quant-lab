@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import subprocess
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from alpha_lab.data_validation import validate_price_panel
 from alpha_lab.evaluation import compute_ic, compute_rank_ic
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
@@ -14,6 +17,39 @@ from alpha_lab.quantile import long_short_return, quantile_assignments, quantile
 from alpha_lab.splits import time_split
 from alpha_lab.strategy import StrategySpec
 from alpha_lab.turnover import long_short_turnover, quantile_turnover
+
+
+@dataclass(frozen=True)
+class ExperimentProvenance:
+    """Minimal provenance record for one :func:`run_factor_experiment` call.
+
+    Captured automatically at run time.  Stored on
+    :attr:`ExperimentResult.provenance` so every result object carries its own
+    audit trail without requiring a separate registry entry.
+    """
+
+    factor_name: str
+    """Name of the factor as reported in the factor DataFrame."""
+
+    horizon: int
+    """Forward-return horizon (per-asset rows) used to compute labels."""
+
+    n_quantiles: int
+    """Number of quantile buckets used in the factor evaluation path."""
+
+    run_timestamp_utc: str
+    """ISO-8601 UTC timestamp of when the experiment was executed."""
+
+    git_commit: str | None
+    """Short git commit hash of the current HEAD, or ``None`` if the project
+    is not in a git repository or git is unavailable."""
+
+    portfolio_cost_rate: float | None
+    """One-way transaction cost rate passed to the experiment, or ``None``."""
+
+    strategy_repr: str | None
+    """``repr()`` of the :class:`~alpha_lab.strategy.StrategySpec` passed to
+    the experiment, or ``None`` if no strategy was provided."""
 
 
 @dataclass(frozen=True)
@@ -155,6 +191,22 @@ class ExperimentResult:
     bottom bucket turnover; NaN on the first evaluation date.
     """
 
+    provenance: ExperimentProvenance
+    """Minimal audit record: factor name, horizon, quantiles, run timestamp,
+    git commit, cost rate, and strategy repr.  Captured automatically."""
+
+    n_eval_dates: int
+    """Number of distinct dates in the evaluation period."""
+
+    n_eval_assets: int
+    """Number of distinct assets in the evaluation period."""
+
+    n_label_nan_dates: int
+    """Number of evaluation dates for which **no** valid (non-NaN) forward
+    return label existed for any asset.  These dates are excluded from IC and
+    quantile-return computation.  Typically equals the label ``horizon``
+    (the last ``horizon`` dates have no future price to compute a return)."""
+
     portfolio_weights_df: pd.DataFrame | None = None
     """Portfolio weights by date and asset when portfolio parameters are
     provided to :func:`run_factor_experiment`.
@@ -288,6 +340,11 @@ def run_factor_experiment(
     -------
     ExperimentResult
     """
+    # --- Step -1: validate raw price panel ----------------------------------
+    # Catch bad input early before any downstream computation occurs.  This
+    # also validates programmatic callers, not just the CLI path.
+    validate_price_panel(prices)
+
     # --- Step 0: resolve strategy overrides ---------------------------------
     # StrategySpec is the explicit domain boundary between the factor research
     # layer and the portfolio research layer.  When provided it overrides all
@@ -315,6 +372,17 @@ def run_factor_experiment(
         raise ValueError("holding_period must be >= 1")
     if rebalance_frequency is not None and rebalance_frequency < 1:
         raise ValueError("rebalance_frequency must be >= 1")
+
+    # Warn when portfolio_cost_rate is supplied but portfolio mode is not active.
+    # After strategy override, holding_period is None iff portfolio mode is off.
+    if portfolio_cost_rate is not None and holding_period is None:
+        warnings.warn(
+            "portfolio_cost_rate is ignored because portfolio simulation is not "
+            "enabled.  Provide holding_period and rebalance_frequency (or a "
+            "StrategySpec) to enable the portfolio path.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # --- Step 0b: validate split arguments ----------------------------------
     # Require both or neither.  A lone train_end / test_start, or a val_start
@@ -360,6 +428,17 @@ def run_factor_experiment(
         eval_factor = factor_df.copy()
         eval_label = label_df.copy()
         eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
+
+    # --- Step 3b: diagnostics -----------------------------------------------
+    n_eval_dates = int(eval_factor["date"].nunique())
+    n_eval_assets = int(eval_factor["asset"].nunique())
+    # Count eval dates that have no valid (non-NaN) forward return label for
+    # any asset.  These are excluded from IC and quantile-return computation.
+    dates_with_labels: set[object] = set(
+        eval_label.loc[eval_label["value"].notna(), "date"].unique()
+    )
+    eval_factor_dates: set[object] = set(eval_factor["date"].unique())
+    n_label_nan_dates = len(eval_factor_dates - dates_with_labels)
 
     # --- Step 4: IC / RankIC -----------------------------------------------
     ic_df = compute_ic(eval_factor, eval_label)
@@ -411,6 +490,19 @@ def run_factor_experiment(
             port_return_df, port_turnover_df, port_cost_adj_df
         )
 
+    # --- Step 8: build provenance -------------------------------------------
+    _factor_names = factor_df["factor"].unique() if not factor_df.empty else []
+    _factor_name_str = str(_factor_names[0]) if len(_factor_names) > 0 else "unknown"
+    prov = ExperimentProvenance(
+        factor_name=_factor_name_str,
+        horizon=horizon,
+        n_quantiles=n_quantiles,
+        run_timestamp_utc=_utc_now(),
+        git_commit=_get_git_commit(),
+        portfolio_cost_rate=portfolio_cost_rate,
+        strategy_repr=repr(strategy) if strategy is not None else None,
+    )
+
     return ExperimentResult(
         factor_df=factor_df,
         label_df=label_df,
@@ -425,6 +517,10 @@ def run_factor_experiment(
         quantile_assignments_df=asgn_df,
         quantile_turnover_df=qto_df,
         long_short_turnover_df=lsto_df,
+        provenance=prov,
+        n_eval_dates=n_eval_dates,
+        n_eval_assets=n_eval_assets,
+        n_label_nan_dates=n_label_nan_dates,
         portfolio_weights_df=port_weights_df,
         portfolio_return_df=port_return_df,
         portfolio_turnover_df=port_turnover_df,
@@ -436,6 +532,36 @@ def run_factor_experiment(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _utc_now() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
+    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+
+
+def _get_git_commit() -> str | None:
+    """Return the short git commit hash of the current HEAD, or ``None``.
+
+    Uses ``git rev-parse --short HEAD`` in the package directory.  Returns
+    ``None`` if git is not available, the project is not in a repository, or
+    the subprocess call fails for any reason.  Failures are intentionally
+    silent — a missing commit hash is not a hard error.
+    """
+    try:
+        from pathlib import Path
+
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            cwd=str(Path(__file__).resolve().parent),
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or None
+    except Exception:
+        pass
+    return None
 
 
 def _summarise(

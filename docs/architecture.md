@@ -133,18 +133,50 @@ sizes differ.
 
 ## Path / Config
 
-`alpha_lab.config` defines project-root-relative path constants anchored to the
-location of the installed package:
+`alpha_lab.config` defines project-root-relative path constants:
 
 ```python
-PROJECT_ROOT       = Path(__file__).resolve().parents[2]
+# Env-var override (required for non-editable installs):
+PROJECT_ROOT = Path(os.environ["ALPHA_LAB_PROJECT_ROOT"]).resolve()
+# Editable-install default (src/alpha_lab/config.py → parents[2]):
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 DATA_DIR           = PROJECT_ROOT / "data"
 RAW_DATA_DIR       = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 ```
 
-All modules that write or read project-relative paths (e.g. `registry.py`)
-import from `config` rather than constructing CWD-relative `Path()` literals.
+**Integrity check**: if `PROJECT_ROOT / "pyproject.toml"` does not exist, a
+`RuntimeError` is raised immediately — preventing silent artifact misplacement.
+
+**Env var override**: set `ALPHA_LAB_PROJECT_ROOT` to the project root directory
+for non-editable installs or when running from unusual working directories.
+
+All modules that write or read project-relative paths (e.g. `registry.py`,
+CLI default `--output-dir`) import from `config` rather than constructing
+CWD-relative `Path()` literals.
+
+## Raw Input Validation
+
+`alpha_lab.data_validation.validate_price_panel(df)` enforces the raw price
+panel contract at every system entrypoint (CLI, `run_factor_experiment`):
+
+- required columns: `date`, `asset`, `close`
+- no empty DataFrame
+- no NaT or unparseable dates
+- no null/empty asset strings
+- no duplicate `(date, asset)` rows
+- no NaN close values
+- no non-positive close values
+
+`alpha_lab.interfaces.validate_factor_output(df)` enforces the canonical factor
+output contract after every `factor_fn` call:
+
+- required columns: `date`, `asset`, `factor`, `value`
+- no NaT dates
+- no null/empty asset or factor strings
+- no duplicate `(date, asset, factor)` rows
+- no all-NaN value column
 
 ## Entrypoint
 

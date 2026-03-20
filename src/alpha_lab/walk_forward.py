@@ -387,6 +387,17 @@ def run_walk_forward_experiment(
     if portfolio_cost_rate is not None and portfolio_cost_rate < 0:
         raise ValueError("portfolio_cost_rate must be >= 0")
 
+    # Warn when portfolio_cost_rate is supplied but portfolio mode is not active.
+    _portfolio_active = (strategy is not None) or (holding_period is not None)
+    if portfolio_cost_rate is not None and not _portfolio_active:
+        warnings.warn(
+            "portfolio_cost_rate is ignored because portfolio simulation is not "
+            "enabled.  Provide holding_period and rebalance_frequency (or a "
+            "StrategySpec) to enable the portfolio path.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # --- Extract unique sorted dates ----------------------------------------
     dates_raw = pd.to_datetime(prices["date"])
     if dates_raw.isna().any():

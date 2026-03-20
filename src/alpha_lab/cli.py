@@ -10,6 +10,8 @@ from pathlib import Path
 import pandas as pd
 
 import alpha_lab.registry as _registry
+from alpha_lab.config import PROCESSED_DATA_DIR
+from alpha_lab.data_validation import validate_price_panel
 from alpha_lab.experiment import run_factor_experiment
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.obsidian import write_obsidian_note
@@ -146,8 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--output-dir",
-        default="output",
-        help="Directory for summary CSV output.  Created if it does not exist.",
+        default=str(PROCESSED_DATA_DIR / "output"),
+        help=(
+            "Directory for summary CSV output.  Created if it does not exist.  "
+            "Defaults to <project_root>/data/processed/output to keep artifacts "
+            "inside the project regardless of current working directory."
+        ),
     )
     p.add_argument(
         "--append-registry",
@@ -302,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- Load data ---
     prices = _load_prices(Path(args.input_path))
+    try:
+        validate_price_panel(prices)
+    except ValueError as exc:
+        raise SystemExit(f"Error: invalid price data: {exc}") from exc
 
     # --- Derive and validate experiment name ---
     experiment_name: str = args.experiment_name or (

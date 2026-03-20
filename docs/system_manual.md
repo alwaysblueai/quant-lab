@@ -14,6 +14,17 @@ context see [architecture.md](architecture.md).  For contributor guidance see
 uv sync --all-extras
 ```
 
+**Path behaviour**: the package resolves the project root via
+`src/alpha_lab/config.py`.  For editable installs (the standard workflow)
+this works automatically.  For non-editable installs, set:
+
+```bash
+export ALPHA_LAB_PROJECT_ROOT=/path/to/alpha-lab
+```
+
+A `RuntimeError` is raised at import time if the resolved root does not contain
+`pyproject.toml`, preventing silent artifact misplacement.
+
 Run all checks:
 
 ```bash
@@ -24,6 +35,31 @@ In WSL or sandboxed environments with restricted cache directories:
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache make check
+```
+
+---
+
+## Raw Input Validation
+
+`alpha_lab.data_validation.validate_price_panel(df)` is called automatically at
+`run_factor_experiment()` and at the CLI entry point.  It raises `ValueError`
+(or `SystemExit` at the CLI) on the first violation:
+
+| Check | Error trigger |
+|---|---|
+| Required columns | `date`, `asset`, `close` missing |
+| Non-empty | zero rows |
+| Valid dates | NaT or unparseable values in `date` |
+| Non-null asset | null or empty-string in `asset` |
+| No duplicates | duplicate `(date, asset)` pairs |
+| NaN close | any NaN in `close` |
+| Positive close | any `close <= 0` |
+
+You can also call it directly before passing data to any pipeline function:
+
+```python
+from alpha_lab.data_validation import validate_price_panel
+validate_price_panel(your_prices_df)  # raises ValueError on violation
 ```
 
 ---
@@ -272,6 +308,46 @@ adjusted_return(t) = portfolio_return(t) − cost_rate × turnover(t)
   (zero incremental cost).
 - `cost_rate` is one-way, flat-rate.  It does not model market impact,
   bid-ask spread variation, short-borrow fees, or execution timing.
+
+---
+
+## Provenance and Diagnostics
+
+Every `ExperimentResult` carries a `provenance` field (`ExperimentProvenance`)
+and three diagnostic counts:
+
+```python
+result.provenance.factor_name        # e.g. "momentum_5d"
+result.provenance.horizon            # forward-return horizon used
+result.provenance.n_quantiles        # quantile buckets used
+result.provenance.run_timestamp_utc  # ISO-8601 UTC run time
+result.provenance.git_commit         # short commit hash or None
+result.provenance.portfolio_cost_rate
+result.provenance.strategy_repr      # repr(spec) or None
+
+result.n_eval_dates       # distinct dates in the evaluation period
+result.n_eval_assets      # distinct assets in the evaluation period
+result.n_label_nan_dates  # eval dates with no valid forward return label
+                          # (= horizon for full-sample runs)
+```
+
+`n_label_nan_dates` tells you how many trailing dates were excluded from IC and
+quantile-return computation because the forward-return horizon extended beyond
+the available price history.
+
+---
+
+## Parameter Misuse Warnings
+
+Two `UserWarning`s are raised for clearly no-op parameter combinations:
+
+1. **`portfolio_cost_rate` without portfolio mode** — if `portfolio_cost_rate`
+   is supplied but neither `holding_period`/`rebalance_frequency` nor a
+   `StrategySpec` is provided, the rate would be silently dropped.  A warning
+   is raised in both `run_factor_experiment` and `run_walk_forward_experiment`.
+
+2. **`holding_period`/`rebalance_frequency` alongside `strategy`** — the spec
+   values override; the explicit arguments are warned and ignored.
 
 ---
 

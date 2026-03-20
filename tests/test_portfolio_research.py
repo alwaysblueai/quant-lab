@@ -719,13 +719,16 @@ def test_experiment_cost_adj_populated_with_cost_rate() -> None:
 
 
 def test_experiment_cost_adj_none_when_no_portfolio_params() -> None:
-    """portfolio_cost_rate is silently ignored when portfolio simulation is off."""
+    """portfolio_cost_rate is ignored (with UserWarning) when portfolio simulation is off."""
+    import pytest
+
     prices = _make_prices(n_days=30)
-    result = run_factor_experiment(
-        prices,
-        lambda p: momentum(p, window=5),
-        portfolio_cost_rate=0.001,
-    )
+    with pytest.warns(UserWarning, match="portfolio_cost_rate is ignored"):
+        result = run_factor_experiment(
+            prices,
+            lambda p: momentum(p, window=5),
+            portfolio_cost_rate=0.001,
+        )
     assert result.portfolio_cost_adjusted_return_df is None
 
 

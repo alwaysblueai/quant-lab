@@ -160,6 +160,32 @@ complete type annotations.
   breaks when the process is started from a different directory.
 - `RAW_DATA_DIR` is for immutable raw inputs.  Do not write to it.
 - `PROCESSED_DATA_DIR` is for derived outputs (registry, summaries, etc.).
+- The project root is verified at import time: `config.py` checks for
+  `pyproject.toml` and raises `RuntimeError` immediately if it is missing.
+  This prevents silent artifact misplacement in non-editable installs.
+- For non-editable installs, set `ALPHA_LAB_PROJECT_ROOT` env var.
+
+## Raw Input Validation
+
+Every new entrypoint that accepts a raw price panel must call
+`validate_price_panel(df)` before any computation:
+
+```python
+from alpha_lab.data_validation import validate_price_panel
+validate_price_panel(prices)  # raises ValueError on violation
+```
+
+Do not duplicate these checks in individual pipeline functions —
+`validate_price_panel` is the single enforcement point.
+
+## Factor Contract Enforcement
+
+Every factor output must pass `validate_factor_output(df)` from
+`alpha_lab.interfaces`.  This is called automatically inside
+`run_factor_experiment` after each `factor_fn` call.  When writing
+tests for new factors, call `validate_factor_output` directly to
+verify the output satisfies the full contract (including NaT dates,
+null assets, null factor names).
 
 ---
 

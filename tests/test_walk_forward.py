@@ -818,15 +818,16 @@ def test_pooled_cost_adj_df_empty_without_cost_rate() -> None:
 
 
 def test_pooled_cost_adj_df_empty_without_portfolio_params() -> None:
-    """No portfolio simulation → empty pooled cost-adjusted DataFrame."""
-    result = run_walk_forward_experiment(
-        _PRICES,
-        _factor_fn,
-        train_size=30,
-        test_size=10,
-        step=10,
-        portfolio_cost_rate=0.001,
-    )
+    """No portfolio simulation → empty pooled cost-adjusted DataFrame (with UserWarning)."""
+    with pytest.warns(UserWarning, match="portfolio_cost_rate is ignored"):
+        result = run_walk_forward_experiment(
+            _PRICES,
+            _factor_fn,
+            train_size=30,
+            test_size=10,
+            step=10,
+            portfolio_cost_rate=0.001,
+        )
     assert result.pooled_cost_adjusted_portfolio_return_df.empty
 
 
