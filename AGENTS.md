@@ -1,5 +1,45 @@
 # Alpha Lab Agent Rules
 
+## Knowledge reference layer
+
+This repo is the **implementation layer**.  The **knowledge layer** lives at:
+
+```
+/mnt/c/quant/vault/quant-knowledge
+```
+
+Before implementing a factor or designing an experiment, consult:
+
+| Need | Where to look |
+|------|---------------|
+| Factor definition / hypothesis | `30_factors/Factor - *.md` |
+| Algorithm / estimation method | `20_methods/Method - *.md` |
+| Pre-flight checklist | `60_playbooks/Playbook - *.md` |
+| End-to-end pipeline pattern | `80_pipelines/Pipeline - *.md` |
+| Concept definition | `10_concepts/Concept - *.md` |
+
+After an experiment, export the result card back to quant-knowledge:
+
+```python
+from alpha_lab.reporting import export_experiment_card
+path = export_experiment_card(result, name="momentum-5d-Ashare")
+# writes to /mnt/c/quant/vault/quant-knowledge/50_experiments/Exp - YYYYMM - momentum-5d-Ashare.md
+```
+
+The vault root must already exist.  The `50_experiments/` subdir is created on demand.
+
+By default the call raises `FileExistsError` if the card already exists.
+Pass `overwrite=True` to replace an existing card intentionally.
+
+The generated card marks Setup and Results as **auto-generated** (do not edit
+manually) and leaves Interpretation, Next Steps, Open Questions, and Notes as
+**manual sections** for researcher completion.
+
+**Rule**: quant-knowledge is read-only from this repo's perspective except for
+`50_experiments/` which alpha-lab writes to via `export_experiment_card`.
+
+---
+
 ## Core research constraints
 - Never use future data.
 - Never leak labels into features.

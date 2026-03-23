@@ -8,6 +8,7 @@ import pandas as pd
 
 from alpha_lab.costs import cost_adjusted_long_short
 from alpha_lab.experiment import ExperimentResult
+from alpha_lab.obsidian import write_obsidian_note
 
 # Ordered column names for summary DataFrames produced by this module.
 SUMMARY_COLUMNS: tuple[str, ...] = (
@@ -252,6 +253,226 @@ def to_obsidian_markdown(
         "## Next Steps",
         "",
         "<!-- Add next steps here -->",
+    ]
+
+    if notes is not None:
+        lines += [
+            "",
+            "## Notes",
+            "",
+            notes,
+        ]
+
+    return "\n".join(lines) + "\n"
+
+
+def export_experiment_card(
+    result: ExperimentResult,
+    name: str,
+    *,
+    vault_path: str | Path | None = None,
+    cost_rate: float | None = None,
+    notes: str | None = None,
+    tags: list[str] | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Export an ExperimentResult as a quant-knowledge experiment card.
+
+    Writes to ``{vault_path}/50_experiments/Exp - YYYYMM - {name}.md``
+    using the quant-knowledge frontmatter schema (``type: experiment``).
+    The generated card is a research log: it records setup, metrics, and
+    placeholder sections for interpretation and next steps.
+
+    Parameters
+    ----------
+    result:
+        Output of :func:`~alpha_lab.experiment.run_factor_experiment`.
+    name:
+        Short description for the filename (e.g.
+        ``"momentum-5d-Ashare"``).  Combined with today's YYYYMM to form
+        the filename ``Exp - YYYYMM - {name}.md``.  Must not contain path
+        separators.
+    vault_path:
+        Path to the quant-knowledge vault root.  Defaults to
+        :data:`~alpha_lab.config.OBSIDIAN_VAULT_PATH`.  Raises
+        :exc:`ValueError` when both this argument and the config value
+        are ``None``.
+    cost_rate:
+        Optional one-way transaction cost rate.  When provided, a
+        cost-adjusted return row is appended to the metrics table.
+    notes:
+        Optional free-text appended under a ``## Notes`` section.
+    tags:
+        YAML frontmatter tags.  Defaults to
+        ``[experiment, factor, quant]``.
+    overwrite:
+        If ``False`` (default), raises :exc:`FileExistsError` when the
+        destination file already exists.
+
+    Returns
+    -------
+    Path
+        Resolved path of the written card.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is empty/whitespace or contains path separators, or
+        if no vault path can be resolved.
+    FileNotFoundError
+        If the resolved vault path does not exist on disk.
+    NotADirectoryError
+        If the resolved vault path exists but is not a directory.
+    FileExistsError
+        If the destination file already exists and ``overwrite`` is
+        ``False``.
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("name must not be empty or whitespace")
+    if "/" in name or "\\" in name:
+        raise ValueError(
+            f"name must not contain path separators; got {name!r}"
+        )
+
+    # Resolve vault path.
+    resolved_vault: Path
+    if vault_path is not None:
+        resolved_vault = Path(vault_path).resolve()
+    else:
+        from alpha_lab.config import OBSIDIAN_VAULT_PATH
+
+        if OBSIDIAN_VAULT_PATH is None:
+            raise ValueError(
+                "vault_path was not provided and OBSIDIAN_VAULT_PATH is not "
+                "set.  Pass vault_path explicitly or set the "
+                "OBSIDIAN_VAULT_PATH environment variable."
+            )
+        resolved_vault = OBSIDIAN_VAULT_PATH
+
+    # Vault root must already exist.  We create the 50_experiments subdir on
+    # demand, but we do not create the vault root — a missing root most likely
+    # indicates a misconfigured path rather than a first-time setup.
+    if not resolved_vault.exists():
+        raise FileNotFoundError(
+            f"Vault path {resolved_vault!s} does not exist.  "
+            "Ensure vault_path (or OBSIDIAN_VAULT_PATH) points to an "
+            "existing quant-knowledge vault directory."
+        )
+    if not resolved_vault.is_dir():
+        raise NotADirectoryError(
+            f"Vault path {resolved_vault!s} exists but is not a directory."
+        )
+
+    yyyymm = datetime.date.today().strftime("%Y%m")
+    card_name = f"Exp - {yyyymm} - {name}"
+    output_path = resolved_vault / "50_experiments" / f"{card_name}.md"
+
+    markdown = _render_experiment_card(
+        result,
+        card_name=card_name,
+        cost_rate=cost_rate,
+        notes=notes,
+        tags=tags,
+    )
+    return write_obsidian_note(markdown, output_path, overwrite=overwrite)
+
+
+def _render_experiment_card(
+    result: ExperimentResult,
+    *,
+    card_name: str,
+    cost_rate: float | None,
+    notes: str | None,
+    tags: list[str] | None,
+) -> str:
+    """Render an ExperimentResult as a quant-knowledge experiment card."""
+    summary_df = summarise_experiment_result(result, cost_rate=cost_rate)
+    row = summary_df.iloc[0]
+
+    factor_name = str(row["factor_name"])
+    split_desc = str(row["split_description"])
+    n_dates = int(row["n_dates_used"])  # type: ignore[arg-type]
+    prov = result.provenance
+
+    resolved_tags = tags if tags is not None else ["experiment", "factor", "quant"]
+    tag_str = "[" + ", ".join(resolved_tags) + "]"
+
+    # quant-knowledge §4 frontmatter schema
+    frontmatter_lines = [
+        "---",
+        "type: experiment",
+        f"name: {card_name}",
+        'source: "alpha-lab / Self-developed"',
+        f"tags: {tag_str}",
+        "status: draft",
+        f"factor: {factor_name}",
+        f"horizon: {prov.horizon}",
+        f"quantiles: {prov.n_quantiles}",
+        f"split: {split_desc}",
+        f'git_commit: {prov.git_commit or "unknown"}',
+        f"run_timestamp_utc: {prov.run_timestamp_utc}",
+        "---",
+    ]
+
+    s = result.summary
+    metrics_rows = [
+        f"| Mean IC | {_fmt_float(s.mean_ic)} |",
+        f"| Mean Rank IC | {_fmt_float(s.mean_rank_ic)} |",
+        f"| IC IR | {_fmt_float(s.ic_ir)} |",
+        f"| Mean L/S Return | {_fmt_float(s.mean_long_short_return)} |",
+        f"| L/S Hit Rate | {_fmt_float(s.long_short_hit_rate)} |",
+        f"| Mean L/S Turnover (one-way) | {_fmt_float(s.mean_long_short_turnover)} |",
+    ]
+    if cost_rate is not None:
+        adj = float(row["mean_cost_adjusted_long_short_return"])  # type: ignore[arg-type]
+        metrics_rows.append(
+            f"| Mean L/S Return (cost-adj, rate={cost_rate}) | {_fmt_float(adj)} |"
+        )
+
+    lines = [
+        *frontmatter_lines,
+        "",
+        f"# {card_name}",
+        "",
+        "> *Auto-generated by `alpha-lab`. Setup, Results, and frontmatter "
+        "reflect the recorded experiment and must not be edited manually.*  ",
+        "> *Interpretation, Next Steps, Open Questions, and Notes are for "
+        "manual completion.*",
+        "",
+        "## Setup",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+        f"| Factor | `{factor_name}` |",
+        f"| Horizon | {prov.horizon} bars |",
+        f"| N quantiles | {prov.n_quantiles} |",
+        f"| Split | {split_desc} |",
+        f"| Eval dates (finite IC) | {n_dates} |",
+        f"| Assets in eval period | {result.n_eval_assets} |",
+        f'| Git commit | `{prov.git_commit or "unknown"}` |',
+        "",
+        "## Results",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        *metrics_rows,
+        "",
+        "## Interpretation",
+        "",
+        "<!-- Add interpretation here -->",
+        "",
+        "## Next Steps",
+        "",
+        "<!-- Add next steps here -->",
+        "",
+        "## Related Cards",
+        "",
+        f"- [[30_factors/Factor - {factor_name}]]",
+        "",
+        "## Open Questions",
+        "",
+        "<!-- What needs further investigation? -->",
     ]
 
     if notes is not None:

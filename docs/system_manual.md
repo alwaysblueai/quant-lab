@@ -245,12 +245,51 @@ from alpha_lab.reporting import (
     summarise_experiment_result,
     export_summary_csv,
     to_obsidian_markdown,
+    export_experiment_card,
 )
 
 summary = summarise_experiment_result(result, cost_rate=0.001)
 export_summary_csv(summary, "output/reports/momentum_5d.csv")
 md = to_obsidian_markdown(result, title="Momentum 5d OOS", cost_rate=0.001)
 ```
+
+#### export_experiment_card
+
+Writes a structured experiment note to `{vault}/50_experiments/Exp - YYYYMM - {name}.md`
+using the quant-knowledge frontmatter schema.
+
+```python
+path = export_experiment_card(result, name="momentum-5d-Ashare")
+# vault defaults to OBSIDIAN_VAULT_PATH from config / env var
+# returns the resolved Path of the written file
+
+# Explicit vault and overwrite:
+path = export_experiment_card(
+    result,
+    name="momentum-5d-Ashare",
+    vault_path="/path/to/quant-knowledge",
+    overwrite=True,
+)
+```
+
+**Behaviour:**
+- The vault root must already exist (`FileNotFoundError` if not).
+- The `50_experiments/` subdir is created automatically if absent.
+- Default is safe: raises `FileExistsError` if the card already exists.
+  Pass `overwrite=True` to replace an existing card intentionally.
+- `name` must be non-empty and must not contain path separators.
+- Returns the resolved `Path` of the written file.
+
+**Generated vs manual sections:**
+Setup, Results, and YAML frontmatter are auto-generated from the
+`ExperimentResult` and must not be edited manually.  The note includes a
+visible notice to that effect.  Interpretation, Next Steps, Open Questions,
+and Notes are placeholders for researcher completion.
+
+**Vault path resolution order:**
+`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var → config default
+(`/mnt/c/quant/vault/quant-knowledge`).  An empty or whitespace env var is
+treated as "not configured" and falls through to the default.
 
 ---
 

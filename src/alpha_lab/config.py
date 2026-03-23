@@ -38,3 +38,21 @@ if not (PROJECT_ROOT / "pyproject.toml").exists():
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
+
+# ---------------------------------------------------------------------------
+# Obsidian vault path (quant-knowledge)
+# ---------------------------------------------------------------------------
+# Points to the quant-knowledge Obsidian vault.  Used by
+# :func:`~alpha_lab.reporting.export_experiment_card` to resolve the
+# ``50_experiments/`` destination directory without requiring an explicit
+# path at every call site.
+#
+# Set ``OBSIDIAN_VAULT_PATH`` in your shell environment (or a ``.env`` file
+# loaded before import) to override the default.  The default assumes the
+# WSL2 Windows path used in the primary dev environment.
+# ---------------------------------------------------------------------------
+
+_env_vault = (os.environ.get("OBSIDIAN_VAULT_PATH") or "").strip()
+OBSIDIAN_VAULT_PATH: Path | None = (
+    Path(_env_vault).resolve() if _env_vault else Path("/mnt/c/quant/vault/quant-knowledge")
+)
