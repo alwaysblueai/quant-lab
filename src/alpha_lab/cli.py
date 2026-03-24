@@ -13,7 +13,9 @@ import alpha_lab.registry as _registry
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.data_validation import validate_price_panel
 from alpha_lab.experiment import run_factor_experiment
+from alpha_lab.factors.low_volatility import low_volatility
 from alpha_lab.factors.momentum import momentum
+from alpha_lab.factors.reversal import reversal
 from alpha_lab.obsidian import write_obsidian_note
 from alpha_lab.reporting import (
     export_summary_csv,
@@ -29,17 +31,25 @@ from alpha_lab.reporting import (
 REQUIRED_PRICE_COLUMNS: frozenset[str] = frozenset({"date", "asset", "close"})
 
 # Supported factor names (used for argparse choices and dispatch).
-SUPPORTED_FACTORS: frozenset[str] = frozenset({"momentum"})
+SUPPORTED_FACTORS: frozenset[str] = frozenset(
+    {"momentum", "reversal", "low_volatility"}
+)
 
 
 def _build_factor_fn(
     factor: str,
     *,
     momentum_window: int,
+    reversal_window: int,
+    low_volatility_window: int,
 ) -> object:
     """Return a callable ``(prices) -> factor_df`` for the requested factor."""
     if factor == "momentum":
         return lambda prices: momentum(prices, window=momentum_window)
+    if factor == "reversal":
+        return lambda prices: reversal(prices, window=reversal_window)
+    if factor == "low_volatility":
+        return lambda prices: low_volatility(prices, window=low_volatility_window)
     # argparse choices= guards this path; kept for explicit safety.
     raise ValueError(
         f"Unknown factor {factor!r}.  Supported: {sorted(SUPPORTED_FACTORS)}"
@@ -101,6 +111,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=20,
         help="Look-back window (per-asset rows) for the momentum factor.",
+    )
+    p.add_argument(
+        "--reversal-window",
+        type=int,
+        default=5,
+        help="Look-back window (per-asset rows) for the reversal factor.",
+    )
+    p.add_argument(
+        "--low-volatility-window",
+        type=int,
+        default=20,
+        help="Rolling return-volatility window (per-asset rows) for the low-volatility factor.",
     )
 
     # --- Split ---
@@ -297,6 +319,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--quantiles must be at least 2")
     if args.momentum_window <= 0:
         parser.error("--momentum-window must be a positive integer")
+    if args.reversal_window <= 0:
+        parser.error("--reversal-window must be a positive integer")
+    if args.low_volatility_window <= 0:
+        parser.error("--low-volatility-window must be a positive integer")
     if args.cost_rate is not None and args.cost_rate < 0:
         parser.error("--cost-rate must be >= 0")
 
@@ -323,7 +349,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     # --- Build factor function ---
-    factor_fn = _build_factor_fn(args.factor, momentum_window=args.momentum_window)
+    factor_fn = _build_factor_fn(
+        args.factor,
+        momentum_window=args.momentum_window,
+        reversal_window=args.reversal_window,
+        low_volatility_window=args.low_volatility_window,
+    )
 
     # --- Run pipeline ---
     result = run_factor_experiment(

@@ -271,6 +271,36 @@ def test_cli_unknown_factor_exits(tmp_path: Path) -> None:
         )
 
 
+def test_cli_reversal_run_succeeds(tmp_path: Path) -> None:
+    prices_csv = _write_prices_csv(tmp_path / "prices.csv")
+    rc = main(
+        [
+            "--input-path", str(prices_csv),
+            "--factor", "reversal",
+            "--reversal-window", "5",
+            "--label-horizon", "5",
+            "--quantiles", "5",
+            "--output-dir", str(tmp_path / "out"),
+        ]
+    )
+    assert rc == 0
+
+
+def test_cli_low_volatility_run_succeeds(tmp_path: Path) -> None:
+    prices_csv = _write_prices_csv(tmp_path / "prices.csv")
+    rc = main(
+        [
+            "--input-path", str(prices_csv),
+            "--factor", "low_volatility",
+            "--low-volatility-window", "20",
+            "--label-horizon", "5",
+            "--quantiles", "5",
+            "--output-dir", str(tmp_path / "out"),
+        ]
+    )
+    assert rc == 0
+
+
 # ---------------------------------------------------------------------------
 # 5. Argument validation
 # ---------------------------------------------------------------------------
