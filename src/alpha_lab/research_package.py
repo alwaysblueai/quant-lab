@@ -831,7 +831,13 @@ def _resolve_workflow_summary_path(
     matches = sorted(case_dir.glob("*_workflow_summary.json"))
     if not matches:
         return None
-    return matches[0].resolve()
+    if len(matches) == 1:
+        return matches[0].resolve()
+    match_names = ", ".join(path.name for path in matches)
+    raise ValueError(
+        "multiple workflow summary files found; pass workflow_summary_path explicitly: "
+        f"{match_names}"
+    )
 
 
 def _resolve_optional_path(
@@ -870,23 +876,33 @@ def _discover_replay_runs(
             runs.append((engine, resolved))
         return tuple(runs), tuple(sorted(set(missing)))
 
-    discovered: set[Path] = set()
-    if (case_dir / "backtest_summary.json").exists():
-        discovered.add(case_dir)
+    discovered_runs: list[tuple[str | None, Path]] = []
+    seen_paths: set[Path] = set()
 
-    for parent_name in ("replays", "backtest_runs"):
-        parent = case_dir / parent_name
-        if parent.exists() and parent.is_dir():
-            for child in sorted(parent.iterdir()):
-                if child.is_dir() and (child / "backtest_summary.json").exists():
-                    discovered.add(child.resolve())
+    # Restrict fallback discovery to canonical replay locations so residual
+    # scratch folders under case_dir cannot silently contaminate package input.
+    canonical_paths: tuple[tuple[str | None, Path], ...] = (
+        ("vectorbt", case_dir / "replay_compare" / "vectorbt"),
+        ("backtrader", case_dir / "replay_compare" / "backtrader"),
+        ("vectorbt", case_dir / "replays" / "vectorbt_run"),
+        ("backtrader", case_dir / "replays" / "backtrader_run"),
+        ("vectorbt", case_dir / "backtest_runs" / "vectorbt"),
+        ("backtrader", case_dir / "backtest_runs" / "backtrader"),
+    )
+    for engine, candidate in canonical_paths:
+        resolved = candidate.resolve()
+        if resolved in seen_paths:
+            continue
+        if resolved.is_dir() and (resolved / "backtest_summary.json").exists():
+            discovered_runs.append((engine, resolved))
+            seen_paths.add(resolved)
 
-    for child in sorted(case_dir.iterdir()):
-        if child.is_dir() and (child / "backtest_summary.json").exists():
-            discovered.add(child.resolve())
+    root_summary = case_dir / "backtest_summary.json"
+    case_dir_resolved = case_dir.resolve()
+    if root_summary.exists() and case_dir_resolved not in seen_paths:
+        discovered_runs.append((None, case_dir_resolved))
 
-    discovered_runs = tuple((None, path) for path in sorted(discovered, key=str))
-    return discovered_runs, ()
+    return tuple(discovered_runs), ()
 
 
 def _discover_execution_impact_report(
@@ -894,21 +910,16 @@ def _discover_execution_impact_report(
     case_dir: Path,
     replay_runs: tuple[tuple[str | None, Path], ...],
 ) -> Path | None:
-    direct = case_dir / "execution_impact_report.json"
-    if direct.exists():
-        return direct.resolve()
+    del replay_runs  # deterministic fallback now uses canonical case-level locations only
 
-    candidates = sorted(
-        {
-            run_path / "execution_impact_report.json"
-            for _engine, run_path in replay_runs
-            if (run_path / "execution_impact_report.json").exists()
-        },
-        key=str,
+    candidates = (
+        case_dir / "execution_impact" / "execution_impact_report.json",
+        case_dir / "execution_impact_report.json",
     )
-    if not candidates:
-        return None
-    return candidates[0].resolve()
+    for path in candidates:
+        if path.exists():
+            return path.resolve()
+    return None
 
 
 def _load_trial_registry_metadata(

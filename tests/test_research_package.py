@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from alpha_lab.alpha_registry import ALPHA_REGISTRY_COLUMNS
 from alpha_lab.research_package import (
@@ -393,3 +394,71 @@ def test_campaign_summary_aggregates_multiple_packages(tmp_path: Path) -> None:
     assert campaign.verdict_distribution["candidate_for_registry"] == 1
     assert campaign.verdict_distribution["reject"] == 1
     assert campaign.top_candidates == ("campaign_case_a",)
+
+
+def test_build_research_package_rejects_ambiguous_workflow_summary(tmp_path: Path) -> None:
+    case_dir = _create_case(tmp_path, case_name="case_ambiguous_workflow")
+    _write_json(
+        case_dir / "zzz_single_factor_workflow_summary.json",
+        {
+            "workflow": "run-single-factor",
+            "status": "success",
+            "experiment_name": "zzz",
+            "outputs": {},
+        },
+    )
+
+    with pytest.raises(ValueError, match="multiple workflow summary files found"):
+        build_research_package(case_dir, created_at_utc="2026-03-25T00:00:00+00:00")
+
+
+def test_build_research_package_ignores_noncanonical_replay_dirs(tmp_path: Path) -> None:
+    case_dir = _create_case(
+        tmp_path,
+        case_name="case_canonical_replay_only",
+        include_replays=False,
+        include_execution_impact=False,
+    )
+    for engine in ("vectorbt", "backtrader"):
+        run_dir = case_dir / "replay_compare" / engine
+        _write_json(
+            run_dir / "backtest_summary.json",
+            {
+                "engine": engine,
+                "summary": {
+                    "total_return": 0.1,
+                    "sharpe_annualized": 1.0,
+                    "max_drawdown": -0.1,
+                    "mean_turnover": 0.2,
+                    "n_periods": 10,
+                },
+                "warnings": [],
+            },
+        )
+        _write_json(
+            run_dir / "adapter_run_metadata.json",
+            {
+                "engine": engine,
+                "adapter_version": "1.0.0",
+                "warnings": [],
+            },
+        )
+
+    _write_json(
+        case_dir / "replay_compare" / "stale_engine" / "backtest_summary.json",
+        {
+            "engine": "stale_engine",
+            "summary": {
+                "total_return": 999.0,
+                "sharpe_annualized": 999.0,
+                "max_drawdown": -0.99,
+                "mean_turnover": 9.9,
+                "n_periods": 1,
+            },
+            "warnings": [],
+        },
+    )
+
+    package = build_research_package(case_dir, created_at_utc="2026-03-25T00:00:00+00:00")
+    engines = {item.engine for item in package.replay_results}
+    assert engines == {"vectorbt", "backtrader"}
