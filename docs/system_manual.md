@@ -260,7 +260,7 @@ using the quant-knowledge frontmatter schema.
 
 ```python
 path = export_experiment_card(result, name="momentum-5d-Ashare")
-# vault defaults to OBSIDIAN_VAULT_PATH from config / env var
+# requires OBSIDIAN_VAULT_PATH to be set, unless vault_path is passed explicitly
 # returns the resolved Path of the written file
 
 # Explicit vault and overwrite:
@@ -287,9 +287,8 @@ visible notice to that effect.  Interpretation, Next Steps, Open Questions,
 and Notes are placeholders for researcher completion.
 
 **Vault path resolution order:**
-`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var → config default
-(`/mnt/c/quant/vault/quant-knowledge`).  An empty or whitespace env var is
-treated as "not configured" and falls through to the default.
+`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var.  An empty or whitespace
+env var is treated as "not configured".
 
 ---
 

@@ -48,11 +48,9 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 # path at every call site.
 #
 # Set ``OBSIDIAN_VAULT_PATH`` in your shell environment (or a ``.env`` file
-# loaded before import) to override the default.  The default assumes the
-# WSL2 Windows path used in the primary dev environment.
+# loaded before import) to configure the vault root.  If unset, exports that
+# require the vault will raise unless an explicit ``vault_path`` is passed.
 # ---------------------------------------------------------------------------
 
 _env_vault = (os.environ.get("OBSIDIAN_VAULT_PATH") or "").strip()
-OBSIDIAN_VAULT_PATH: Path | None = (
-    Path(_env_vault).resolve() if _env_vault else Path("/mnt/c/quant/vault/quant-knowledge")
-)
+OBSIDIAN_VAULT_PATH: Path | None = Path(_env_vault).resolve() if _env_vault else None

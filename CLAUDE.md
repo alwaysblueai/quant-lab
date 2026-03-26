@@ -5,7 +5,7 @@
 This repo is the **implementation layer**.  The **knowledge layer** lives at:
 
 ```
-/mnt/c/quant/vault/quant-knowledge
+/path/to/quant-knowledge
 ```
 
 Before implementing a factor or designing an experiment, consult:
@@ -23,7 +23,7 @@ After an experiment, export the result card back to quant-knowledge:
 ```python
 from alpha_lab.reporting import export_experiment_card
 path = export_experiment_card(result, name="momentum-5d-Ashare")
-# writes to /mnt/c/quant/vault/quant-knowledge/50_experiments/Exp - YYYYMM - momentum-5d-Ashare.md
+# writes to <OBSIDIAN_VAULT_PATH>/50_experiments/Exp - YYYYMM - momentum-5d-Ashare.md
 ```
 
 The vault root must already exist.  The `50_experiments/` subdir is created on demand.
