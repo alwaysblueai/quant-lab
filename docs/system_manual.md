@@ -478,9 +478,8 @@ When metadata is available, exported cards include:
 - validation scheme and runtime versions in Setup
 
 **Vault path resolution order:**
-`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var → config default
-(`/mnt/c/quant/vault/quant-knowledge`).  An empty or whitespace env var is
-treated as "not configured" and falls through to the default.
+`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var.  An empty or whitespace
+env var is treated as "not configured".
 
 ---
 

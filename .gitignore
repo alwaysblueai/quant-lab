@@ -16,6 +16,42 @@ wheels/
 # Local tool state
 .claude/
 
+# Environment files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# OS/editor artifacts
+.DS_Store
+.idea/
+.vscode/
+
+# Coverage / profiling artifacts
+.coverage
+htmlcov/
+coverage.xml
+
+# Common research artifacts (keep out of git by default)
+outputs/
+results/
+reports/
+runs/
+artifacts/
+logs/
+*.log
+
+# Data-like binary formats (usually large / generated)
+*.parquet
+*.feather
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.sqlite
+*.db
+
 # Data directories: keep structure, ignore contents
 data/raw/*
 !data/raw/.gitkeep
