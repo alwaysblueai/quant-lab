@@ -1,0 +1,29 @@
+campaign_name: research_campaign_1
+campaign_description: >-
+  First portfolio-grade research campaign combining two single-factor baselines
+  (value, quality) and one composite enhancement case with standardized outputs.
+
+output_root_dir: ../../../outputs/campaigns/research_campaign_1
+case_output_root_dir: ../../../outputs/real_cases
+
+vault_export:
+  vault_root: null
+  mode: versioned
+
+cases:
+  - case_name: bp_single_factor_v1
+    package_type: single_factor
+    spec_path: ../../real_cases/bp_single_factor_v1.yaml
+
+  - case_name: roe_ttm_single_factor_v1
+    package_type: single_factor
+    spec_path: ../../real_cases/roe_ttm_single_factor_v1.yaml
+
+  - case_name: value_quality_lowvol_v1
+    package_type: composite
+    spec_path: ../../real_cases/value_quality_lowvol_v1.yaml
+
+execution_order:
+  - bp_single_factor_v1
+  - roe_ttm_single_factor_v1
+  - value_quality_lowvol_v1
