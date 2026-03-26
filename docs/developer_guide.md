@@ -36,6 +36,66 @@ How to extend and maintain Alpha Lab.  For system-level API reference see
 
 ---
 
+## Adding or Tightening Research Contracts
+
+Use `alpha_lab.research_contracts` for schema/validation changes. Keep these
+rules centralized instead of scattering checks across pipelines.
+
+When adding contract rules:
+1. Extend validator functions (`validate_prices_table`, `validate_canonical_signal_table`, etc.).
+2. Add/update `ResearchBundle.validate()` checks.
+3. Add explicit tests for malformed input and expected error text.
+4. Update `docs/data_conventions.md` and `README.md` contract sections.
+
+---
+
+## Adding or Extending Vendor Ingestion
+
+Vendor adapters belong in `src/alpha_lab/data_sources`.
+
+Rules:
+
+1. Do not call vendor APIs from factor workflows or experiment templates.
+2. Preserve raw vendor payloads under `data/raw/...` with deterministic files
+   and manifests.
+3. Convert vendor schemas into explicit internal tables before any research use.
+4. Make PIT assumptions explicit in code and docs.
+5. Missing optional vendor fields must degrade gracefully and be recorded in
+   manifests instead of being silently dropped.
+6. Add tests for normalization, missing-field handling, and bundle
+   compatibility with `ResearchBundle.validate()`.
+
+---
+
+## Adding Research Governance Modules
+
+For modules such as sample construction, validation, screening, and diagnostics:
+
+1. Prefer typed dataclass outputs over loose nested dicts.
+2. Keep schema columns explicit and stable.
+3. Add deterministic behavior for shuffled input ordering.
+4. Add at least:
+   - one happy-path test
+   - one malformed-input test
+   - one edge-case test tied to financial semantics (overlap, leakage, missingness, or tradability).
+5. Keep boundaries explicit:
+   - research diagnostics and governance in `src/alpha_lab`
+   - no broker/execution/live-trading logic.
+
+---
+
+## Evolving Handoff Schema
+
+`alpha_lab.handoff` is a versioned interface to external strict backtesters.
+
+When changing it:
+1. Update `HANDOFF_SCHEMA_VERSION` using semantic versioning rules in `docs/handoff_artifact.md`.
+2. Keep new fields backward-compatible unless a major bump is intentional.
+3. Add tests for determinism, validation failures, and manifest hash integrity.
+4. Update `docs/handoff_artifact.md` with new files/fields and compatibility notes.
+
+---
+
 ## Adding a New Portfolio Weight Method
 
 1. Open `src/alpha_lab/portfolio_research.py`.
@@ -86,6 +146,10 @@ If you add a new field:
    aggregate statistic to `WalkForwardAggregate`.
 4. Add tests for: field is `None` when the feature is not requested; field is
    a DataFrame with the expected columns when the feature is active.
+
+Current governance-oriented optional fields include:
+- `factor_report`
+- `sample_weights_df`
 
 ---
 

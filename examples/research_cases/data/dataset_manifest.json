@@ -1,0 +1,19 @@
+{
+  "dataset_name": "research_case_panel_v1",
+  "seed": 20260325,
+  "n_assets": 60,
+  "n_days": 520,
+  "start_date": "2023-01-02",
+  "end_date": "2024-12-27",
+  "files": [
+    "prices_case_panel.csv",
+    "asset_metadata_case_panel.csv",
+    "market_state_case_panel.csv",
+    "neutralization_exposures_case_panel.csv",
+    "candidate_signals_vqm_case_panel.csv"
+  ],
+  "notes": [
+    "Synthetic but finance-structured panel for deterministic workflow examples.",
+    "Contains value/quality/momentum latent structure plus tradability state flags."
+  ]
+}

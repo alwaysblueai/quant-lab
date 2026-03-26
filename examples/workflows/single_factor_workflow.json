@@ -1,0 +1,32 @@
+{
+  "data": {
+    "prices_path": "data/raw/prices.csv",
+    "asset_metadata_path": "data/raw/asset_metadata.csv",
+    "market_state_path": "data/raw/market_state.csv",
+    "neutralization_exposures_path": "data/raw/exposures.csv"
+  },
+  "factor": {
+    "name": "momentum",
+    "params": {
+      "window": 20
+    }
+  },
+  "spec": {
+    "experiment_name": "single_momentum_cli",
+    "horizon": 5,
+    "n_quantiles": 5,
+    "validation_mode": "purged_kfold",
+    "purged_n_splits": 5,
+    "label_method": "rankpct",
+    "dataset_id": "prices_snapshot_20260325",
+    "trial_id": "single-001",
+    "trial_count": 3,
+    "assumptions": [
+      "Close-to-close decision timestamp",
+      "No live execution simulation in this workflow"
+    ],
+    "append_trial_log": true,
+    "update_registry": false,
+    "export_handoff": true
+  }
+}

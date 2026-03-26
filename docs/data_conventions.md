@@ -9,6 +9,24 @@
 
 ## Canonical Table Formats
 
+### Research Bundle Components
+
+`alpha_lab.research_contracts.ResearchBundle` separates research inputs into:
+- `prices`
+- `factors`
+- `labels`
+- `universe`
+- `tradability`
+- `metadata`
+- optional `snapshot` descriptor (`dataset_id`, hash/version notes)
+
+Validation rules enforced by contract utilities:
+- required columns and dtypes
+- uniqueness of canonical keys
+- parseable timestamps
+- monotonic price history per asset (when required)
+- alignment of `(date, asset)` support between `universe` and `tradability`
+
 ### Factor Output
 
 Reusable factor outputs must be long-form with:
@@ -34,6 +52,22 @@ canonical long-form schema:
 This keeps merge and validation rules consistent while still preventing
 accidental leakage from mixing features and targets in the same reusable table.
 
+For event-style labels, the repository also supports a unified label schema:
+
+| date | asset | label_name | label_type | label_value | event_start | event_end | trigger | realized_horizon | confidence |
+|------|-------|------------|------------|-------------|-------------|-----------|---------|------------------|------------|
+
+Used by:
+- `regression_forward_label`
+- `rankpct_label`
+- `triple_barrier_labels`
+- `trend_scanning_labels`
+
+`label_value` semantics depend on `label_type`:
+- regression: continuous forward-return style target
+- ranking: percentile rank target
+- event_classification: discrete event class (e.g., -1/0/1)
+
 ## Time Alignment Rules
 
 - Factor values at time `t` may only use information available at or before `t`.
@@ -41,6 +75,49 @@ accidental leakage from mixing features and targets in the same reusable table.
 - Row-based lookbacks must be defined explicitly.
 - If a factor uses per-asset history, the implementation must operate on each asset's own ordered observations.
 - Never rely on union-calendar alignment unless the strategy explicitly requires it and the choice is documented.
+
+### Explicit Timing Metadata
+
+Every experiment should record a timing contract via `DelaySpec`:
+- `decision_timestamp`
+- `execution_delay_periods`
+- `return_horizon_periods`
+- `label_start_offset_periods`
+- `label_end_offset_periods`
+- optional `purge_periods` and `embargo_periods`
+
+This metadata is audit metadata, not an execution simulator.
+
+## Universe / Tradability / Exclusions
+
+Research-sample construction is explicit and PIT-safe:
+- `universe`: `[date, asset, in_universe]`
+- `tradability`: `[date, asset, is_tradable]`
+- `exclusion_reasons`: `[date, asset, reason, detail]`
+
+Typical exclusion reasons include:
+- listing age / missing listing date
+- ST filter
+- halted trading
+- limit-locked non-executable day
+- minimum ADV filter
+
+Universe and tradability must share the same `(date, asset)` support.
+
+## Sample Weights
+
+Sample weights are stored separately from factors/labels:
+
+| date | asset | sample_weight |
+|------|-------|---------------|
+
+Optional component columns may be tracked in analysis artifacts:
+- uniqueness weight
+- return-magnitude weight
+- time-decay weight
+- confidence weight
+
+Weights are non-negative and typically normalized.
 
 ## Missing Data
 

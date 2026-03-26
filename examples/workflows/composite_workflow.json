@@ -1,0 +1,43 @@
+{
+  "data": {
+    "prices_path": "data/raw/prices.csv",
+    "asset_metadata_path": "data/raw/asset_metadata.csv",
+    "market_state_path": "data/raw/market_state.csv",
+    "neutralization_exposures_path": "data/raw/exposures.csv",
+    "exposure_data_path": "data/raw/exposures.csv"
+  },
+  "factors": [
+    {
+      "name": "momentum",
+      "params": {
+        "window": 20
+      }
+    },
+    {
+      "name": "reversal",
+      "params": {
+        "window": 5
+      }
+    },
+    {
+      "name": "low_volatility",
+      "params": {
+        "window": 20
+      }
+    }
+  ],
+  "spec": {
+    "experiment_name": "composite_cli",
+    "horizon": 5,
+    "n_quantiles": 5,
+    "composite_method": "icir",
+    "portfolio_top_k": 20,
+    "portfolio_bottom_k": 20,
+    "dataset_id": "prices_snapshot_20260325",
+    "trial_id": "composite-001",
+    "trial_count": 8,
+    "append_trial_log": true,
+    "update_registry": true,
+    "export_handoff": true
+  }
+}

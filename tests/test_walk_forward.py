@@ -1146,3 +1146,53 @@ def test_pooled_portfolio_turnover_mean_nan_without_portfolio() -> None:
         step=10,
     )
     assert math.isnan(result.aggregate_summary.pooled_portfolio_turnover_mean)
+
+
+# ---------------------------------------------------------------------------
+# 13. Validation metadata scaffolding
+# ---------------------------------------------------------------------------
+
+
+def test_walk_forward_exposes_validation_spec() -> None:
+    result = run_walk_forward_experiment(
+        _PRICES,
+        _factor_fn,
+        train_size=30,
+        test_size=10,
+        step=10,
+        purge_periods=2,
+        embargo_periods=1,
+    )
+    assert result.validation_spec is not None
+    assert result.validation_spec.purge_periods == 2
+    assert result.validation_spec.embargo_periods == 1
+
+
+def test_walk_forward_fold_results_carry_fold_level_validation_metadata() -> None:
+    result = run_walk_forward_experiment(
+        _PRICES,
+        _factor_fn,
+        train_size=30,
+        test_size=10,
+        step=10,
+    )
+    assert len(result.per_fold_results) > 0
+    first = result.per_fold_results[0]
+    assert first.metadata is not None
+    assert first.metadata.validation is not None
+    assert first.metadata.validation.scheme == "walk_forward_fold"
+
+
+def test_walk_forward_fold_windows_include_validation_window_when_val_size_used() -> None:
+    result = run_walk_forward_experiment(
+        _PRICES,
+        _factor_fn,
+        train_size=30,
+        test_size=10,
+        step=10,
+        val_size=5,
+    )
+    assert result.fold_windows_df is not None
+    assert "val_start" in result.fold_windows_df.columns
+    assert "val_end" in result.fold_windows_df.columns
+    assert result.fold_windows_df["val_start"].notna().all()

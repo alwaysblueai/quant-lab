@@ -412,8 +412,15 @@ def _render_experiment_card(
         f"split: {split_desc}",
         f'git_commit: {prov.git_commit or "unknown"}',
         f"run_timestamp_utc: {prov.run_timestamp_utc}",
-        "---",
     ]
+    if result.metadata is not None:
+        if result.metadata.dataset_id is not None:
+            frontmatter_lines.append(f"dataset_id: {result.metadata.dataset_id}")
+        if result.metadata.dataset_hash is not None:
+            frontmatter_lines.append(f"dataset_hash: {result.metadata.dataset_hash}")
+        if result.metadata.trial_id is not None:
+            frontmatter_lines.append(f"trial_id: {result.metadata.trial_id}")
+    frontmatter_lines.append("---")
 
     s = result.summary
     metrics_rows = [
@@ -430,6 +437,41 @@ def _render_experiment_card(
             f"| Mean L/S Return (cost-adj, rate={cost_rate}) | {_fmt_float(adj)} |"
         )
 
+    setup_rows = [
+        f"| Factor | `{factor_name}` |",
+        f"| Horizon | {prov.horizon} bars |",
+        f"| N quantiles | {prov.n_quantiles} |",
+        f"| Split | {split_desc} |",
+        f"| Eval dates (finite IC) | {n_dates} |",
+        f"| Assets in eval period | {result.n_eval_assets} |",
+        f'| Git commit | `{prov.git_commit or "unknown"}` |',
+        (
+            f"| Python / pandas / numpy | `{prov.python_version}` / "
+            f"`{prov.pandas_version}` / `{prov.numpy_version}` |"
+        ),
+    ]
+    if result.delay_spec is not None:
+        setup_rows.extend(
+            [
+                f"| Decision timestamp | `{result.delay_spec.decision_timestamp}` |",
+                f"| Execution delay (periods) | {result.delay_spec.execution_delay_periods} |",
+                (
+                    f"| Label window offsets | "
+                    f"[{result.delay_spec.label_start_offset_periods}, "
+                    f"{result.delay_spec.label_end_offset_periods}) |"
+                ),
+                (
+                    f"| Purge / embargo (periods) | "
+                    f"{result.delay_spec.purge_periods} / "
+                    f"{result.delay_spec.embargo_periods} |"
+                ),
+            ]
+        )
+    if result.metadata is not None and result.metadata.validation is not None:
+        setup_rows.append(
+            f"| Validation scheme | `{result.metadata.validation.scheme}` |"
+        )
+
     lines = [
         *frontmatter_lines,
         "",
@@ -444,13 +486,7 @@ def _render_experiment_card(
         "",
         "| Field | Value |",
         "|---|---|",
-        f"| Factor | `{factor_name}` |",
-        f"| Horizon | {prov.horizon} bars |",
-        f"| N quantiles | {prov.n_quantiles} |",
-        f"| Split | {split_desc} |",
-        f"| Eval dates (finite IC) | {n_dates} |",
-        f"| Assets in eval period | {result.n_eval_assets} |",
-        f'| Git commit | `{prov.git_commit or "unknown"}` |',
+        *setup_rows,
         "",
         "## Results",
         "",
