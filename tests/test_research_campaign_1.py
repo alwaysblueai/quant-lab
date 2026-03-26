@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from alpha_lab.campaigns.research_campaign_1 import run_research_campaign_1
+import alpha_lab.campaigns.research_campaign_1 as research_campaign_1
 from tests.composite_case_helpers import write_demo_composite_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
 
@@ -26,7 +26,7 @@ def test_research_campaign_1_smoke_runs_and_writes_required_outputs(tmp_path: Pa
         comp_spec=comp_spec,
     )
 
-    result = run_research_campaign_1(campaign_path)
+    result = research_campaign_1.run_research_campaign_1(campaign_path)
 
     assert result.output_dir.exists()
     required = {
@@ -56,6 +56,75 @@ def test_research_campaign_1_smoke_runs_and_writes_required_outputs(tmp_path: Pa
 
         pointer_path = result.output_dir / case_name / "case_output_pointer.json"
         assert pointer_path.exists()
+
+
+def test_research_campaign_1_main_with_render_report_writes_campaign_report(
+    tmp_path: Path,
+) -> None:
+    bp_spec = write_demo_single_factor_case(tmp_path / "bp_case", factor_name="bp")
+    roe_spec = write_demo_single_factor_case(tmp_path / "roe_case", factor_name="roe_ttm")
+    comp_spec = write_demo_composite_case(tmp_path / "composite_case")
+
+    _rewrite_spec_name(bp_spec, "bp_single_factor_v1")
+    _rewrite_spec_name(roe_spec, "roe_ttm_single_factor_v1")
+    _rewrite_spec_name(comp_spec, "value_quality_lowvol_v1")
+
+    campaign_path = _write_campaign_manifest(
+        tmp_path,
+        bp_spec=bp_spec,
+        roe_spec=roe_spec,
+        comp_spec=comp_spec,
+    )
+
+    rc = research_campaign_1.main([str(campaign_path), "--render-report"])
+    assert rc == 0
+
+    campaign_out = tmp_path / "campaign_outputs"
+    report_path = campaign_out / "campaign_report.md"
+    assert report_path.exists()
+
+    results_payload = json.loads((campaign_out / "campaign_results.json").read_text(encoding="utf-8"))
+    assert results_payload["render_status"] == "success"
+    assert results_payload["rendered_report"] is True
+    assert results_payload["rendered_report_path"] == str(report_path.resolve())
+    assert results_payload["render_error"] is None
+
+
+def test_research_campaign_1_render_failure_is_warning_only(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    bp_spec = write_demo_single_factor_case(tmp_path / "bp_case", factor_name="bp")
+    roe_spec = write_demo_single_factor_case(tmp_path / "roe_case", factor_name="roe_ttm")
+    comp_spec = write_demo_composite_case(tmp_path / "composite_case")
+
+    _rewrite_spec_name(bp_spec, "bp_single_factor_v1")
+    _rewrite_spec_name(roe_spec, "roe_ttm_single_factor_v1")
+    _rewrite_spec_name(comp_spec, "value_quality_lowvol_v1")
+
+    campaign_path = _write_campaign_manifest(
+        tmp_path,
+        bp_spec=bp_spec,
+        roe_spec=roe_spec,
+        comp_spec=comp_spec,
+    )
+
+    def _raise_render(*args, **kwargs):
+        raise RuntimeError("campaign render failed intentionally")
+
+    monkeypatch.setattr(research_campaign_1, "write_campaign_report", _raise_render)
+
+    rc = research_campaign_1.main([str(campaign_path), "--render-report"])
+    assert rc == 0
+
+    campaign_out = tmp_path / "campaign_outputs"
+    assert not (campaign_out / "campaign_report.md").exists()
+
+    results_payload = json.loads((campaign_out / "campaign_results.json").read_text(encoding="utf-8"))
+    assert results_payload["render_status"] == "failed"
+    assert results_payload["rendered_report"] is False
+    assert results_payload["rendered_report_path"] is None
+    assert "campaign render failed intentionally" in str(results_payload["render_error"])
 
 
 def _rewrite_spec_name(spec_path: Path, case_name: str) -> None:

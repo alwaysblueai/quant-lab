@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import logging
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from alpha_lab.reporting.renderers import write_campaign_report
 from alpha_lab.real_cases.composite.pipeline import run_composite_case
 from alpha_lab.real_cases.single_factor.pipeline import run_single_factor_case
 
@@ -21,6 +23,7 @@ _REQUIRED_CASE_NAMES: tuple[str, str, str] = (
     "roe_ttm_single_factor_v1",
     "value_quality_lowvol_v1",
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -487,6 +490,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional vault export mode override passed to case runners.",
     )
+    parser.add_argument(
+        "--render-report",
+        action="store_true",
+        help="Render campaign_report.md after a successful campaign run.",
+    )
+    parser.add_argument(
+        "--render-overwrite",
+        action="store_true",
+        help="Overwrite existing campaign_report.md when rendering is enabled.",
+    )
     return parser
 
 
@@ -505,6 +518,16 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
 
+    render_meta = _render_campaign_report(
+        output_dir=result.output_dir,
+        enabled=bool(args.render_report),
+        overwrite=bool(args.render_overwrite),
+    )
+    _update_campaign_results(
+        result.artifact_paths["campaign_results"],
+        render_meta,
+    )
+
     success = sum(1 for row in result.case_results if row.status == "success")
     failed = sum(1 for row in result.case_results if row.status == "failed")
 
@@ -517,8 +540,62 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Results  : {result.artifact_paths['campaign_results']}")
     print(f"  Summary  : {result.artifact_paths['campaign_summary']}")
     print(f"  Index    : {result.artifact_paths['campaign_index']}")
+    print(f"  Report Render Status: {render_meta.get('render_status')}")
+    print(f"  Report Path         : {render_meta.get('rendered_report_path')}")
 
     return 0
+
+
+def _render_campaign_report(
+    *,
+    output_dir: Path,
+    enabled: bool,
+    overwrite: bool,
+) -> dict[str, object]:
+    if not enabled:
+        return {
+            "rendered_report": False,
+            "rendered_report_path": None,
+            "render_status": "skipped",
+            "render_error": None,
+        }
+
+    try:
+        report_path = write_campaign_report(output_dir, overwrite=overwrite)
+        return {
+            "rendered_report": True,
+            "rendered_report_path": str(report_path),
+            "render_status": "success",
+            "render_error": None,
+        }
+    except Exception as exc:
+        logger.warning(
+            "Campaign report rendering failed for %s: %s",
+            output_dir,
+            exc,
+        )
+        return {
+            "rendered_report": False,
+            "rendered_report_path": None,
+            "render_status": "failed",
+            "render_error": str(exc),
+        }
+
+
+def _update_campaign_results(
+    campaign_results_path: Path,
+    render_meta: dict[str, object],
+) -> None:
+    try:
+        payload = _load_json(campaign_results_path)
+        payload.update(render_meta)
+        _write_json(campaign_results_path, payload)
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist campaign render metadata into %s: %s",
+            campaign_results_path,
+            exc,
+        )
 
 
 def _run_case(

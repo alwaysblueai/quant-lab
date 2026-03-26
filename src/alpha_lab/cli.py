@@ -34,6 +34,8 @@ REQUIRED_PRICE_COLUMNS: frozenset[str] = frozenset({"date", "asset", "close"})
 SUPPORTED_FACTORS: frozenset[str] = frozenset(
     {"momentum", "reversal", "low_volatility"}
 )
+_UNIFIED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset({"real-case", "campaign"})
+_SUPPORTED_CAMPAIGNS: frozenset[str] = frozenset({"research_campaign_1"})
 
 
 def _build_factor_fn(
@@ -295,7 +297,7 @@ def _print_stdout_summary(
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> int:
+def _legacy_main(argv: list[str] | None = None) -> int:
     """Run a factor experiment from the command line.
 
     Parameters
@@ -418,6 +420,99 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Registry   : appended '{experiment_name}'")
 
     return 0
+
+
+def build_unified_parser() -> argparse.ArgumentParser:
+    """Return the unified top-level router parser."""
+    parser = argparse.ArgumentParser(
+        prog="alpha-lab",
+        description=(
+            "Unified routing CLI for real-case and campaign workflows. "
+            "This command forwards workflow arguments to existing runner CLIs."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    top = parser.add_subparsers(dest="top_command", required=True)
+
+    real_case = top.add_parser(
+        "real-case",
+        help="Run real-case workflows.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    real_case_kinds = real_case.add_subparsers(dest="real_case_kind", required=True)
+
+    single_factor = real_case_kinds.add_parser(
+        "single-factor",
+        help="Route to the single-factor real-case CLI.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    single_factor.add_argument("action", choices=["run"])
+    single_factor.add_argument("args", nargs=argparse.REMAINDER)
+
+    composite = real_case_kinds.add_parser(
+        "composite",
+        help="Route to the composite real-case CLI.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    composite.add_argument("action", choices=["run"])
+    composite.add_argument("args", nargs=argparse.REMAINDER)
+
+    campaign = top.add_parser(
+        "campaign",
+        help="Run campaign workflows.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    campaign_commands = campaign.add_subparsers(dest="campaign_action", required=True)
+    campaign_run = campaign_commands.add_parser(
+        "run",
+        help="Run one supported campaign workflow.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    campaign_run.add_argument("campaign_name", choices=sorted(_SUPPORTED_CAMPAIGNS))
+    campaign_run.add_argument("args", nargs=argparse.REMAINDER)
+
+    return parser
+
+
+def unified_main(argv: list[str] | None = None) -> int:
+    """Route unified CLI commands to existing module entrypoints."""
+    parser = build_unified_parser()
+    args = parser.parse_args(argv)
+
+    if args.top_command == "real-case":
+        forwarded = [args.action, *args.args]
+        if args.real_case_kind == "single-factor":
+            from alpha_lab.real_cases.single_factor.cli import main as single_factor_main
+
+            return single_factor_main(forwarded)
+
+        if args.real_case_kind == "composite":
+            from alpha_lab.real_cases.composite.cli import main as composite_main
+
+            return composite_main(forwarded)
+
+        parser.error(f"unsupported real-case workflow: {args.real_case_kind!r}")
+
+    if args.top_command == "campaign":
+        if args.campaign_name not in _SUPPORTED_CAMPAIGNS:
+            parser.error(
+                "unsupported campaign name "
+                f"{args.campaign_name!r}; supported: {sorted(_SUPPORTED_CAMPAIGNS)}"
+            )
+
+        from alpha_lab.campaigns.research_campaign_1 import main as research_campaign_1_main
+
+        return research_campaign_1_main(args.args)
+
+    parser.error(f"unsupported top-level command: {args.top_command!r}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entrypoint that preserves the legacy CLI and adds unified routing."""
+    resolved_argv = list(sys.argv[1:] if argv is None else argv)
+    if resolved_argv and resolved_argv[0] in _UNIFIED_TOP_LEVEL_COMMANDS:
+        return unified_main(resolved_argv)
+    return _legacy_main(resolved_argv)
 
 
 if __name__ == "__main__":
