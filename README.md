@@ -269,6 +269,27 @@ export_summary_csv(summary, "output/reports/momentum_5d.csv")
 md = to_obsidian_markdown(result, title="Momentum 5d — OOS", notes="Needs decay analysis.")
 ```
 
+Experiment card export to quant-knowledge:
+
+```python
+import os
+from alpha_lab.reporting import export_experiment_card
+
+# Option A: set environment variable once
+os.environ["OBSIDIAN_VAULT_PATH"] = "/path/to/quant-knowledge"
+path = export_experiment_card(result, name="momentum-5d-Ashare")
+
+# Option B: pass vault_path explicitly
+path = export_experiment_card(
+    result,
+    name="momentum-5d-Ashare",
+    vault_path="/path/to/quant-knowledge",
+)
+```
+
+If neither `vault_path` nor `OBSIDIAN_VAULT_PATH` is provided, export raises
+`ValueError`.
+
 ## Turnover and Cost Estimation
 
 `ExperimentResult` now includes portfolio turnover outputs computed alongside
