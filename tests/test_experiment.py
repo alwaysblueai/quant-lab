@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 
 from alpha_lab.experiment import ExperimentResult, ExperimentSummary, run_factor_experiment
+from alpha_lab.experiment_metadata import ExperimentMetadata
 from alpha_lab.factors.momentum import momentum
+from alpha_lab.timing import DelaySpec
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -497,3 +499,70 @@ def test_ic_ir_is_nan_when_ic_has_zero_variance():
     ic_vals = result.ic_df["ic"].dropna()
     if len(ic_vals) > 1 and float(ic_vals.std(ddof=1)) == 0.0:
         assert math.isnan(result.summary.ic_ir)
+
+
+# ---------------------------------------------------------------------------
+# 8. Timing / metadata / diagnostics contracts
+# ---------------------------------------------------------------------------
+
+
+def test_default_delay_spec_matches_horizon() -> None:
+    result = run_factor_experiment(_make_prices(), _momentum_fn, horizon=3)
+    assert result.delay_spec is not None
+    assert result.delay_spec.return_horizon_periods == 3
+    assert result.label_metadata is not None
+    assert result.label_metadata.horizon_periods == 3
+
+
+def test_custom_delay_spec_must_match_horizon() -> None:
+    with pytest.raises(ValueError, match="must match horizon"):
+        run_factor_experiment(
+            _make_prices(),
+            _momentum_fn,
+            horizon=5,
+            delay_spec=DelaySpec.for_horizon(3),
+        )
+
+
+def test_metadata_without_delay_is_completed_by_runner() -> None:
+    md = ExperimentMetadata(dataset_id="snapshot-1")
+    result = run_factor_experiment(_make_prices(), _momentum_fn, metadata=md, horizon=2)
+    assert result.metadata is not None
+    assert result.metadata.delay is not None
+    assert result.metadata.delay.return_horizon_periods == 2
+
+
+def test_generate_factor_report_attaches_report() -> None:
+    result = run_factor_experiment(
+        _make_prices(),
+        _momentum_fn,
+        horizon=5,
+        generate_factor_report=True,
+    )
+    assert result.factor_report is not None
+    assert result.factor_report.horizon == 5
+
+
+def test_sample_weights_are_propagated_when_provided() -> None:
+    prices = _make_prices(n_assets=4, n_days=20)
+    keys = prices[["date", "asset"]].drop_duplicates().copy()
+    keys["sample_weight"] = 1.0
+    result = run_factor_experiment(
+        prices,
+        _momentum_fn,
+        sample_weights=keys,
+    )
+    assert result.sample_weights_df is not None
+    assert {"date", "asset", "sample_weight"} == set(result.sample_weights_df.columns)
+    assert len(result.sample_weights_df) == len(
+        result.factor_df[["date", "asset"]].drop_duplicates()
+    )
+
+
+def test_sample_weights_duplicate_keys_raise() -> None:
+    prices = _make_prices(n_assets=4, n_days=20)
+    keys = prices[["date", "asset"]].drop_duplicates().iloc[:10].copy()
+    bad = pd.concat([keys, keys.iloc[[0]]], ignore_index=True)
+    bad["sample_weight"] = 1.0
+    with pytest.raises(ValueError, match="duplicate"):
+        run_factor_experiment(prices, _momentum_fn, sample_weights=bad)

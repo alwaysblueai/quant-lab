@@ -1,0 +1,69 @@
+{
+  "data": {
+    "prices_path": "../data/prices_case_panel.csv",
+    "asset_metadata_path": "../data/asset_metadata_case_panel.csv",
+    "market_state_path": "../data/market_state_case_panel.csv",
+    "neutralization_exposures_path": "../data/neutralization_exposures_case_panel.csv",
+    "exposure_data_path": "../data/neutralization_exposures_case_panel.csv",
+    "candidate_signals_path": "../data/candidate_signals_vqm_case_panel.csv"
+  },
+  "spec": {
+    "experiment_name": "case2_composite_value_quality_momentum",
+    "horizon": 5,
+    "n_quantiles": 5,
+    "label_method": "rankpct",
+    "universe_rules": {
+      "min_listing_age_days": 120,
+      "min_adv": 300000.0,
+      "adv_window": 20
+    },
+    "preprocess": {
+      "apply_winsorize": true,
+      "winsorize_lower": 0.01,
+      "winsorize_upper": 0.99,
+      "apply_zscore": true,
+      "apply_rank": false,
+      "min_group_size": 10,
+      "min_coverage": 0.7
+    },
+    "neutralization": {
+      "size_col": "size_exposure",
+      "industry_col": "industry",
+      "beta_col": "beta_exposure",
+      "min_obs": 20,
+      "ridge": 1e-08
+    },
+    "screening_min_coverage": 0.7,
+    "screening_min_abs_monotonicity": 0.05,
+    "screening_max_pairwise_corr": 0.9,
+    "screening_max_vif": 15.0,
+    "composite_method": "icir",
+    "composite_lookback": 63,
+    "composite_min_history": 20,
+    "composite_factor_name": "vqm_composite",
+    "portfolio_top_k": 15,
+    "portfolio_bottom_k": 15,
+    "portfolio_weighting_method": "rank",
+    "portfolio_value": 10000000.0,
+    "adv_window": 20,
+    "capacity_max_adv_participation": 0.05,
+    "capacity_concentration_weight_threshold": 0.08,
+    "cost_flat_fee_bps": 1.5,
+    "cost_spread_bps": 6.0,
+    "cost_impact_eta": 0.12,
+    "hypothesis": "A value+quality+momentum composite should improve breadth and robustness versus any single style sleeve.",
+    "research_question": "Can a neutralized VQM blend clear screening gates and remain executable enough for external strict backtest handoff?",
+    "factor_spec": "value_book_to_price_proxy + quality_profitability_proxy + momentum_63d (ICIR-weighted)",
+    "dataset_id": "research_case_panel_v1",
+    "trial_id": "case2-trial-001",
+    "trial_count": 3,
+    "assumptions": [
+      "Proxy value/quality factors are for workflow demonstration and diagnostics.",
+      "No internal strict execution simulator is used."
+    ],
+    "append_trial_log": true,
+    "update_registry": true,
+    "export_handoff": true,
+    "handoff_include_label_snapshot": true
+  }
+}

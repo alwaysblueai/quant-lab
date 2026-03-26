@@ -9,8 +9,14 @@ import pandas as pd
 
 from alpha_lab.costs import cost_adjusted_long_short
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
+from alpha_lab.experiment_metadata import ExperimentMetadata, ValidationMetadata
 from alpha_lab.splits import walk_forward_split
 from alpha_lab.strategy import StrategySpec
+from alpha_lab.timing import DelaySpec
+from alpha_lab.validation_scaffold import (
+    WalkForwardValidationSpec,
+    fold_windows_from_summary,
+)
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -249,6 +255,15 @@ class WalkForwardResult:
     :attr:`pooled_cost_adjusted_portfolio_return_df` for the turnover path.
     """
 
+    validation_spec: WalkForwardValidationSpec | None = None
+    """Validation metadata contract used to generate folds."""
+
+    fold_windows_df: pd.DataFrame | None = None
+    """Explicit per-fold window table.
+
+    Columns: ``[fold_id, train_start, train_end, val_start, val_end, test_start, test_end]``.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Runner
@@ -266,6 +281,8 @@ def run_walk_forward_experiment(
     n_quantiles: int = 5,
     cost_rate: float | None = None,
     val_size: int = 0,
+    purge_periods: int = 0,
+    embargo_periods: int = 0,
     holding_period: int | None = None,
     rebalance_frequency: int | None = None,
     weighting_method: str = "equal",
@@ -328,6 +345,12 @@ def run_walk_forward_experiment(
         produced for the validation window.  Set this to 0 (the default)
         unless you are using it to create a gap between training and test
         windows to avoid label overlap.
+    purge_periods:
+        Optional metadata-only purge span recorded in each fold's
+        :class:`~alpha_lab.timing.DelaySpec` and validation metadata.
+    embargo_periods:
+        Optional metadata-only embargo span recorded in each fold's
+        :class:`~alpha_lab.timing.DelaySpec` and validation metadata.
     holding_period:
         Optional number of rebalance periods to hold each portfolio position.
         Must be provided together with ``rebalance_frequency``.  When both are
@@ -372,6 +395,10 @@ def run_walk_forward_experiment(
         raise ValueError("train_size, test_size, and step must be positive integers")
     if cost_rate is not None and cost_rate < 0:
         raise ValueError("cost_rate must be >= 0")
+    if purge_periods < 0:
+        raise ValueError("purge_periods must be >= 0")
+    if embargo_periods < 0:
+        raise ValueError("embargo_periods must be >= 0")
     if strategy is not None:
         if holding_period is not None or rebalance_frequency is not None:
             warnings.warn(
@@ -421,9 +448,19 @@ def run_walk_forward_experiment(
             "Increase the dataset size or reduce train_size/test_size."
         )
 
+    validation_spec = WalkForwardValidationSpec(
+        train_size=train_size,
+        test_size=test_size,
+        step=step,
+        val_size=val_size,
+        purge_periods=purge_periods,
+        embargo_periods=embargo_periods,
+    )
+
     # --- Run per-fold experiments -------------------------------------------
     per_fold_results: list[ExperimentResult] = []
     fold_rows: list[dict[str, object]] = []
+    fold_window_rows: list[dict[str, object]] = []
     pooled_ic_parts: list[pd.DataFrame] = []
     pooled_port_ret_parts: list[pd.DataFrame] = []
     pooled_port_to_parts: list[pd.DataFrame] = []
@@ -440,6 +477,14 @@ def run_walk_forward_experiment(
         train_end_ts: pd.Timestamp = train_dates.iloc[-1]
         test_start_ts: pd.Timestamp = test_dates.iloc[0]
         test_end_ts: pd.Timestamp = test_dates.iloc[-1]
+        val_start_ts: pd.Timestamp | None = None
+        val_end_ts: pd.Timestamp | None = None
+        if "val" in masks:
+            val_mask: pd.Series = pd.Series(masks["val"])
+            val_dates = unique_dates[val_mask.to_numpy()]
+            if len(val_dates) > 0:
+                val_start_ts = val_dates.iloc[0]
+                val_end_ts = val_dates.iloc[-1]
 
         # Restrict prices to this fold's visible window (up to and including
         # test_end_ts) so that factor_fn cannot access future price data beyond
@@ -447,6 +492,26 @@ def run_walk_forward_experiment(
         fold_prices = prices[
             pd.to_datetime(prices["date"]) <= test_end_ts
         ].reset_index(drop=True)
+
+        delay_spec = DelaySpec.for_horizon(
+            horizon,
+            purge_periods=purge_periods,
+            embargo_periods=embargo_periods,
+        )
+        metadata = ExperimentMetadata(
+            trial_id=f"wf-{fold_id}",
+            trial_count=len(splits),
+            validation=ValidationMetadata(
+                scheme="walk_forward_fold",
+                train_end=train_end_ts,
+                test_start=test_start_ts,
+                val_start=val_start_ts,
+                purge_periods=purge_periods,
+                embargo_periods=embargo_periods,
+                notes=f"fold_id={fold_id}",
+            ),
+            delay=delay_spec,
+        )
 
         result = run_factor_experiment(
             fold_prices,
@@ -460,8 +525,22 @@ def run_walk_forward_experiment(
             weighting_method=weighting_method,
             portfolio_cost_rate=portfolio_cost_rate,
             strategy=strategy,
+            delay_spec=delay_spec,
+            metadata=metadata,
         )
         per_fold_results.append(result)
+
+        fold_window_rows.append(
+            {
+                "fold_id": fold_id,
+                "train_start": train_start_ts,
+                "train_end": train_end_ts,
+                "val_start": val_start_ts,
+                "val_end": val_end_ts,
+                "test_start": test_start_ts,
+                "test_end": test_end_ts,
+            }
+        )
 
         # Accumulate IC observations for the pooled OOS series.
         if not result.ic_df.empty:
@@ -554,6 +633,25 @@ def run_walk_forward_experiment(
         if pooled_port_to_parts
         else pd.DataFrame(columns=["fold_id", "date", "portfolio_turnover"])
     )
+    fold_windows_df = fold_windows_from_summary(fold_summary_df)
+    if fold_window_rows:
+        val_df = pd.DataFrame(fold_window_rows)[["fold_id", "val_start", "val_end"]]
+        fold_windows_df = fold_windows_df.drop(columns=["val_start", "val_end"]).merge(
+            val_df,
+            on="fold_id",
+            how="left",
+        )
+        fold_windows_df = fold_windows_df[
+            [
+                "fold_id",
+                "train_start",
+                "train_end",
+                "val_start",
+                "val_end",
+                "test_start",
+                "test_end",
+            ]
+        ]
     aggregate = _compute_aggregate(
         fold_summary_df,
         pooled_ic_df,
@@ -570,6 +668,8 @@ def run_walk_forward_experiment(
         pooled_portfolio_return_df=pooled_portfolio_return_df,
         pooled_cost_adjusted_portfolio_return_df=pooled_cost_adjusted_portfolio_return_df,
         pooled_portfolio_turnover_df=pooled_portfolio_turnover_df,
+        validation_spec=validation_spec,
+        fold_windows_df=fold_windows_df,
     )
 
 

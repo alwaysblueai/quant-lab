@@ -7,42 +7,69 @@ three layers with explicit contracts between them.  No layer models execution,
 order routing, position accounting, or broker integration.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Factor Research Layer                                           │
-│   alpha_lab.factors.*     factor computation (e.g. momentum)   │
-│   alpha_lab.labels        forward-return label generation       │
-│   alpha_lab.evaluation    IC / Rank-IC computation             │
-│   alpha_lab.quantile      quantile bucket returns, long-short   │
-│   alpha_lab.turnover      quantile / long-short turnover        │
-│   alpha_lab.preprocess    winsorize, z-score                   │
-├─────────────────────────────────────────────────────────────────┤
-│ Strategy Construction Intent Layer                              │
-│   alpha_lab.strategy.StrategySpec   portfolio construction spec │
-│                                     (explicit boundary object)  │
-├─────────────────────────────────────────────────────────────────┤
-│ Portfolio Research Layer                                        │
-│   alpha_lab.portfolio_research      portfolio_weights,          │
-│                                     simulate_portfolio_returns, │
-│                                     portfolio_turnover,         │
-│                                     portfolio_cost_adjusted_    │
-│                                     returns                     │
-├─────────────────────────────────────────────────────────────────┤
-│ Orchestration                                                   │
-│   alpha_lab.experiment      run_factor_experiment (one split)  │
-│   alpha_lab.walk_forward    run_walk_forward_experiment (OOS)  │
-├─────────────────────────────────────────────────────────────────┤
-│ Support                                                         │
-│   alpha_lab.splits       time_split, walk_forward_split        │
-│   alpha_lab.reporting    summarise, export CSV, Obsidian note  │
-│   alpha_lab.registry     append-only CSV experiment log        │
-│   alpha_lab.comparison   compare_experiments, rank_experiments │
-│   alpha_lab.costs        cost_adjusted_long_short              │
-│   alpha_lab.config       project-root-relative path constants  │
-│   alpha_lab.interfaces   validate_factor_output schema guard   │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│ Research Contract Layer                                            │
+│   alpha_lab.data_validation      raw price-panel guards            │
+│   alpha_lab.interfaces           canonical factor-output guards     │
+│   alpha_lab.research_contracts   typed research bundle contracts    │
+│   alpha_lab.research_universe    PIT universe/tradability builder   │
+│   alpha_lab.timing               DelaySpec / LabelMetadata          │
+│   alpha_lab.experiment_metadata  governance metadata schema         │
+│   alpha_lab.validation_scaffold  walk-forward validation metadata   │
+│   alpha_lab.purged_validation    purged/embargo split logic         │
+│   alpha_lab.sample_weights       concurrency/uniqueness/decay       │
+├────────────────────────────────────────────────────────────────────┤
+│ Factor Research Layer                                               │
+│   alpha_lab.factors.*          factor computation                  │
+│   alpha_lab.signal_transforms  winsorize/zscore/rank/neutralize    │
+│   alpha_lab.labels             forward/rankpct/event labels         │
+│   alpha_lab.neutralization     residual neutralization              │
+│   alpha_lab.evaluation         IC / Rank-IC                        │
+│   alpha_lab.quantile           quantile returns / long-short        │
+│   alpha_lab.turnover           quantile / long-short turnover       │
+│   alpha_lab.factor_report      rich diagnostics bundle              │
+│   alpha_lab.factor_selection   screening / redundancy gates         │
+│   alpha_lab.multiple_testing   significance inflation controls       │
+│   alpha_lab.feature_importance MDI/MDA/SFI scaffolds               │
+├────────────────────────────────────────────────────────────────────┤
+│ Strategy + Portfolio Research Layer                                 │
+│   alpha_lab.strategy             StrategySpec boundary object       │
+│   alpha_lab.portfolio_research   research-level weight/return path  │
+├────────────────────────────────────────────────────────────────────┤
+│ Orchestration and Governance                                        │
+│   alpha_lab.experiment           run_factor_experiment              │
+│   alpha_lab.walk_forward         run_walk_forward_experiment        │
+│   alpha_lab.research_templates   end-to-end research workflows      │
+│   alpha_lab.reporting            summaries + card export            │
+│   alpha_lab.data_sources         vendor ingestion + standardization │
+│   alpha_lab.handoff              external backtest handoff export   │
+│   alpha_lab.backtest_adapter     external replay adapter layer       │
+│   alpha_lab.research_package     case-level archival package layer   │
+│   alpha_lab.trial_log            append-only trial accounting       │
+│   alpha_lab.registry             summary registry                   │
+│   alpha_lab.alpha_registry       alpha lifecycle registry           │
+│   alpha_lab.composite_signals    IC/ICIR/equal blend layer          │
+│   alpha_lab.alpha_pool_diagnostics breadth/diversification checks   │
+│   alpha_lab.rebalance_recommendation decay-aware cadence helper     │
+│   alpha_lab.capacity_diagnostics  ADV/capacity warning layer        │
+│   alpha_lab.exposure_audit        industry/style exposure audit      │
+│   alpha_lab.research_costs        layered friction proxies           │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Layer Contracts
+
+### Vendor Data Layer → Research Contract Layer
+
+`alpha_lab.data_sources` is the only vendor-facing boundary in the repository.
+It isolates Tushare extraction from research workflows:
+
+- raw snapshots preserve vendor schemas and extraction params
+- standardization converts Tushare fields into canonical internal tables
+- bundle building emits workflow-compatible `prices`, `asset_metadata`,
+  `market_state`, `neutralization_exposures`, and candidate signal tables
+
+The core workflow architecture does not call Tushare APIs directly.
 
 ### Factor Research Layer → Strategy Layer
 
@@ -84,28 +111,40 @@ attaches these to `ExperimentResult` optional fields.
 ```
 prices (long-form)
     │
-    ▼
-factor_fn(prices)  →  factor_df  [date, asset, factor, value]
+    ├── validate_price_panel
     │
-    ├──► forward_return(prices, horizon)  →  label_df
+    ├── optional research sample construction
+    │   └── universe / tradability / exclusion reasons
     │
-    ├──► eval period mask (time_split or full sample)
+    ├── factor_fn(prices) -> factor_df
+    │   └── validate_factor_output
     │
-    ├──── Factor Eval Path ─────────────────────────────────────────
-    │     compute_ic, compute_rank_ic, quantile_returns,
-    │     long_short_return, quantile_assignments,
-    │     quantile_turnover, long_short_turnover
-    │     → ic_df, rank_ic_df, quantile_returns_df, long_short_df, …
+    ├── label generation -> label_df
+    │   ├── forward_return / rankpct / event labels
+    │   └── LabelMetadata + DelaySpec
     │
-    └──── Portfolio Path (optional, requires holding_period) ───────
-          portfolio_weights / portfolio_weights_from_strategy
-              → weights_df  [date, asset, weight]
-          simulate_portfolio_returns (1-period step returns)
-              → return_df   [date, portfolio_return]
-          portfolio_turnover (active rebalance dates only)
-              → turnover_df [date, portfolio_turnover]
-          portfolio_cost_adjusted_returns (if cost_rate supplied)
-              → cost_adj_df [date, portfolio_return, adjusted_return]
+    ├── optional sample weights
+    │   └── uniqueness / return magnitude / decay / confidence
+    │
+    ├── evaluation split mask (time_split or full sample)
+    │
+    ├── factor diagnostics path
+    │   ├── IC / Rank-IC / quantile / long-short / turnover
+    │   └── optional FactorReport (rolling IC, coverage, monotonicity, decay)
+    │
+    ├── optional governance diagnostics
+    │   ├── neutralization / screening / multiple-testing
+    │   ├── feature importance / alpha-pool breadth
+    │   └── capacity / exposure / friction diagnostics
+    │
+    ├── optional portfolio research path
+    │   └── weights / returns / turnover / cost-adjusted returns
+    │
+    └── ExperimentResult
+        ├── provenance
+        ├── ExperimentMetadata
+        ├── DelaySpec + LabelMetadata
+        └── optional FactorReport
 ```
 
 ## Walk-Forward Evaluation
@@ -130,6 +169,10 @@ produced by `walk_forward_split`.  Each fold:
 
 Pooled series are statistically sounder than mean-of-fold-means when fold
 sizes differ.
+
+Walk-forward also surfaces explicit validation scaffolding:
+- `validation_spec`: global walk-forward split assumptions
+- `fold_windows_df`: fold-level train/val/test timestamp windows
 
 ## Path / Config
 
@@ -183,3 +226,38 @@ output contract after every `factor_fn` call:
 The CLI entry point is `scripts/run_experiment.py`, which delegates to
 `alpha_lab.cli`.  There is no `main.py`.  Notebook and script workflows import
 from `alpha_lab` directly.
+
+## External Replay Boundary
+
+`alpha_lab.backtest_adapter` consumes handoff bundles and translates them into
+engine inputs (vectorbt + backtrader in v1).  This remains adapter-only functionality:
+
+- no internal strict execution simulator
+- no broker/OMS/EMS/live trading stack
+- unsupported engine semantics are surfaced as explicit warnings in
+  `BacktestResult`
+
+`alpha_lab.research_package` is a post-run archival layer.  It reads existing
+workflow/replay/execution outputs and emits deterministic package artifacts
+(`research_package.json`, `research_package.md`, optional `artifact_index.json`)
+without rerunning research or replay logic.
+
+## Tushare Data Boundary
+
+The disciplined Tushare path is:
+
+```text
+Tushare Pro API
+  -> raw snapshots
+  -> standardized internal research tables
+  -> workflow-compatible research inputs
+  -> existing workflows / handoff / replay / research package
+```
+
+This keeps three concerns separate:
+
+- vendor provenance and refresh timing
+- internal canonical schemas
+- research execution and evaluation
+
+For details see [tushare_integration.md](tushare_integration.md).
