@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +32,20 @@ def build_parser() -> argparse.ArgumentParser:
             "<output-root-dir>/<case_name>."
         ),
     )
+    run_parser.add_argument(
+        "--vault-root",
+        default=None,
+        help=(
+            "Optional quant-knowledge vault root path. Resolution priority: "
+            "CLI flag -> OBSIDIAN_VAULT_PATH env -> disabled."
+        ),
+    )
+    run_parser.add_argument(
+        "--vault-export-mode",
+        default="versioned",
+        choices=["skip", "overwrite", "versioned"],
+        help="Vault export behavior when a vault root is available.",
+    )
     return parser
 
 
@@ -46,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         result = run_composite_case(
             spec_path,
             output_root_dir=args.output_root_dir,
+            vault_root=args.vault_root,
+            vault_export_mode=args.vault_export_mode,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
@@ -59,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Metrics  : {result.artifact_paths['metrics']}")
     print(f"  Summary  : {result.artifact_paths['summary']}")
     print(f"  Card     : {result.artifact_paths['experiment_card']}")
+    manifest_payload = json.loads(result.artifact_paths["run_manifest"].read_text(encoding="utf-8"))
+    vault_meta = manifest_payload.get("vault_export", {})
+    print(f"  Vault Export Status : {vault_meta.get('status')}")
+    print(f"  Vault Export Mode   : {vault_meta.get('mode')}")
     return 0
 
 

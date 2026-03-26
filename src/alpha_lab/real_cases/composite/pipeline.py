@@ -31,6 +31,8 @@ def run_composite_case(
     *,
     output_root_dir: str | Path | None = None,
     component_loader: ComponentLoader | None = None,
+    vault_root: str | Path | None = None,
+    vault_export_mode: str = "versioned",
 ) -> CompositeCaseRunResult:
     """Run one real-case composite study end-to-end and export artifacts."""
 
@@ -81,6 +83,8 @@ def run_composite_case(
         evaluation_result=evaluation_result,
         output_dir=output_dir,
         spec_path=spec_path,
+        vault_root=vault_root,
+        vault_export_mode=vault_export_mode,
     )
 
     return CompositeCaseRunResult(

@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import math
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
 import pandas as pd
 
+from alpha_lab.vault_export import export_to_vault, resolve_vault_root
+
 from .combine import CombineResult
 from .evaluate import CompositeEvaluationResult
 from .spec import CompositeCaseSpec, dump_spec_yaml, spec_to_dict
 from .templates import render_experiment_card_markdown, render_summary_markdown
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "run_manifest.json",
@@ -33,6 +39,8 @@ def export_artifact_bundle(
     evaluation_result: CompositeEvaluationResult,
     output_dir: str | Path,
     spec_path: str | Path | None = None,
+    vault_root: str | Path | None = None,
+    vault_export_mode: str = "versioned",
 ) -> dict[str, Path]:
     """Write standardized artifact bundle for one composite case run."""
 
@@ -111,8 +119,41 @@ def export_artifact_bundle(
         "spec": _to_jsonable(spec_to_dict(spec)),
         "outputs": {name: str(path) for name, path in paths.items()},
         "required_bundle_files": list(REQUIRED_BUNDLE_FILES),
+        "vault_export": {
+            "enabled": False,
+            "mode": "skip",
+            "target_paths": [],
+            "status": "skipped",
+            "error": None,
+        },
     }
+
+    # Write once so manifest_path exists for optional vault sync.
     _write_json(paths["run_manifest"], manifest)
+
+    resolved_vault = resolve_vault_root(vault_root)
+    enabled = resolved_vault is not None and vault_export_mode.strip().lower() != "skip"
+    vault_result = export_to_vault(
+        {
+            "experiment_card_path": paths["experiment_card"],
+            "summary_path": paths["summary"],
+            "manifest_path": paths["run_manifest"],
+        },
+        case_name=spec.name,
+        vault_root=vault_root,
+        mode=vault_export_mode,
+    )
+    manifest["vault_export"] = vault_result.to_manifest_dict(enabled=enabled)
+    _write_json(paths["run_manifest"], manifest)
+
+    if vault_result.status == "failed":
+        logger.warning(
+            "Vault export failed for case %s: %s",
+            spec.name,
+            vault_result.error,
+        )
+    if vault_result.success and vault_result.target_paths:
+        _sync_exported_manifest_copies(paths["run_manifest"], vault_result.target_paths)
 
     return paths
 
@@ -142,3 +183,23 @@ def _to_jsonable(value: object) -> object:
 
 def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
+
+
+def _sync_exported_manifest_copies(
+    local_manifest_path: Path,
+    target_paths: tuple[str, ...],
+) -> None:
+    """Ensure vault-side manifest copies contain final vault_export payload."""
+
+    for raw in target_paths:
+        target = Path(raw)
+        if not target.name.endswith("run_manifest.json"):
+            continue
+        try:
+            shutil.copy2(local_manifest_path, target)
+        except OSError as exc:
+            logger.warning(
+                "Failed to sync vault manifest copy %s: %s",
+                target,
+                exc,
+            )
