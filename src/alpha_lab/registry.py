@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.reporting import SUMMARY_COLUMNS
 
@@ -67,23 +68,23 @@ def register_experiment(
         If the existing registry file has an incompatible schema.
     """
     if not isinstance(summary, pd.DataFrame):
-        raise TypeError(
+        raise AlphaLabDataError(
             f"summary must be a pandas DataFrame, got {type(summary).__name__}"
         )
     if summary.empty:
-        raise ValueError("summary DataFrame is empty")
+        raise AlphaLabDataError("summary DataFrame is empty")
     if len(summary) != 1:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"summary must contain exactly one row, got {len(summary)}"
         )
     missing = set(SUMMARY_COLUMNS) - set(summary.columns)
     if missing:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"summary is missing required columns: {sorted(missing)}"
         )
     extra = set(summary.columns) - set(SUMMARY_COLUMNS)
     if extra:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"summary contains unexpected columns: {sorted(extra)}"
         )
 
@@ -153,16 +154,16 @@ def append_to_registry(
         If ``row`` is not a :class:`pandas.DataFrame`.
     """
     if not isinstance(row, pd.DataFrame):
-        raise TypeError(f"row must be a pandas DataFrame, got {type(row).__name__}")
+        raise AlphaLabDataError(f"row must be a pandas DataFrame, got {type(row).__name__}")
 
     missing = set(REGISTRY_COLUMNS) - set(row.columns)
     if missing:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"row is missing required registry columns: {sorted(missing)}"
         )
     extra = set(row.columns) - set(REGISTRY_COLUMNS)
     if extra:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"row contains unexpected columns: {sorted(extra)}"
         )
 
@@ -212,7 +213,7 @@ def _check_exact_schema(
             parts.append(f"unexpected: {sorted(extra)}")
         if wrong_order:
             parts.append(f"wrong order: got {col_list}, expected {expected}")
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Registry file {path} has an incompatible schema "
             f"({'; '.join(parts)}).  Refusing to proceed to avoid schema drift."
         )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
 _COST_ADJUSTED_COLUMNS: tuple[str, ...] = (
     "date",
     "factor",
@@ -60,9 +62,9 @@ def apply_linear_cost(
         If ``returns`` and ``turnover`` do not share the same index.
     """
     if cost_rate < 0:
-        raise ValueError(f"cost_rate must be >= 0, got {cost_rate}")
+        raise AlphaLabConfigError(f"cost_rate must be >= 0, got {cost_rate}")
     if not returns.index.equals(turnover.index):
-        raise ValueError(
+        raise AlphaLabDataError(
             "returns and turnover must share the same index; "
             f"got lengths {len(returns)} and {len(turnover)} with non-matching indices"
         )
@@ -112,7 +114,7 @@ def cost_adjusted_long_short(
         If ``cost_rate < 0``.
     """
     if cost_rate < 0:
-        raise ValueError(f"cost_rate must be >= 0, got {cost_rate}")
+        raise AlphaLabConfigError(f"cost_rate must be >= 0, got {cost_rate}")
 
     if long_short_df.empty or long_short_turnover_df.empty:
         return pd.DataFrame(columns=list(_COST_ADJUSTED_COLUMNS))

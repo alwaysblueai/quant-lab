@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_lab.data_validation import validate_price_panel
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.interfaces import validate_factor_output
 
 
@@ -22,4 +23,4 @@ def validate_canonical_signal_table(
     try:
         validate_factor_output(signal_df)
     except ValueError as exc:
-        raise ValueError(f"{table_name} violates canonical signal contract: {exc}") from exc
+        raise AlphaLabDataError(f"{table_name} violates canonical signal contract: {exc}") from exc

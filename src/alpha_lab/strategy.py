@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError
+
 _VALID_WEIGHT_METHODS: frozenset[str] = frozenset({"equal", "rank", "score"})
 
 
@@ -65,24 +67,24 @@ class StrategySpec:
 
     def __post_init__(self) -> None:
         if self.long_top_k is not None and self.long_top_k <= 0:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"long_top_k must be a positive integer, got {self.long_top_k}"
             )
         if self.short_bottom_k is not None and self.short_bottom_k <= 0:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"short_bottom_k must be a positive integer, got {self.short_bottom_k}"
             )
         if self.weighting_method not in _VALID_WEIGHT_METHODS:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"weighting_method must be one of {sorted(_VALID_WEIGHT_METHODS)}, "
                 f"got {self.weighting_method!r}"
             )
         if self.holding_period < 1:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"holding_period must be >= 1, got {self.holding_period}"
             )
         if self.rebalance_frequency < 1:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"rebalance_frequency must be >= 1, got {self.rebalance_frequency}"
             )
 

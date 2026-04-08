@@ -4,6 +4,8 @@ import math
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabDataError
+
 _QUANTILE_TURNOVER_COLUMNS: tuple[str, ...] = ("date", "factor", "quantile", "turnover")
 _LONG_SHORT_TURNOVER_COLUMNS: tuple[str, ...] = ("date", "factor", "long_short_turnover")
 
@@ -59,7 +61,7 @@ def quantile_turnover(assignments: pd.DataFrame) -> pd.DataFrame:
 
     dupes = assignments.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise ValueError(
+        raise AlphaLabDataError(
             "assignments contains duplicate (date, asset) rows; "
             "each asset must appear at most once per date"
         )
@@ -131,7 +133,7 @@ def long_short_turnover(quantile_turnover_df: pd.DataFrame) -> pd.DataFrame:
 
     missing = set(_QUANTILE_TURNOVER_COLUMNS) - set(quantile_turnover_df.columns)
     if missing:
-        raise ValueError(f"Missing columns in quantile_turnover_df: {missing}")
+        raise AlphaLabDataError(f"Missing columns in quantile_turnover_df: {missing}")
 
     def _ls_turn(group: pd.DataFrame) -> float:
         q_min = int(group["quantile"].min())
@@ -162,13 +164,13 @@ def _check_assignment_columns(df: pd.DataFrame) -> None:
     required = {"date", "asset", "factor", "quantile"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"assignments is missing required columns: {missing}")
+        raise AlphaLabDataError(f"assignments is missing required columns: {missing}")
 
 
 def _single_name(series: pd.Series, table_name: str) -> str:  # type: ignore[type-arg]
     names = pd.unique(series)
     if len(names) != 1:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"{table_name} must contain exactly one factor name, got {names!r}"
         )
     return str(names[0])

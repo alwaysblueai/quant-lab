@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
 
 def time_split(
     dates: pd.Series | np.ndarray,
@@ -45,12 +47,12 @@ def time_split(
     # loses the .to_numpy() method in pandas 2.x.
     dates_ts = pd.to_datetime(dates)
     if pd.isna(dates_ts).any():
-        raise ValueError("dates contains NaT values; all dates must be valid timestamps")
+        raise AlphaLabDataError("dates contains NaT values; all dates must be valid timestamps")
     train_end_ts = pd.Timestamp(train_end)
     test_start_ts = pd.Timestamp(test_start)
 
     if train_end_ts >= test_start_ts:
-        raise ValueError(
+        raise AlphaLabConfigError(
             f"train_end ({train_end_ts.date()}) must be strictly before "
             f"test_start ({test_start_ts.date()})"
         )
@@ -61,12 +63,12 @@ def time_split(
     if val_start is not None:
         val_start_ts = pd.Timestamp(val_start)
         if val_start_ts <= train_end_ts:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"val_start ({val_start_ts.date()}) must be strictly after "
                 f"train_end ({train_end_ts.date()})"
             )
         if val_start_ts > test_start_ts:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 f"val_start ({val_start_ts.date()}) must be at or before "
                 f"test_start ({test_start_ts.date()})"
             )
@@ -116,26 +118,26 @@ def walk_forward_split(
         generated.
     """
     if train_size <= 0 or test_size <= 0 or step <= 0:
-        raise ValueError("train_size, test_size, and step must be positive integers")
+        raise AlphaLabConfigError("train_size, test_size, and step must be positive integers")
     if val_size < 0:
-        raise ValueError("val_size must be non-negative")
+        raise AlphaLabConfigError("val_size must be non-negative")
     if val_size >= train_size:
-        raise ValueError("val_size must be less than train_size")
+        raise AlphaLabConfigError("val_size must be less than train_size")
 
     dates_arr = np.asarray(pd.to_datetime(np.asarray(dates)))
     n = len(dates_arr)
 
     if pd.isnull(dates_arr).any():
-        raise ValueError("dates contains NaT values; all dates must be valid timestamps")
+        raise AlphaLabDataError("dates contains NaT values; all dates must be valid timestamps")
 
     if n > 1 and not np.all(dates_arr[:-1] <= dates_arr[1:]):
-        raise ValueError("dates must be sorted in chronological order")
+        raise AlphaLabDataError("dates must be sorted in chronological order")
 
     # Repeated dates indicate panel data (many assets per date).  Row-based
     # slicing would split a shared timestamp across folds, creating leakage.
     # Pass unique dates instead: e.g. df["date"].drop_duplicates().sort_values()
     if len(dates_arr) != len(np.unique(dates_arr)):
-        raise ValueError(
+        raise AlphaLabDataError(
             "dates contains repeated values. walk_forward_split() operates on "
             "unique dates. For panel data pass the unique sorted date axis: "
             "e.g. df['date'].drop_duplicates().sort_values().reset_index(drop=True)"

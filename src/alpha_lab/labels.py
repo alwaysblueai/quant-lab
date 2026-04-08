@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 
 _REQUIRED_COLS = {"date", "asset", "close"}
@@ -38,20 +39,20 @@ def forward_return(df: pd.DataFrame, *, horizon: int = 1) -> pd.DataFrame:
 
     missing = _REQUIRED_COLS - set(df.columns)
     if missing:
-        raise KeyError(f"Input DataFrame is missing required columns: {missing}")
+        raise AlphaLabDataError(f"Input DataFrame is missing required columns: {missing}")
 
     if horizon <= 0:
-        raise ValueError("'horizon' must be a positive integer")
+        raise AlphaLabConfigError("'horizon' must be a positive integer")
 
     if df["date"].isna().any():
-        raise ValueError("Input 'date' column contains NaN/NaT values.")
+        raise AlphaLabDataError("Input 'date' column contains NaN/NaT values.")
 
     if df["asset"].isna().any():
-        raise ValueError("Input 'asset' column contains NaN values.")
+        raise AlphaLabDataError("Input 'asset' column contains NaN values.")
 
     dupes = df.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise ValueError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
+        raise AlphaLabDataError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
 
     df_copy = df.copy()
     df_copy["date"] = pd.to_datetime(df_copy["date"])
