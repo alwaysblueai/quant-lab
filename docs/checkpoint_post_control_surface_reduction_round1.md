@@ -1,17 +1,20 @@
 # Checkpoint: post-control-surface-reduction-round1
 
-**Date:** 2026-04-07
+**Date:** 2026-04-08
 
 ## Summary
 
 Round 1 of the alpha-lab control-surface reduction plan is complete and verified. The
 round removed duplicated resolution paths (vault path, PIT gate), converted silent
 failure modes into explicit errors, enforced write boundaries in code rather than only
-in documentation, consolidated documentation authority to single-source files, and
-demoted the experimental handoff surface off the default import path. No architectural
-redesign was performed; all changes targeted enforcement of intent that was already
-present in the system's design. 17 tests pass. 1 pre-existing test failure is unchanged
-and was not introduced by this round.
+in documentation, consolidated documentation authority to single-source files, demoted
+the experimental handoff surface off the default import path, migrated utility-layer
+exception raises to the AlphaLabError hierarchy, and wired research integrity checks
+(PIT, leakage, rolling stability) into experiment.py and walk_forward.py. No
+architectural redesign was performed; all changes targeted enforcement of intent that
+was already present in the system's design. New test files cover the research_integrity
+package and experiment/walk-forward integrity integration. 1 pre-existing test failure
+is unchanged and was not introduced by this round.
 
 ## Reference
 

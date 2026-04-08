@@ -51,7 +51,6 @@ enforcement. Round 1 enforced what was already intended.
 | Item | Files affected | Change |
 |---|---|---|
 | Missing vault path | `vault_export.py`, `test_vault_export.py` | Unset `OBSIDIAN_VAULT_PATH` with non-skip mode now returns `success=False, status="failed"`; previously returned silent `success=True, status="skipped"` |
-| Suppressed L2 validation | `reporting/level2_portfolio_validation.py` | `run_for_non_promoted_cases=False` now emits `warnings.warn()` instead of silently skipping |
 
 ### Documentation authority consolidation
 
@@ -67,16 +66,30 @@ enforcement. Round 1 enforced what was already intended.
 | Item | Files affected | Change |
 |---|---|---|
 | `handoff.py` demotion | `handoff.py`, `experimental_level3/handoff.py`, `experimental_level3/__init__.py` | Canonical location moved to `experimental_level3/handoff.py`; old path replaced with `__getattr__`-based lazy shim that emits `DeprecationWarning` on attribute access |
+| `semantic_consistency.py` | `research_integrity/semantic_consistency.py` | New module added to the research_integrity package; provides semantic consistency checks for mid-frequency and experimental workflows |
 
-### PIT consistency improvements
+
+### Exception hierarchy alignment
+
+| Item | Files affected | Change |
+|---|---|---|
+| `ValueError` → `AlphaLabError` family | `comparison.py`, `costs.py`, `data_validation.py`, `interfaces.py`, `labels.py`, `registry.py`, `research_contracts.py`, `splits.py`, `strategy.py`, `turnover.py` | All utility-layer `ValueError` and `TypeError` raises converted to `AlphaLabConfigError`, `AlphaLabDataError`, or `AlphaLabValidationError`; callers can now catch the typed hierarchy instead of bare built-ins |
+
+### Experiment and walk-forward integrity wiring
 
 | Item | Files affected | Change |
 |---|---|---|
 | `pit_check()` extraction | `research_integrity/asof.py` | Shared function wraps `check_no_future_dates_in_input` + immediate `raise_on_hard_failures`; single-point hard-abort semantics |
-| `experiment.py` PIT callers | `experiment.py` | 6 calls to `check_no_future_dates_in_input` replaced with `pit_check()` |
-| `walk_forward.py` PIT callers | `walk_forward.py` | 2 calls replaced with `pit_check()`; now-redundant `raise_on_hard_failures` call and its import removed |
-| Novelty sidecar freshness | `generate_inbox_novelty_sidecar.py` | Sidecar hook now calls `_rebuild_card_index()` before reading CARD-INDEX.tsv; self-contained regardless of hook ordering |
+| `experiment.py` PIT callsites | `experiment.py` | 6 `pit_check()` calls added: prices, factor_df, label_df, and the three portfolio weight/return/turnover DataFrames; no `check_no_future_dates_in_input` calls remain |
+| `walk_forward.py` PIT callsites | `walk_forward.py` | 2 `pit_check()` calls added inside `_execute_single_fold`: fold-scoped prices and fold factor output; `raise_on_hard_failures` not imported at walk-forward level |
+| `experiment.py` leakage checks | `experiment.py` | `check_factor_label_temporal_order` and `check_cross_section_transform_scope` from `research_integrity/leakage_checks.py` wired into `run_factor_experiment` |
+| `ExperimentSummary` diagnostic extension | `experiment.py` | Added ~20 new scalar fields: `ic_positive_rate`, `rank_ic_positive_rate`, `ic_valid_ratio`, `rank_ic_valid_ratio`, `long_short_ir`, `long_short_return_per_turnover`; four subperiod robustness fields; six rolling-window stability fields; `eval_coverage_ratio_mean/min`; `instability_flags`; `rolling_instability_flags` |
+| `ExperimentResult` integrity fields | `experiment.py` | `rolling_stability_df` (per-date rolling stability frame), `integrity_checks`, and `integrity_report` added to `ExperimentResult` |
+| `WalkForwardResult` integrity fields | `walk_forward.py` | `fold_integrity_reports` (per-fold `IntegrityReport` tuple) and `aggregate_integrity_report` added to `WalkForwardResult` |
+| Walk-forward fold refactor | `walk_forward.py` | Fold loop extracted into `_FoldTask` / `_FoldOutput` / `_execute_single_fold`; `run_walk_forward_experiment` gained `factor_fn_mode` (`"per_fold"` \| `"precompute"`) and `max_workers` params for optional parallel fold execution |
+| `ValueError` → `AlphaLabError` in experiment/walk-forward | `experiment.py`, `walk_forward.py` | Input-validation `ValueError` / `TypeError` calls converted to `AlphaLabConfigError` / `AlphaLabDataError` consistent with the utility-layer migration |
 | Experiment provenance | `experiment.py` | `ExperimentProvenance` gained `git_dirty: bool | None` field |
+| Novelty sidecar freshness | `generate_inbox_novelty_sidecar.py` (vault layer) | Sidecar hook now calls `_rebuild_card_index()` before reading CARD-INDEX.tsv; self-contained regardless of hook ordering |
 
 
 ## 3. Verified Outcomes
@@ -87,11 +100,11 @@ Post-implementation verification confirmed:
 - `config.OBSIDIAN_VAULT_PATH`: removed from `config.py`; all vault path resolution goes through `resolve_vault_root()`
 - All `write_obsidian_note()` callers audited: two vault-targeting callers pass `restricted_root`; two local-path callers correctly pass `None`
 - Lifecycle backlink gate fires on `restricted_root`-gated writes for any lifecycle value outside `{"", "draft", "active", "theoretical"}`
-- `pit_check()` confirmed at all six `experiment.py` sites and both `walk_forward.py` sites
+- `pit_check()` confirmed at all six `experiment.py` sites (prices, factor_df, label_df, portfolio weights/return/turnover) and both `walk_forward.py` fold-level sites (fold prices, fold factor output)
 - Handoff shim confirmed: `DeprecationWarning` emitted on attribute access; canonical path clean
 
 **Test state:**
-- 17 tests pass
+- New test files added in Round 1: `test_research_integrity_asof.py`, `test_research_integrity_leakage_checks.py`, `test_research_integrity_midfreq_checks.py`, `test_research_integrity_reporting.py`, `test_vault_export_gate.py`, `test_research_integrity_integration.py`; `test_experiment.py` and `test_vault_export.py` extended.
 - 1 pre-existing test failure remains unchanged: `test_obsidian_markdown_has_required_sections` fails because section headers in `to_obsidian_markdown()` are Chinese (`## 解释`, `## 下一步`) while the test expects English. This failure existed before Round 1 and is not caused by any Round 1 change.
 
 
@@ -131,10 +144,10 @@ removal-focused scope.
 
 - No changes to `real_cases/*/pipeline.py` behavior
 - No changes to the `model_factor` pipeline
-- No changes to `walk_forward.py` fold logic beyond removing the now-redundant call
 - No changes to the pre-existing failing test (`test_obsidian_markdown_has_required_sections`)
 - No refactoring of the `reporting/` render layer
 - No vault card modifications beyond the auto-gen marker addition to the Registry board
+- L2 validation suppression warning (`reporting/level2_portfolio_validation.py`): the `run_for_non_promoted_cases=False` silent-skip → `warnings.warn()` change exists in the working tree but was not committed in the Round 1 stack; deferred to a subsequent commit
 
 
 ## 6. Recommended Next Wave
