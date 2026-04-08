@@ -224,6 +224,140 @@ def test_summary_ic_ir_matches_mean_over_std():
         assert math.isclose(result.summary.ic_ir, expected)
 
 
+def test_summary_ic_positive_rate_matches_ic_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    ic_vals = result.ic_df["ic"].dropna()
+    expected = float((ic_vals > 0).mean()) if len(ic_vals) > 0 else float("nan")
+    if math.isnan(expected):
+        assert math.isnan(result.summary.ic_positive_rate)
+    else:
+        assert math.isclose(result.summary.ic_positive_rate, expected)
+
+
+def test_summary_ic_valid_ratio_matches_ic_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    expected = float(result.ic_df["ic"].notna().mean())
+    assert math.isclose(result.summary.ic_valid_ratio, expected)
+
+
+def test_summary_long_short_ir_matches_mean_over_std():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    ls_vals = result.long_short_df["long_short_return"].dropna()
+    if len(ls_vals) <= 1:
+        assert math.isnan(result.summary.long_short_ir)
+        return
+    ls_std = float(ls_vals.std(ddof=1))
+    if ls_std == 0.0 or math.isnan(ls_std):
+        assert math.isnan(result.summary.long_short_ir)
+        return
+    expected = float(ls_vals.mean()) / ls_std
+    assert math.isclose(result.summary.long_short_ir, expected)
+
+
+def test_summary_long_short_return_per_turnover_matches_ratio():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    mean_ls = result.summary.mean_long_short_return
+    mean_turn = result.summary.mean_long_short_turnover
+    if math.isnan(mean_turn) or mean_turn <= 0.0:
+        assert math.isnan(result.summary.long_short_return_per_turnover)
+    else:
+        expected = mean_ls / mean_turn
+        assert math.isclose(result.summary.long_short_return_per_turnover, expected)
+
+
+def test_summary_subperiod_robustness_share_in_unit_interval():
+    result = run_factor_experiment(_make_prices(n_days=60), _momentum_fn)
+    for value in (
+        result.summary.subperiod_ic_positive_share,
+        result.summary.subperiod_long_short_positive_share,
+    ):
+        if not math.isnan(value):
+            assert 0.0 <= value <= 1.0
+
+
+def test_rolling_stability_df_has_expected_columns():
+    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    assert {
+        "date",
+        "rolling_mean_ic",
+        "rolling_ic_positive_rate",
+        "rolling_mean_rank_ic",
+        "rolling_rank_ic_positive_rate",
+        "rolling_mean_long_short_return",
+        "rolling_long_short_positive_rate",
+    }.issubset(result.rolling_stability_df.columns)
+
+
+def test_summary_rolling_metrics_match_rolling_stability_df():
+    result = run_factor_experiment(_make_prices(n_days=90), _momentum_fn)
+    rolling = result.rolling_stability_df
+
+    rolling_ic = rolling["rolling_mean_ic"].dropna()
+    if len(rolling_ic) == 0:
+        assert math.isnan(result.summary.rolling_ic_positive_share)
+        assert math.isnan(result.summary.rolling_ic_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_ic_positive_share,
+            float((rolling_ic > 0).mean()),
+        )
+        assert math.isclose(result.summary.rolling_ic_min_mean, float(rolling_ic.min()))
+
+    rolling_rank = rolling["rolling_mean_rank_ic"].dropna()
+    if len(rolling_rank) == 0:
+        assert math.isnan(result.summary.rolling_rank_ic_positive_share)
+        assert math.isnan(result.summary.rolling_rank_ic_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_rank_ic_positive_share,
+            float((rolling_rank > 0).mean()),
+        )
+        assert math.isclose(
+            result.summary.rolling_rank_ic_min_mean,
+            float(rolling_rank.min()),
+        )
+
+    rolling_ls = rolling["rolling_mean_long_short_return"].dropna()
+    if len(rolling_ls) == 0:
+        assert math.isnan(result.summary.rolling_long_short_positive_share)
+        assert math.isnan(result.summary.rolling_long_short_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_long_short_positive_share,
+            float((rolling_ls > 0).mean()),
+        )
+        assert math.isclose(
+            result.summary.rolling_long_short_min_mean,
+            float(rolling_ls.min()),
+        )
+
+
+def test_summary_rolling_metrics_are_nan_for_short_samples():
+    result = run_factor_experiment(_make_prices(n_days=18), _momentum_fn)
+    assert math.isnan(result.summary.rolling_ic_positive_share)
+    assert math.isnan(result.summary.rolling_rank_ic_positive_share)
+    assert math.isnan(result.summary.rolling_long_short_positive_share)
+    assert math.isnan(result.summary.rolling_ic_min_mean)
+    assert math.isnan(result.summary.rolling_rank_ic_min_mean)
+    assert math.isnan(result.summary.rolling_long_short_min_mean)
+
+
+def test_summary_coverage_ratios_in_unit_interval():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    for value in (
+        result.summary.eval_coverage_ratio_mean,
+        result.summary.eval_coverage_ratio_min,
+    ):
+        if not math.isnan(value):
+            assert 0.0 <= value <= 1.0
+
+
+def test_summary_instability_flags_are_strings():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    assert isinstance(result.summary.instability_flags, tuple)
+    assert all(isinstance(flag, str) for flag in result.summary.instability_flags)
+
+
 # ---------------------------------------------------------------------------
 # 4. No-lookahead: full-sample DataFrames
 # ---------------------------------------------------------------------------

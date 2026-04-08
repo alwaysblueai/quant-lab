@@ -3,12 +3,20 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Literal
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
 from alpha_lab.costs import cost_adjusted_long_short
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
+from alpha_lab.interfaces import validate_factor_output
+from alpha_lab.research_integrity.asof import pit_check
+from alpha_lab.research_integrity.contracts import IntegrityCheckResult, IntegrityReport
+from alpha_lab.research_integrity.reporting import build_integrity_report
 from alpha_lab.splits import walk_forward_split
 from alpha_lab.strategy import StrategySpec
 
@@ -249,6 +257,195 @@ class WalkForwardResult:
     :attr:`pooled_cost_adjusted_portfolio_return_df` for the turnover path.
     """
 
+    fold_integrity_reports: tuple[IntegrityReport, ...] = ()
+    """Per-fold integrity reports aligned with ``per_fold_results``."""
+
+    aggregate_integrity_report: IntegrityReport | None = None
+    """Aggregate integrity report composed across all folds."""
+
+
+# ---------------------------------------------------------------------------
+# Per-fold task/output descriptors
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FoldTask:
+    """Lightweight descriptor for a single walk-forward fold."""
+
+    fold_id: int
+    train_start_ts: pd.Timestamp
+    train_end_ts: pd.Timestamp
+    test_start_ts: pd.Timestamp
+    test_end_ts: pd.Timestamp
+
+
+@dataclass
+class _FoldOutput:
+    """Collected outputs from executing a single fold."""
+
+    result: ExperimentResult
+    integrity_report: IntegrityReport
+    integrity_checks: list[IntegrityCheckResult]
+    summary_row: dict[str, object]
+    pooled_ic: pd.DataFrame | None
+    pooled_port_ret: pd.DataFrame | None
+    pooled_port_to: pd.DataFrame | None
+    pooled_cost_adj: pd.DataFrame | None
+
+
+def _execute_single_fold(
+    *,
+    task: _FoldTask,
+    prices: pd.DataFrame,
+    factor_fn: Callable[[pd.DataFrame], pd.DataFrame],
+    precomputed_factor_df: pd.DataFrame | None,
+    horizon: int,
+    n_quantiles: int,
+    cost_rate: float | None,
+    holding_period: int | None,
+    rebalance_frequency: int | None,
+    weighting_method: str,
+    portfolio_cost_rate: float | None,
+    strategy: StrategySpec | None,
+) -> _FoldOutput:
+    """Execute a single walk-forward fold and return collected outputs.
+
+    This function encapsulates the per-fold logic that was previously inline
+    in the fold loop, making it callable from both sequential and parallel
+    dispatch paths.
+    """
+    fold_id = task.fold_id
+    train_start_ts = task.train_start_ts
+    train_end_ts = task.train_end_ts
+    test_start_ts = task.test_start_ts
+    test_end_ts = task.test_end_ts
+
+    # --- Integrity checks ---------------------------------------------------
+    fold_prices = prices[
+        pd.to_datetime(prices["date"]) <= test_end_ts
+    ].reset_index(drop=True)
+
+    integrity_checks: list[IntegrityCheckResult] = []
+    integrity_checks.append(
+        pit_check(fold_prices, max_allowed_date=test_end_ts, object_name=f"fold_{fold_id}_prices")
+    )
+
+    # --- Factor computation -------------------------------------------------
+    if precomputed_factor_df is not None:
+        # Precompute mode: slice the pre-computed factor to this fold's window.
+        fold_factor_slice = precomputed_factor_df[
+            precomputed_factor_df["date"] <= test_end_ts
+        ].reset_index(drop=True)
+        # Wrap in a lambda so run_factor_experiment receives a callable.
+        fold_factor_fn: Callable[[pd.DataFrame], pd.DataFrame] = lambda _p, _f=fold_factor_slice: _f
+    else:
+        fold_factor_fn = factor_fn
+
+    # --- Run experiment -----------------------------------------------------
+    result = run_factor_experiment(
+        fold_prices,
+        fold_factor_fn,
+        horizon=horizon,
+        n_quantiles=n_quantiles,
+        train_end=train_end_ts,
+        test_start=test_start_ts,
+        holding_period=holding_period,
+        rebalance_frequency=rebalance_frequency,
+        weighting_method=weighting_method,
+        portfolio_cost_rate=portfolio_cost_rate,
+        strategy=strategy,
+    )
+
+    # --- Integrity check on factor output -----------------------------------
+    if not result.factor_df.empty:
+        integrity_checks.append(
+            pit_check(result.factor_df, max_allowed_date=test_end_ts, object_name=f"fold_{fold_id}_factor_output")
+        )
+
+    integrity_report = build_integrity_report(
+        tuple(integrity_checks),
+        context={"fold_id": fold_id},
+    )
+    # --- Accumulate pooled IC -----------------------------------------------
+    pooled_ic: pd.DataFrame | None = None
+    if not result.ic_df.empty:
+        fold_ic = result.ic_df[["date", "ic"]].copy()
+        fold_ic.insert(0, "fold_id", fold_id)
+        pooled_ic = fold_ic
+
+    # --- Accumulate pooled portfolio returns --------------------------------
+    pooled_port_ret: pd.DataFrame | None = None
+    if result.portfolio_return_df is not None and not result.portfolio_return_df.empty:
+        fold_port = result.portfolio_return_df[["date", "portfolio_return"]].copy()
+        fold_port.insert(0, "fold_id", fold_id)
+        pooled_port_ret = fold_port
+
+    # --- Accumulate pooled portfolio turnover --------------------------------
+    pooled_port_to: pd.DataFrame | None = None
+    if result.portfolio_turnover_df is not None and not result.portfolio_turnover_df.empty:
+        fold_to = result.portfolio_turnover_df[["date", "portfolio_turnover"]].copy()
+        fold_to.insert(0, "fold_id", fold_id)
+        pooled_port_to = fold_to
+
+    # --- Accumulate pooled cost-adjusted portfolio returns -------------------
+    pooled_cost_adj: pd.DataFrame | None = None
+    if (
+        result.portfolio_cost_adjusted_return_df is not None
+        and not result.portfolio_cost_adjusted_return_df.empty
+    ):
+        fold_cost_adj = result.portfolio_cost_adjusted_return_df[
+            ["date", "portfolio_return", "adjusted_return"]
+        ].copy()
+        fold_cost_adj.insert(0, "fold_id", fold_id)
+        pooled_cost_adj = fold_cost_adj
+
+    # --- Compute long-short cost-adjusted return ----------------------------
+    if cost_rate is not None and not result.long_short_df.empty:
+        adj_df = cost_adjusted_long_short(
+            result.long_short_df,
+            result.long_short_turnover_df,
+            cost_rate=cost_rate,
+        )
+        adj_vals = adj_df["adjusted_return"].dropna()
+        mean_cost_adj: float = float(adj_vals.mean()) if len(adj_vals) > 0 else math.nan
+    else:
+        mean_cost_adj = math.nan
+
+    # --- Build summary row --------------------------------------------------
+    ps = result.portfolio_summary
+    s = result.summary
+    summary_row: dict[str, object] = {
+        "fold_id": fold_id,
+        "train_start": train_start_ts,
+        "train_end": train_end_ts,
+        "start_date": test_start_ts,
+        "end_date": test_end_ts,
+        "mean_ic": s.mean_ic,
+        "mean_rank_ic": s.mean_rank_ic,
+        "ic_ir": s.ic_ir,
+        "mean_long_short": s.mean_long_short_return,
+        "mean_turnover": s.mean_long_short_turnover,
+        "mean_cost_adjusted_return": mean_cost_adj,
+        "mean_portfolio_return": ps.mean_portfolio_return if ps else math.nan,
+        "portfolio_hit_rate": ps.portfolio_hit_rate if ps else math.nan,
+        "mean_portfolio_turnover": ps.mean_portfolio_turnover if ps else math.nan,
+        "mean_cost_adjusted_portfolio_return": (
+            ps.mean_cost_adjusted_return if ps else math.nan
+        ),
+    }
+
+    return _FoldOutput(
+        result=result,
+        integrity_report=integrity_report,
+        integrity_checks=integrity_checks,
+        summary_row=summary_row,
+        pooled_ic=pooled_ic,
+        pooled_port_ret=pooled_port_ret,
+        pooled_port_to=pooled_port_to,
+        pooled_cost_adj=pooled_cost_adj,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Runner
@@ -271,6 +468,8 @@ def run_walk_forward_experiment(
     weighting_method: str = "equal",
     portfolio_cost_rate: float | None = None,
     strategy: StrategySpec | None = None,
+    factor_fn_mode: Literal["per_fold", "precompute"] = "per_fold",
+    max_workers: int | None = None,
 ) -> WalkForwardResult:
     """Run a factor experiment over rolling walk-forward folds.
 
@@ -356,6 +555,25 @@ def run_walk_forward_experiment(
         also controls ``long_top_k`` / ``short_bottom_k`` for the weight-based
         portfolio path.  ``n_quantiles`` and ``portfolio_cost_rate`` are not
         part of the strategy spec and must be provided separately.
+    factor_fn_mode:
+        Controls how ``factor_fn`` is invoked across folds:
+
+        - ``"per_fold"`` (default): calls ``factor_fn(fold_prices)`` once per
+          fold, where ``fold_prices`` is filtered to ``date <= test_end``.
+          This is the safe mode for factors that fit models or carry state.
+        - ``"precompute"``: calls ``factor_fn(prices)`` **once** on the full
+          price panel before the fold loop, then slices the result per fold.
+          This avoids redundant computation for pure lookback factors (e.g.
+          momentum, reversal) that only use historical prices at each date.
+          **Only use this mode when ``factor_fn`` is a stateless lookback
+          factor** — using it with a fitted/adaptive factor will leak data.
+    max_workers:
+        Maximum number of threads to use for parallel fold execution.
+        ``None`` or ``1`` runs folds sequentially (the default).  Values > 1
+        use a :class:`~concurrent.futures.ThreadPoolExecutor` to run
+        independent folds in parallel.  The GIL is largely released by
+        pandas/numpy C extensions, so threads provide meaningful speedup
+        for CPU-bound fold computation without pickle overhead.
 
     Returns
     -------
@@ -369,9 +587,9 @@ def run_walk_forward_experiment(
     """
     # --- Validate inputs ----------------------------------------------------
     if train_size <= 0 or test_size <= 0 or step <= 0:
-        raise ValueError("train_size, test_size, and step must be positive integers")
+        raise AlphaLabConfigError("train_size, test_size, and step must be positive integers")
     if cost_rate is not None and cost_rate < 0:
-        raise ValueError("cost_rate must be >= 0")
+        raise AlphaLabConfigError("cost_rate must be >= 0")
     if strategy is not None:
         if holding_period is not None or rebalance_frequency is not None:
             warnings.warn(
@@ -381,11 +599,11 @@ def run_walk_forward_experiment(
                 stacklevel=2,
             )
     elif (holding_period is None) != (rebalance_frequency is None):
-        raise ValueError(
+        raise AlphaLabConfigError(
             "holding_period and rebalance_frequency must both be provided or both be omitted."
         )
     if portfolio_cost_rate is not None and portfolio_cost_rate < 0:
-        raise ValueError("portfolio_cost_rate must be >= 0")
+        raise AlphaLabConfigError("portfolio_cost_rate must be >= 0")
 
     # Warn when portfolio_cost_rate is supplied but portfolio mode is not active.
     _portfolio_active = (strategy is not None) or (holding_period is not None)
@@ -401,7 +619,7 @@ def run_walk_forward_experiment(
     # --- Extract unique sorted dates ----------------------------------------
     dates_raw = pd.to_datetime(prices["date"])
     if dates_raw.isna().any():
-        raise ValueError("prices contains NaT in 'date'")
+        raise AlphaLabDataError("prices contains NaT in 'date'")
 
     unique_dates = dates_raw.drop_duplicates().sort_values().reset_index(drop=True)
 
@@ -415,121 +633,95 @@ def run_walk_forward_experiment(
     )
 
     if not splits:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"No walk-forward folds generated with train_size={train_size}, "
             f"test_size={test_size}, step={step} on {len(unique_dates)} unique dates.  "
             "Increase the dataset size or reduce train_size/test_size."
         )
 
-    # --- Run per-fold experiments -------------------------------------------
-    per_fold_results: list[ExperimentResult] = []
-    fold_rows: list[dict[str, object]] = []
-    pooled_ic_parts: list[pd.DataFrame] = []
-    pooled_port_ret_parts: list[pd.DataFrame] = []
-    pooled_port_to_parts: list[pd.DataFrame] = []
-    pooled_cost_adj_parts: list[pd.DataFrame] = []
+    if factor_fn_mode not in ("per_fold", "precompute"):
+        raise AlphaLabConfigError(
+            f"factor_fn_mode must be 'per_fold' or 'precompute', got {factor_fn_mode!r}"
+        )
 
+    # --- Precompute factor if requested -------------------------------------
+    # In precompute mode, factor_fn is called once on the full price panel.
+    # Per-fold, the result is sliced to date <= test_end_ts.  This avoids
+    # redundant computation for pure lookback factors (momentum, reversal, etc.)
+    # but is unsafe for fitted/adaptive factors.
+    precomputed_factor_df: pd.DataFrame | None = None
+    if factor_fn_mode == "precompute":
+        precomputed_factor_df = factor_fn(prices)
+        validate_factor_output(precomputed_factor_df)
+        # Ensure dates are comparable timestamps.
+        precomputed_factor_df = precomputed_factor_df.copy()
+        precomputed_factor_df["date"] = pd.to_datetime(precomputed_factor_df["date"])
+
+    # --- Build per-fold task descriptors ------------------------------------
+    fold_tasks: list[_FoldTask] = []
     for fold_id, masks in enumerate(splits):
         train_mask: pd.Series = pd.Series(masks["train"])
         test_mask: pd.Series = pd.Series(masks["test"])
-
         train_dates = unique_dates[train_mask.to_numpy()]
         test_dates = unique_dates[test_mask.to_numpy()]
+        fold_tasks.append(
+            _FoldTask(
+                fold_id=fold_id,
+                train_start_ts=train_dates.iloc[0],
+                train_end_ts=train_dates.iloc[-1],
+                test_start_ts=test_dates.iloc[0],
+                test_end_ts=test_dates.iloc[-1],
+            )
+        )
 
-        train_start_ts: pd.Timestamp = train_dates.iloc[0]
-        train_end_ts: pd.Timestamp = train_dates.iloc[-1]
-        test_start_ts: pd.Timestamp = test_dates.iloc[0]
-        test_end_ts: pd.Timestamp = test_dates.iloc[-1]
-
-        # Restrict prices to this fold's visible window (up to and including
-        # test_end_ts) so that factor_fn cannot access future price data beyond
-        # this fold's test period.  This makes each fold strictly independent.
-        fold_prices = prices[
-            pd.to_datetime(prices["date"]) <= test_end_ts
-        ].reset_index(drop=True)
-
-        result = run_factor_experiment(
-            fold_prices,
-            factor_fn,
+    # --- Run per-fold experiments -------------------------------------------
+    def _run_one_fold(task: _FoldTask) -> _FoldOutput:
+        return _execute_single_fold(
+            task=task,
+            prices=prices,
+            factor_fn=factor_fn,
+            precomputed_factor_df=precomputed_factor_df,
             horizon=horizon,
             n_quantiles=n_quantiles,
-            train_end=train_end_ts,
-            test_start=test_start_ts,
+            cost_rate=cost_rate,
             holding_period=holding_period,
             rebalance_frequency=rebalance_frequency,
             weighting_method=weighting_method,
             portfolio_cost_rate=portfolio_cost_rate,
             strategy=strategy,
         )
-        per_fold_results.append(result)
 
-        # Accumulate IC observations for the pooled OOS series.
-        if not result.ic_df.empty:
-            fold_ic = result.ic_df[["date", "ic"]].copy()
-            fold_ic.insert(0, "fold_id", fold_id)
-            pooled_ic_parts.append(fold_ic)
+    use_parallel = max_workers is not None and max_workers > 1 and len(fold_tasks) > 1
+    if use_parallel:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            fold_outputs = list(executor.map(_run_one_fold, fold_tasks))
+    else:
+        fold_outputs = [_run_one_fold(task) for task in fold_tasks]
 
-        # Accumulate portfolio-return observations for the pooled OOS series.
-        if result.portfolio_return_df is not None and not result.portfolio_return_df.empty:
-            fold_port = result.portfolio_return_df[["date", "portfolio_return"]].copy()
-            fold_port.insert(0, "fold_id", fold_id)
-            pooled_port_ret_parts.append(fold_port)
+    # --- Collect outputs into result structures -----------------------------
+    per_fold_results: list[ExperimentResult] = []
+    fold_rows: list[dict[str, object]] = []
+    pooled_ic_parts: list[pd.DataFrame] = []
+    pooled_port_ret_parts: list[pd.DataFrame] = []
+    pooled_port_to_parts: list[pd.DataFrame] = []
+    pooled_cost_adj_parts: list[pd.DataFrame] = []
+    fold_integrity_reports: list[IntegrityReport] = []
+    aggregate_integrity_checks: list[IntegrityCheckResult] = []
 
-        # Accumulate portfolio-turnover observations (active rebalance dates only).
-        if result.portfolio_turnover_df is not None and not result.portfolio_turnover_df.empty:
-            fold_to = result.portfolio_turnover_df[["date", "portfolio_turnover"]].copy()
-            fold_to.insert(0, "fold_id", fold_id)
-            pooled_port_to_parts.append(fold_to)
+    for out in fold_outputs:
+        fold_integrity_reports.append(out.integrity_report)
+        aggregate_integrity_checks.extend(out.integrity_checks)
+        per_fold_results.append(out.result)
+        fold_rows.append(out.summary_row)
 
-        # Accumulate cost-adjusted portfolio-return observations (OOS only).
-        # portfolio_cost_adjusted_return_df columns: [date, portfolio_return, adjusted_return]
-        # portfolio_return = gross return (before cost); adjusted_return = net return.
-        if (
-            result.portfolio_cost_adjusted_return_df is not None
-            and not result.portfolio_cost_adjusted_return_df.empty
-        ):
-            fold_cost_adj = result.portfolio_cost_adjusted_return_df[
-                ["date", "portfolio_return", "adjusted_return"]
-            ].copy()
-            fold_cost_adj.insert(0, "fold_id", fold_id)
-            pooled_cost_adj_parts.append(fold_cost_adj)
-
-        # Compute long-short cost-adjusted return for this fold if requested.
-        if cost_rate is not None and not result.long_short_df.empty:
-            adj_df = cost_adjusted_long_short(
-                result.long_short_df,
-                result.long_short_turnover_df,
-                cost_rate=cost_rate,
-            )
-            adj_vals = adj_df["adjusted_return"].dropna()
-            mean_cost_adj: float = float(adj_vals.mean()) if len(adj_vals) > 0 else math.nan
-        else:
-            mean_cost_adj = math.nan
-
-        # Extract per-fold portfolio summary (None when portfolio params omitted).
-        ps = result.portfolio_summary
-        s = result.summary
-        fold_rows.append(
-            {
-                "fold_id": fold_id,
-                "train_start": train_start_ts,
-                "train_end": train_end_ts,
-                "start_date": test_start_ts,
-                "end_date": test_end_ts,
-                "mean_ic": s.mean_ic,
-                "mean_rank_ic": s.mean_rank_ic,
-                "ic_ir": s.ic_ir,
-                "mean_long_short": s.mean_long_short_return,
-                "mean_turnover": s.mean_long_short_turnover,
-                "mean_cost_adjusted_return": mean_cost_adj,
-                "mean_portfolio_return": ps.mean_portfolio_return if ps else math.nan,
-                "portfolio_hit_rate": ps.portfolio_hit_rate if ps else math.nan,
-                "mean_portfolio_turnover": ps.mean_portfolio_turnover if ps else math.nan,
-                "mean_cost_adjusted_portfolio_return": (
-                    ps.mean_cost_adjusted_return if ps else math.nan
-                ),
-            }
-        )
+        if out.pooled_ic is not None:
+            pooled_ic_parts.append(out.pooled_ic)
+        if out.pooled_port_ret is not None:
+            pooled_port_ret_parts.append(out.pooled_port_ret)
+        if out.pooled_port_to is not None:
+            pooled_port_to_parts.append(out.pooled_port_to)
+        if out.pooled_cost_adj is not None:
+            pooled_cost_adj_parts.append(out.pooled_cost_adj)
 
     fold_summary_df = pd.DataFrame(fold_rows, columns=list(_FOLD_SUMMARY_COLUMNS))
     pooled_ic_df = (
@@ -561,6 +753,18 @@ def run_walk_forward_experiment(
         pooled_cost_adjusted_portfolio_return_df,
         pooled_portfolio_turnover_df,
     )
+    aggregate_integrity_report = build_integrity_report(
+        tuple(aggregate_integrity_checks),
+        context={
+            "pipeline": "run_walk_forward_experiment",
+            "n_folds": len(fold_summary_df),
+            "train_size": train_size,
+            "test_size": test_size,
+            "step": step,
+            "horizon": horizon,
+            "n_quantiles": n_quantiles,
+        },
+    )
 
     return WalkForwardResult(
         per_fold_results=per_fold_results,
@@ -570,6 +774,8 @@ def run_walk_forward_experiment(
         pooled_portfolio_return_df=pooled_portfolio_return_df,
         pooled_cost_adjusted_portfolio_return_df=pooled_cost_adjusted_portfolio_return_df,
         pooled_portfolio_turnover_df=pooled_portfolio_turnover_df,
+        fold_integrity_reports=tuple(fold_integrity_reports),
+        aggregate_integrity_report=aggregate_integrity_report,
     )
 
 
