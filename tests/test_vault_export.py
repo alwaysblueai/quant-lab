@@ -87,7 +87,7 @@ def test_vault_export_skip_mode_writes_nothing(tmp_path: Path) -> None:
     assert not (vault_root / "50_experiments").exists()
 
 
-def test_vault_export_missing_vault_path_is_skip(
+def test_vault_export_missing_vault_path_is_hard_failure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -101,9 +101,10 @@ def test_vault_export_missing_vault_path_is_skip(
         mode="versioned",
     )
 
-    assert result.success
-    assert result.status == "skipped"
-    assert result.mode_used == "skip"
+    assert not result.success
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "OBSIDIAN_VAULT_PATH" in result.error
 
 
 def test_vault_export_invalid_path_is_handled_gracefully(tmp_path: Path) -> None:

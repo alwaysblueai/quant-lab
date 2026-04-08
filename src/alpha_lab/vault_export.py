@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from alpha_lab.exceptions import AlphaLabConfigError
+
 VaultExportMode = Literal["skip", "overwrite", "versioned"]
 VaultExportStatus = Literal["success", "failed", "skipped"]
 
@@ -68,13 +70,21 @@ def export_to_vault(
         )
 
     resolved_root = resolve_vault_root(vault_root)
-    if mode_l == "skip" or resolved_root is None:
+    if mode_l == "skip":
         return ExportResult(
             success=True,
             target_paths=(),
             mode_used="skip",
             status="skipped",
             error=None,
+        )
+    if resolved_root is None:
+        return ExportResult(
+            success=False,
+            target_paths=(),
+            mode_used=mode_l,  # type: ignore[arg-type]
+            status="failed",
+            error="vault_root was not provided and OBSIDIAN_VAULT_PATH is not set",
         )
 
     if not resolved_root.exists():
@@ -241,11 +251,11 @@ def _copy_set(
 def _safe_case_name(case_name: str) -> str:
     stripped = case_name.strip()
     if not stripped:
-        raise ValueError("case_name must be non-empty")
+        raise AlphaLabConfigError("case_name must be non-empty")
 
     normalized = re.sub(r"\s+", "_", stripped)
     normalized = re.sub(r"[^A-Za-z0-9_.-]", "-", normalized)
     normalized = normalized.strip(".-_")
     if not normalized:
-        raise ValueError(f"case_name is not valid for vault path: {case_name!r}")
+        raise AlphaLabConfigError(f"case_name is not valid for vault path: {case_name!r}")
     return normalized
