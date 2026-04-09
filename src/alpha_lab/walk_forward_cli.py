@@ -4,6 +4,7 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -21,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="run_walk_forward_experiment",
         description=(
             "Run a walk-forward factor experiment and write fold-level / aggregate "
-            "artifacts for out-of-sample research."
+            "artifacts for Level 1/2 out-of-sample research validation."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -59,7 +60,13 @@ def _fmt_float(value: float) -> str:
     return f"{value:.4f}"
 
 
-def _walk_forward_markdown(*, experiment_name: str, wf, factor: str, horizon: int) -> str:
+def _walk_forward_markdown(
+    *,
+    experiment_name: str,
+    wf: Any,
+    factor: str,
+    horizon: int,
+) -> str:
     agg = wf.aggregate_summary
     lines = [
         "---",

@@ -59,3 +59,17 @@ def test_invalid_env_var_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # Clean up — reload with correct state
     monkeypatch.delenv("ALPHA_LAB_PROJECT_ROOT", raising=False)
     importlib.reload(cfg)
+
+
+def test_data_root_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from alpha_lab import config as cfg
+    import importlib
+
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    importlib.reload(cfg)
+    try:
+        assert cfg.DATA_ROOT == (tmp_path / "warehouse").resolve()
+        assert cfg.resolve_data_root() == (tmp_path / "warehouse").resolve()
+    finally:
+        monkeypatch.delenv("ALPHA_LAB_DATA_ROOT", raising=False)
+        importlib.reload(cfg)

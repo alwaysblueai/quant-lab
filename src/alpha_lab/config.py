@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from alpha_lab.exceptions import AlphaLabConfigError
+
 # ---------------------------------------------------------------------------
 # Project root resolution
 # ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ else:
 # ALPHA_LAB_PROJECT_ROOT set) rather than silently writing artifacts to a
 # wrong location.
 if not (PROJECT_ROOT / "pyproject.toml").exists():
-    raise RuntimeError(
+    raise AlphaLabConfigError(
         f"alpha_lab.config: PROJECT_ROOT resolved to {PROJECT_ROOT!s} but "
         "'pyproject.toml' was not found there.  If the package was installed "
         "non-editablely, set the ALPHA_LAB_PROJECT_ROOT environment variable "
@@ -40,17 +42,24 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 # ---------------------------------------------------------------------------
-# Obsidian vault path (quant-knowledge)
+# External data root
 # ---------------------------------------------------------------------------
-# Points to the quant-knowledge Obsidian vault.  Used by
-# :func:`~alpha_lab.reporting.export_experiment_card` to resolve the
-# ``50_experiments/`` destination directory without requiring an explicit
-# path at every call site.
-#
-# Set ``OBSIDIAN_VAULT_PATH`` in your shell environment (or a ``.env`` file
-# loaded before import) to configure the vault root.  If unset, exports that
-# require the vault will raise unless an explicit ``vault_path`` is passed.
+# Large vendor-backed datasets should live outside the repository so that the
+# codebase stays lightweight. The default points to a user-local directory, but
+# can be overridden explicitly for portable or test-friendly setups.
 # ---------------------------------------------------------------------------
 
-_env_vault = (os.environ.get("OBSIDIAN_VAULT_PATH") or "").strip()
-OBSIDIAN_VAULT_PATH: Path | None = Path(_env_vault).resolve() if _env_vault else None
+DEFAULT_DATA_ROOT = Path.home() / ".local" / "share" / "alpha-lab" / "data"
+
+
+def resolve_data_root(path_value: str | Path | None = None) -> Path:
+    """Resolve the external alpha-lab data root."""
+    if path_value is not None:
+        return Path(path_value).expanduser().resolve()
+    env_value = (os.environ.get("ALPHA_LAB_DATA_ROOT") or "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+    return DEFAULT_DATA_ROOT
+
+
+DATA_ROOT = resolve_data_root()

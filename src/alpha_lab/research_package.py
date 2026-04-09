@@ -1,3 +1,10 @@
+"""Experimental Level 3 packaging utilities around replay artifacts.
+
+Core Level 1/2 package assembly lives in
+`alpha_lab.reporting.research_validation_package`.
+This module adds replay/implementability-specific summaries and verdicts.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -7,6 +14,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.reporting.research_validation_package import (
+    build_research_validation_package,
+)
+from alpha_lab.research_integrity.semantic_consistency import (
+    summarize_semantic_report_payload,
+)
 
 ResearchVerdict = Literal[
     "reject",
@@ -57,6 +72,8 @@ class ResearchPackageEngineSummary:
     backtest_summary_path: str | None
     adapter_metadata_path: str | None
     adapter_metadata_ref: dict[str, object] | None
+    semantic_consistency_report_path: str | None
+    semantic_consistency_summary: dict[str, object] | None
     key_metrics: dict[str, object]
     warnings: tuple[dict[str, object], ...]
     missing_artifacts: tuple[str, ...]
@@ -69,6 +86,8 @@ class ResearchPackageEngineSummary:
             "backtest_summary_path": self.backtest_summary_path,
             "adapter_metadata_path": self.adapter_metadata_path,
             "adapter_metadata_ref": self.adapter_metadata_ref,
+            "semantic_consistency_report_path": self.semantic_consistency_report_path,
+            "semantic_consistency_summary": self.semantic_consistency_summary,
             "key_metrics": self.key_metrics,
             "warnings": list(self.warnings),
             "missing_artifacts": list(self.missing_artifacts),
@@ -190,7 +209,7 @@ def load_research_case_outputs(case_output_dir: str | Path) -> LoadedResearchCas
     if not case_dir.exists():
         raise FileNotFoundError(f"case output directory does not exist: {case_dir}")
     if not case_dir.is_dir():
-        raise ValueError(f"case output path is not a directory: {case_dir}")
+        raise AlphaLabConfigError(f"case output path is not a directory: {case_dir}")
 
     workflow_path = _resolve_workflow_summary_path(case_dir)
     workflow_payload = _read_json_object(workflow_path) if workflow_path is not None else None
@@ -236,18 +255,24 @@ def summarize_replay_outputs(
     if not run_dir.exists():
         raise FileNotFoundError(f"replay output directory does not exist: {run_dir}")
     if not run_dir.is_dir():
-        raise ValueError(f"replay output path is not a directory: {run_dir}")
+        raise AlphaLabConfigError(f"replay output path is not a directory: {run_dir}")
 
     summary_path = run_dir / "backtest_summary.json"
     metadata_path = run_dir / "adapter_run_metadata.json"
+    semantic_path = run_dir / "semantic_consistency_report.json"
     summary_payload = _read_json_object(summary_path) if summary_path.exists() else None
     metadata_payload = _read_json_object(metadata_path) if metadata_path.exists() else None
+    semantic_payload = _read_json_object(semantic_path) if semantic_path.exists() else None
+    if semantic_payload is None:
+        semantic_payload = _coerce_mapping((metadata_payload or {}).get("semantic_consistency"))
 
     missing: list[str] = []
     if summary_payload is None:
         missing.append("backtest_summary.json")
     if metadata_payload is None:
         missing.append("adapter_run_metadata.json")
+    if not semantic_payload:
+        missing.append("semantic_consistency_report.json")
 
     summary_block = _coerce_mapping((summary_payload or {}).get("summary"))
     engine_name = _normalize_engine(
@@ -265,6 +290,7 @@ def summarize_replay_outputs(
     }
     warnings = _normalize_warning_rows((summary_payload or {}).get("warnings"))
     adapter_version = _safe_str((metadata_payload or {}).get("adapter_version"))
+    semantic_summary = summarize_semantic_report_payload(semantic_payload or None)
 
     return ResearchPackageEngineSummary(
         engine=engine_name,
@@ -272,6 +298,8 @@ def summarize_replay_outputs(
         backtest_summary_path=str(summary_path) if summary_path.exists() else None,
         adapter_metadata_path=str(metadata_path) if metadata_path.exists() else None,
         adapter_metadata_ref=metadata_payload,
+        semantic_consistency_report_path=str(semantic_path) if semantic_path.exists() else None,
+        semantic_consistency_summary=semantic_summary,
         key_metrics=key_metrics,
         warnings=warnings,
         missing_artifacts=tuple(sorted(set(missing))),
@@ -331,10 +359,15 @@ def build_research_package(
     interpretation: str | None = None,
     notes: str | None = None,
 ) -> ResearchPackage:
+    core_package = build_research_validation_package(
+        case_output_dir,
+        case_id=case_id,
+        case_name=case_name,
+        interpretation=interpretation,
+        notes=notes,
+    )
     loaded = load_research_case_outputs(case_output_dir)
     workflow = loaded.workflow_summary or {}
-    workflow_type = _safe_str(workflow.get("workflow")) or "unknown"
-    experiment_name = _safe_str(workflow.get("experiment_name")) or case_id
 
     replay_results = tuple(
         summarize_replay_outputs(path, engine_hint=engine) for engine, path in loaded.replay_runs
@@ -345,33 +378,28 @@ def build_research_package(
         else None
     )
     verdict = _build_package_verdict(workflow, replay_results, execution_summary)
+    semantic_overview = _semantic_consistency_overview(replay_results)
 
-    artifact_index = _build_artifact_index(loaded)
-    promotion_decision = _coerce_mapping(workflow.get("promotion_decision"))
-    research_intent = {
-        "config_path": _safe_str(workflow.get("config_path")),
-        "workflow_type": workflow_type,
-        "promotion_verdict": _safe_str(promotion_decision.get("verdict")),
-    }
-    research_results = {
-        "key_metrics": _coerce_mapping(workflow.get("key_metrics")),
-        "promotion_decision": promotion_decision,
-        "status": _safe_str(workflow.get("status")),
-    }
-    trial_registry_metadata = {
-        "trial_log_path": str(loaded.trial_log_path) if loaded.trial_log_path else None,
-        "alpha_registry_path": str(loaded.alpha_registry_path)
-        if loaded.alpha_registry_path
-        else None,
-    }
-    identity = {
-        "handoff_bundle_path": str(loaded.handoff_bundle_path)
-        if loaded.handoff_bundle_path
-        else None,
-        "workflow_summary_path": str(loaded.workflow_summary_path)
-        if loaded.workflow_summary_path
-        else None,
-    }
+    core_index = tuple(
+        ResearchPackageArtifactRef(
+            name=ref.name,
+            artifact_type=ref.artifact_type,
+            path=ref.path,
+            exists=ref.exists,
+            required=ref.required,
+        )
+        for ref in core_package.artifact_index
+    )
+    replay_index = _build_replay_artifact_index(loaded)
+    artifact_index = tuple([*core_index, *replay_index])
+    identity = dict(core_package.identity)
+    identity["handoff_bundle_path"] = (
+        str(loaded.handoff_bundle_path) if loaded.handoff_bundle_path else None
+    )
+    research_intent = dict(core_package.research_intent)
+    research_results = dict(core_package.research_results)
+    research_results["semantic_consistency"] = semantic_overview
+    trial_registry_metadata = dict(core_package.trial_registry_metadata)
 
     return ResearchPackage(
         schema_version=RESEARCH_PACKAGE_SCHEMA_VERSION,
@@ -380,8 +408,8 @@ def build_research_package(
         case_id=case_id,
         case_name=case_name,
         case_output_dir=str(loaded.case_dir),
-        workflow_type=workflow_type,
-        experiment_name=experiment_name,
+        workflow_type=core_package.workflow_type,
+        experiment_name=core_package.experiment_name,
         identity=identity,
         research_intent=research_intent,
         research_results=research_results,
@@ -390,8 +418,8 @@ def build_research_package(
         execution_impact=execution_summary,
         artifact_index=artifact_index,
         verdict=verdict,
-        interpretation=interpretation,
-        notes=notes,
+        interpretation=core_package.interpretation,
+        notes=core_package.notes,
     )
 
 
@@ -422,12 +450,16 @@ def _package_markdown(package: ResearchPackage) -> str:
         "## Replay Engines",
     ]
     for replay in package.replay_results:
+        semantic_status = _safe_str(
+            _coerce_mapping(replay.semantic_consistency_summary).get("status")
+        ) or "unknown"
         lines.extend(
             [
                 f"- `{replay.engine}` total_return={replay.key_metrics.get('total_return')} "
                 f"sharpe={replay.key_metrics.get('sharpe_annualized')} "
                 f"max_drawdown={replay.key_metrics.get('max_drawdown')} "
-                f"mean_turnover={replay.key_metrics.get('mean_turnover')}",
+                f"mean_turnover={replay.key_metrics.get('mean_turnover')} "
+                f"semantic_status={semantic_status}",
             ]
         )
     if package.execution_impact is not None:
@@ -496,30 +528,16 @@ def _discover_execution_impact_report(case_dir: Path) -> Path | None:
     return None
 
 
-def _build_artifact_index(
+def _build_replay_artifact_index(
     loaded: LoadedResearchCaseOutputs,
 ) -> tuple[ResearchPackageArtifactRef, ...]:
     refs = [
-        ResearchPackageArtifactRef(
-            name="workflow_summary_json",
-            artifact_type="workflow_summary",
-            path=str(loaded.workflow_summary_path) if loaded.workflow_summary_path else "",
-            exists=loaded.workflow_summary_path is not None,
-            required=True,
-        ),
         ResearchPackageArtifactRef(
             name="handoff_bundle",
             artifact_type="handoff_artifact",
             path=str(loaded.handoff_bundle_path) if loaded.handoff_bundle_path else "",
             exists=loaded.handoff_bundle_path is not None,
             required=True,
-        ),
-        ResearchPackageArtifactRef(
-            name="trial_log_csv",
-            artifact_type="trial_log",
-            path=str(loaded.trial_log_path) if loaded.trial_log_path else "",
-            exists=loaded.trial_log_path is not None,
-            required=False,
         ),
         ResearchPackageArtifactRef(
             name="execution_impact_report_json",
@@ -541,6 +559,24 @@ def _build_artifact_index(
                 required=True,
             )
         )
+        refs.append(
+            ResearchPackageArtifactRef(
+                name=f"semantic_consistency_{engine or 'unknown'}_json",
+                artifact_type="semantic_consistency",
+                path=str(path / "semantic_consistency_report.json"),
+                exists=(path / "semantic_consistency_report.json").exists(),
+                required=True,
+            )
+        )
+        refs.append(
+            ResearchPackageArtifactRef(
+                name=f"semantic_consistency_{engine or 'unknown'}_markdown",
+                artifact_type="semantic_consistency",
+                path=str(path / "semantic_consistency_report.md"),
+                exists=(path / "semantic_consistency_report.md").exists(),
+                required=False,
+            )
+        )
     return tuple(refs)
 
 
@@ -555,12 +591,21 @@ def _build_package_verdict(
         research_verdict = "needs_review"
 
     issues: list[str] = []
+    semantic_warn_present = False
     if not replay_results:
         issues.append("missing_replay_outputs")
     else:
         for replay in replay_results:
             if replay.missing_artifacts:
                 issues.append(f"missing_replay_artifacts:{replay.engine}")
+            semantic = _coerce_mapping(replay.semantic_consistency_summary)
+            semantic_status = _safe_str(semantic.get("status"))
+            if semantic_status is None:
+                issues.append(f"missing_semantic_consistency:{replay.engine}")
+            elif semantic_status == "fail":
+                issues.append(f"semantic_incompatibility:{replay.engine}")
+            elif semantic_status == "warn":
+                semantic_warn_present = True
     if execution_summary is None:
         issues.append("missing_execution_impact_report")
     if research_verdict == "reject":
@@ -568,7 +613,7 @@ def _build_package_verdict(
 
     if issues:
         readiness: PackageReadiness = "blocked"
-    elif research_verdict == "needs_review":
+    elif research_verdict == "needs_review" or semantic_warn_present:
         readiness = "needs_attention"
     else:
         readiness = "ready"
@@ -588,11 +633,25 @@ def _build_package_verdict(
         if execution_summary is not None
         else "execution impact report missing"
     )
-    replay_basis = (
-        "replay outputs present for at least one engine"
-        if replay_results
-        else "replay outputs missing"
-    )
+    if replay_results:
+        semantic_counts = {"pass": 0, "warn": 0, "fail": 0, "unknown": 0}
+        for replay in replay_results:
+            status = _safe_str(
+                _coerce_mapping(replay.semantic_consistency_summary).get("status")
+            )
+            if status is None:
+                semantic_counts["unknown"] += 1
+            elif status in semantic_counts:
+                semantic_counts[status] += 1
+            else:
+                semantic_counts["unknown"] += 1
+        replay_basis = (
+            "replay outputs present; semantic consistency statuses="
+            f"pass:{semantic_counts['pass']} warn:{semantic_counts['warn']} "
+            f"fail:{semantic_counts['fail']} unknown:{semantic_counts['unknown']}"
+        )
+    else:
+        replay_basis = "replay outputs missing"
 
     return ResearchPackageVerdict(
         verdict=research_verdict,  # type: ignore[arg-type]
@@ -608,6 +667,22 @@ def _build_package_verdict(
 def _normalize_engine(engine: object) -> str:
     text = _safe_str(engine) or "unknown"
     return text.lower().strip()
+
+
+def _semantic_consistency_overview(
+    replay_results: Sequence[ResearchPackageEngineSummary],
+) -> dict[str, object]:
+    out: dict[str, object] = {"by_engine": {}, "summary": {}}
+    status_counts: dict[str, int] = {"pass": 0, "warn": 0, "fail": 0, "unknown": 0}
+    for replay in replay_results:
+        summary = replay.semantic_consistency_summary
+        status = _safe_str(_coerce_mapping(summary).get("status")) or "unknown"
+        if status not in status_counts:
+            status = "unknown"
+        status_counts[status] += 1
+        out["by_engine"][replay.engine] = summary
+    out["summary"] = status_counts
+    return out
 
 
 def _normalize_warning_rows(raw: object) -> tuple[dict[str, object], ...]:
@@ -646,7 +721,7 @@ def _read_json_object(path: Path | None) -> dict[str, object]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise AlphaLabDataError(f"{path} must contain a JSON object")
     return payload
 
 
