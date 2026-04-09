@@ -1,3 +1,9 @@
+"""Experimental Level 3 diagnostics for replay-vs-target drift analysis.
+
+This module is intentionally outside the default Level 1/2 research path.
+Use it only for explicit future-facing replay experiments.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -7,6 +13,12 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
+from alpha_lab.research_integrity.semantic_consistency import (
+    summarize_semantic_report_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +59,7 @@ class LoadedExecutionArtifacts:
     run_path: Path
     adapter_run_metadata: dict[str, object] | None
     backtest_summary: dict[str, object] | None
+    semantic_consistency_report: dict[str, object] | None
     target_weights_df: pd.DataFrame | None
     executed_weights_df: pd.DataFrame | None
     turnover_df: pd.DataFrame | None
@@ -80,6 +93,7 @@ class ExecutionImpactReport:
     performance_context: dict[str, object]
     flags: tuple[ExecutionImpactFlag, ...]
     warnings: tuple[dict[str, object], ...]
+    semantic_consistency: dict[str, object] | None
     timeseries_df: pd.DataFrame | None
     comparison_summary: dict[str, object] | None
 
@@ -99,6 +113,7 @@ class ExecutionImpactReport:
             "performance_context": self.performance_context,
             "flags": [x.__dict__ for x in self.flags],
             "warnings": list(self.warnings),
+            "semantic_consistency": self.semantic_consistency,
             "timeseries_summary": _df_records(self.timeseries_df),
             "comparison_summary": self.comparison_summary,
             "interpretation_note": (
@@ -114,7 +129,7 @@ def load_execution_artifacts(run_path: str | Path) -> LoadedExecutionArtifacts:
     if not path.exists():
         raise FileNotFoundError(f"replay output directory does not exist: {path}")
     if not path.is_dir():
-        raise ValueError(f"replay output path is not a directory: {path}")
+        raise AlphaLabConfigError(f"replay output path is not a directory: {path}")
 
     frames: dict[str, pd.DataFrame | None] = {
         "target_weights_df": _read_csv_optional(path / "target_weights.csv"),
@@ -130,7 +145,7 @@ def load_execution_artifacts(run_path: str | Path) -> LoadedExecutionArtifacts:
         if frame is not None and "date" in frame.columns:
             frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
             if frame["date"].isna().any():
-                raise ValueError(f"{filename} contains invalid date values in 'date' column")
+                raise AlphaLabDataError(f"{filename} contains invalid date values in 'date' column")
             frames[filename] = _sort_if_present(frame)
 
     missing = []
@@ -142,6 +157,7 @@ def load_execution_artifacts(run_path: str | Path) -> LoadedExecutionArtifacts:
         run_path=path,
         adapter_run_metadata=_read_json_optional(path / "adapter_run_metadata.json"),
         backtest_summary=_read_json_optional(path / "backtest_summary.json"),
+        semantic_consistency_report=_load_semantic_consistency_payload(path),
         target_weights_df=frames["target_weights_df"],
         executed_weights_df=frames["executed_weights_df"],
         turnover_df=frames["turnover_df"],
@@ -172,6 +188,7 @@ def build_execution_impact_report(
     deviation_summary = _execution_deviation_summary(primary, unavailable)
     turnover_summary = _turnover_effect_summary(primary, comparison, unavailable)
     performance_context = _performance_context(primary, comparison)
+    semantic_consistency = _semantic_consistency_context(primary, comparison, unavailable)
     flags = _build_flags(
         reason_summary_df=reason_summary,
         deviation_summary=deviation_summary,
@@ -201,6 +218,7 @@ def build_execution_impact_report(
         performance_context=performance_context,
         flags=tuple(flags),
         warnings=tuple(warnings),
+        semantic_consistency=semantic_consistency,
         timeseries_df=timeseries,
         comparison_summary=comparison_summary,
     )
@@ -243,7 +261,7 @@ def _read_json_optional(path: Path) -> dict[str, object] | None:
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise AlphaLabDataError(f"{path} must contain a JSON object")
     return payload
 
 
@@ -251,6 +269,17 @@ def _read_csv_optional(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None
     return pd.read_csv(path)
+
+
+def _load_semantic_consistency_payload(path: Path) -> dict[str, object] | None:
+    explicit = _read_json_optional(path / "semantic_consistency_report.json")
+    if explicit is not None:
+        return explicit
+    metadata = _read_json_optional(path / "adapter_run_metadata.json")
+    if metadata is None:
+        return None
+    payload = metadata.get("semantic_consistency")
+    return payload if isinstance(payload, dict) else None
 
 
 def _sort_if_present(df: pd.DataFrame) -> pd.DataFrame:
@@ -404,6 +433,36 @@ def _performance_context(
         out["comparison_engine"] = comparison.engine_name
         out["comparison_summary"] = (comparison.backtest_summary or {}).get("summary") or {}
     return out
+
+
+def _semantic_consistency_context(
+    primary: LoadedExecutionArtifacts,
+    comparison: LoadedExecutionArtifacts | None,
+    unavailable: list[MetricUnavailable],
+) -> dict[str, object] | None:
+    primary_summary = summarize_semantic_report_payload(primary.semantic_consistency_report)
+    if primary_summary is None:
+        unavailable.append(
+            MetricUnavailable(
+                "semantic_consistency",
+                "primary semantic consistency report is missing",
+            )
+        )
+    out: dict[str, object] = {"primary": primary_summary}
+
+    if comparison is not None:
+        comparison_summary = summarize_semantic_report_payload(
+            comparison.semantic_consistency_report
+        )
+        if comparison_summary is None:
+            unavailable.append(
+                MetricUnavailable(
+                    "semantic_consistency",
+                    "comparison semantic consistency report is missing",
+                )
+            )
+        out["comparison"] = comparison_summary
+    return out if any(v is not None for v in out.values()) else None
 
 
 def _build_flags(

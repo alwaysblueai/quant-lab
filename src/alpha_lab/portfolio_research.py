@@ -5,6 +5,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
 # ---------------------------------------------------------------------------
 # Column name constants
 # ---------------------------------------------------------------------------
@@ -76,28 +78,28 @@ def portfolio_weights(
         one factor name.
     """
     if method not in _WEIGHT_METHODS:
-        raise ValueError(
+        raise AlphaLabConfigError(
             f"method must be one of {sorted(_WEIGHT_METHODS)}, got {method!r}"
         )
 
     required = {"date", "asset", "factor", "value"}
     missing = required - set(factor_df.columns)
     if missing:
-        raise ValueError(f"factor_df is missing required columns: {missing}")
+        raise AlphaLabDataError(f"factor_df is missing required columns: {missing}")
 
     if factor_df.empty:
         return pd.DataFrame(columns=list(_WEIGHT_COLUMNS))
 
     factor_names = pd.unique(factor_df["factor"])
     if len(factor_names) != 1:
-        raise ValueError("factor_df must contain exactly one factor name")
+        raise AlphaLabDataError("factor_df must contain exactly one factor name")
 
     if top_k is not None and top_k <= 0:
-        raise ValueError("top_k must be a positive integer")
+        raise AlphaLabConfigError("top_k must be a positive integer")
     if bottom_k is not None and bottom_k <= 0:
-        raise ValueError("bottom_k must be a positive integer")
+        raise AlphaLabConfigError("bottom_k must be a positive integer")
 
-    all_rows: list[dict[str, object]] = []
+    parts: list[pd.DataFrame] = []
 
     for date, group in factor_df.groupby("date", sort=True):
         group = group.dropna(subset=["value"]).copy()
@@ -119,24 +121,27 @@ def portfolio_weights(
         long_w = _compute_weights(long_vals, method)
 
         if eff_bottom > 0:
-            # For the short leg, negate values so the *lowest* factor value
-            # maps to the *highest* negated value → highest short weight.
             short_vals = -group["value"].iloc[n - eff_bottom :].to_numpy(dtype=float)
             short_assets = group["asset"].iloc[n - eff_bottom :].to_numpy()
             short_w = _compute_weights(short_vals, method)
 
-            for asset, w in zip(long_assets, long_w, strict=True):
-                all_rows.append({"date": date, "asset": asset, "weight": float(w)})
-            for asset, w in zip(short_assets, short_w, strict=True):
-                all_rows.append({"date": date, "asset": asset, "weight": -float(w)})
+            assets = np.concatenate([long_assets, short_assets])
+            weights = np.concatenate([long_w, -short_w])
         else:
-            for asset, w in zip(long_assets, long_w, strict=True):
-                all_rows.append({"date": date, "asset": asset, "weight": float(w)})
+            assets = long_assets
+            weights = long_w
 
-    if not all_rows:
+        part = pd.DataFrame({
+            "date": date,
+            "asset": assets,
+            "weight": weights.astype(float),
+        })
+        parts.append(part)
+
+    if not parts:
         return pd.DataFrame(columns=list(_WEIGHT_COLUMNS))
 
-    return pd.DataFrame(all_rows, columns=list(_WEIGHT_COLUMNS)).reset_index(drop=True)
+    return pd.concat(parts, ignore_index=True)[list(_WEIGHT_COLUMNS)]
 
 
 # ---------------------------------------------------------------------------
@@ -211,9 +216,9 @@ def simulate_portfolio_returns(
         If required columns are missing or parameter constraints are violated.
     """
     if holding_period < 1:
-        raise ValueError(f"holding_period must be >= 1, got {holding_period}")
+        raise AlphaLabConfigError(f"holding_period must be >= 1, got {holding_period}")
     if rebalance_frequency < 1:
-        raise ValueError(f"rebalance_frequency must be >= 1, got {rebalance_frequency}")
+        raise AlphaLabConfigError(f"rebalance_frequency must be >= 1, got {rebalance_frequency}")
 
     for df, name, cols in [
         (weights_df, "weights_df", {"date", "asset", "weight"}),
@@ -221,79 +226,86 @@ def simulate_portfolio_returns(
     ]:
         missing = cols - set(df.columns)
         if missing:
-            raise ValueError(f"{name} is missing required columns: {missing}")
+            raise AlphaLabDataError(f"{name} is missing required columns: {missing}")
 
     if weights_df.empty or returns_df.empty:
         return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
 
-    w_df = weights_df.copy()
+    w_df = weights_df[["date", "asset", "weight"]].copy()
     w_df["date"] = pd.to_datetime(w_df["date"])
+    w_df = w_df.drop_duplicates(subset=["date", "asset"], keep="last")
+
     r_df = returns_df[["date", "asset", "value"]].copy()
     r_df["date"] = pd.to_datetime(r_df["date"])
+    r_df = r_df.drop_duplicates(subset=["date", "asset"], keep="last")
 
-    # Identify active rebalance dates (every rebalance_frequency steps).
-    all_rebalance_dates = (
-        w_df["date"].drop_duplicates().sort_values().reset_index(drop=True)
-    )
-    active_rebalance_dates = all_rebalance_dates.iloc[::rebalance_frequency].reset_index(
-        drop=True
-    )
-    n_active = len(active_rebalance_dates)
-
-    # For each active rebalance date, compute the weighted return stream over
-    # the date range where that position is active.
-    # position_returns[eval_date] accumulates returns from all active positions.
-    position_return_sums: dict[pd.Timestamp, list[float]] = {}
-
-    for i, r_date in enumerate(active_rebalance_dates):
-        # Determine when this position expires.
-        if i + holding_period < n_active:
-            expiry: pd.Timestamp | None = active_rebalance_dates.iloc[i + holding_period]
-        else:
-            expiry = None  # Active until the end of the evaluation data.
-
-        weights_at_r = w_df[w_df["date"] == r_date][["asset", "weight"]]
-        if weights_at_r.empty:
-            continue
-
-        # Slice evaluation returns for the active window.
-        if expiry is not None:
-            window_returns = r_df[(r_df["date"] >= r_date) & (r_df["date"] < expiry)]
-        else:
-            window_returns = r_df[r_df["date"] >= r_date]
-
-        if window_returns.empty:
-            continue
-
-        merged = window_returns.merge(weights_at_r, on="asset", how="inner")
-        if merged.empty:
-            continue
-
-        # Compute weighted portfolio return at each evaluation date.
-        daily_ret = (
-            merged.groupby("date", sort=True)
-            .apply(
-                lambda g: float((g["weight"] * g["value"]).sum()),
-                include_groups=False,
-            )
-        )
-
-        for eval_date, ret_val in daily_ret.items():
-            ts = pd.Timestamp(eval_date)
-            if ts not in position_return_sums:
-                position_return_sums[ts] = []
-            position_return_sums[ts].append(float(ret_val))
-
-    if not position_return_sums:
+    all_rebalance_dates = w_df["date"].drop_duplicates().sort_values().reset_index(drop=True)
+    active_rebalance_dates = all_rebalance_dates.iloc[::rebalance_frequency].reset_index(drop=True)
+    if active_rebalance_dates.empty:
         return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
 
-    rows = [
-        {"date": d, "portfolio_return": float(np.mean(vals))}
-        for d, vals in sorted(position_return_sums.items())
-    ]
-    return pd.DataFrame(rows, columns=list(_PORTFOLIO_RETURN_COLUMNS)).reset_index(
-        drop=True
+    active_date_set = set(active_rebalance_dates.tolist())
+    w_active = w_df[w_df["date"].isin(active_date_set)].copy()
+    if w_active.empty:
+        return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
+
+    weight_wide = (
+        w_active.pivot(index="date", columns="asset", values="weight")
+        .sort_index()
+        .fillna(0.0)
     )
+    return_wide = r_df.pivot(index="date", columns="asset", values="value").sort_index()
+    if weight_wide.empty or return_wide.empty:
+        return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
+
+    shared_assets = sorted(set(weight_wide.columns) & set(return_wide.columns))
+    if not shared_assets:
+        return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
+
+    weight_wide = weight_wide.reindex(columns=shared_assets, fill_value=0.0)
+    return_wide = return_wide.reindex(columns=shared_assets)
+
+    weight_values = weight_wide.to_numpy(dtype=float)
+    return_values = return_wide.to_numpy(dtype=float)
+    weighted_returns = np.nan_to_num(return_values, nan=0.0) @ weight_values.T
+
+    valid_return_assets = (~np.isnan(return_values)).astype(float)
+    active_weight_assets = (np.abs(weight_values) > 0).astype(float)
+    position_valid_counts = valid_return_assets @ active_weight_assets.T
+
+    eval_dates = return_wide.index.to_numpy(dtype="datetime64[ns]")
+    rebalance_dates = weight_wide.index.to_numpy(dtype="datetime64[ns]")
+    active_mask = eval_dates[:, None] >= rebalance_dates[None, :]
+
+    n_rebalance = len(rebalance_dates)
+    if holding_period < n_rebalance:
+        expiring_cols = n_rebalance - holding_period
+        expiry_dates = rebalance_dates[holding_period:]
+        active_mask[:, :expiring_cols] &= (
+            eval_dates[:, None] < expiry_dates[None, :]
+        )
+
+    contribution_mask = active_mask & (position_valid_counts > 0.0)
+    if not np.any(contribution_mask):
+        return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
+
+    contribution_counts = contribution_mask.sum(axis=1)
+    contribution_sums = (weighted_returns * contribution_mask).sum(axis=1)
+    portfolio_returns = np.divide(
+        contribution_sums,
+        contribution_counts,
+        out=np.zeros_like(contribution_sums, dtype=float),
+        where=contribution_counts > 0,
+    )
+
+    valid_rows = contribution_counts > 0
+    out = pd.DataFrame(
+        {
+            "date": pd.to_datetime(eval_dates[valid_rows]),
+            "portfolio_return": portfolio_returns[valid_rows].astype(float),
+        }
+    )
+    return out[list(_PORTFOLIO_RETURN_COLUMNS)].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -337,38 +349,28 @@ def portfolio_turnover(weights_df: pd.DataFrame) -> pd.DataFrame:
     """
     missing = {"date", "asset", "weight"} - set(weights_df.columns)
     if missing:
-        raise ValueError(f"weights_df is missing required columns: {missing}")
+        raise AlphaLabDataError(f"weights_df is missing required columns: {missing}")
 
     if weights_df.empty:
         return pd.DataFrame(columns=list(_PORTFOLIO_TURNOVER_COLUMNS))
 
-    df = weights_df.copy()
+    df = weights_df[["date", "asset", "weight"]].copy()
     df["date"] = pd.to_datetime(df["date"])
+    df = df.drop_duplicates(subset=["date", "asset"], keep="last")
 
-    dates = sorted(df["date"].unique())
-    rows: list[dict[str, object]] = []
-    prev_weights: dict[str, float] = {}
+    wide = df.pivot(index="date", columns="asset", values="weight").sort_index()
+    if wide.empty:
+        return pd.DataFrame(columns=list(_PORTFOLIO_TURNOVER_COLUMNS))
 
-    for date in dates:
-        curr_weights: dict[str, float] = (
-            df[df["date"] == date].set_index("asset")["weight"].to_dict()
-        )
-
-        if not prev_weights:
-            rows.append({"date": date, "portfolio_turnover": math.nan})
-        else:
-            all_assets = set(curr_weights) | set(prev_weights)
-            total_abs_change = sum(
-                abs(curr_weights.get(a, 0.0) - prev_weights.get(a, 0.0))
-                for a in all_assets
-            )
-            rows.append({"date": date, "portfolio_turnover": total_abs_change / 2.0})
-
-        prev_weights = curr_weights
-
-    return pd.DataFrame(rows, columns=list(_PORTFOLIO_TURNOVER_COLUMNS)).reset_index(
-        drop=True
+    turnover = wide.fillna(0.0).diff().abs().sum(axis=1) / 2.0
+    turnover.iloc[0] = math.nan
+    out = pd.DataFrame(
+        {
+            "date": turnover.index.to_numpy(),
+            "portfolio_turnover": turnover.to_numpy(dtype=float),
+        }
     )
+    return out[list(_PORTFOLIO_TURNOVER_COLUMNS)].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +431,7 @@ def portfolio_cost_adjusted_returns(
         If ``cost_rate < 0`` or required columns are missing.
     """
     if cost_rate < 0:
-        raise ValueError(f"cost_rate must be >= 0, got {cost_rate}")
+        raise AlphaLabConfigError(f"cost_rate must be >= 0, got {cost_rate}")
 
     for df, name, cols in [
         (portfolio_return_df, "portfolio_return_df", {"date", "portfolio_return"}),
@@ -437,7 +439,7 @@ def portfolio_cost_adjusted_returns(
     ]:
         missing = cols - set(df.columns)
         if missing:
-            raise ValueError(f"{name} is missing required columns: {missing}")
+            raise AlphaLabDataError(f"{name} is missing required columns: {missing}")
 
     if portfolio_return_df.empty:
         return pd.DataFrame(columns=list(_PORTFOLIO_COST_ADJ_COLUMNS))
@@ -508,4 +510,4 @@ def _compute_weights(values: np.ndarray, method: str) -> np.ndarray:
         total = shifted.sum()
         return shifted / total if total > 0 else np.full(n, 1.0 / n)
 
-    raise ValueError(f"Unknown weight method: {method!r}")
+    raise AlphaLabConfigError(f"Unknown weight method: {method!r}")
