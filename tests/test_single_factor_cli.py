@@ -10,6 +10,24 @@ from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
 from tests.single_factor_case_helpers import write_demo_single_factor_case
 
 
+def test_single_factor_cli_help_mentions_profile_and_level2_workflow() -> None:
+    parser = single_factor_cli.build_parser()
+    run_help = next(
+        action.choices["run"].format_help()
+        for action in parser._actions
+        if (
+            hasattr(action, "choices")
+            and isinstance(action.choices, dict)
+            and "run" in action.choices
+        )
+    )
+    assert "--evaluation-profile" in run_help
+    assert "exploratory_screening" in run_help
+    assert "stricter_research" in run_help
+    assert "Level 1/2" in parser.format_help()
+    assert "promotion gate" in parser.format_help()
+
+
 def test_single_factor_cli_run_executes_and_writes_bundle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -24,6 +42,10 @@ def test_single_factor_cli_run_executes_and_writes_bundle(
     captured = capsys.readouterr()
     assert "real-case-single-factor" in captured.out
     assert "Status   : success" in captured.out
+    assert "Evaluation Profile" in captured.out
+    assert "Campaign Triage" in captured.out
+    assert "Level 2 Promotion" in captured.out
+    assert "Level 2 Validation" in captured.out
 
     case_dir = out_root / spec.name
     assert (case_dir / "run_manifest.json").exists()
@@ -36,6 +58,7 @@ def test_single_factor_cli_run_executes_and_writes_bundle(
     assert manifest["rendered_report"] is False
     assert manifest["rendered_report_path"] is None
     assert manifest["render_error"] is None
+    assert manifest["evaluation_standard"]["profile_name"] == "default_research"
 
 
 def test_single_factor_cli_render_report_writes_case_report(tmp_path: Path) -> None:
@@ -156,3 +179,19 @@ def test_single_factor_cli_render_overwrite_controls_existing_report(tmp_path: P
     manifest_success = json.loads((case_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest_success["render_status"] == "success"
     assert manifest_success["rendered_report"] is True
+
+
+def test_single_factor_cli_rejects_unknown_evaluation_profile(tmp_path: Path) -> None:
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    out_root = tmp_path / "cli_out"
+    with pytest.raises(SystemExit):
+        single_factor_cli.main(
+            [
+                "run",
+                str(spec_path),
+                "--output-root-dir",
+                str(out_root),
+                "--evaluation-profile",
+                "unknown_profile",
+            ]
+        )

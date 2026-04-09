@@ -6,7 +6,13 @@ import logging
 import sys
 from pathlib import Path
 
+from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting.renderers import write_case_report
+from alpha_lab.research_evaluation_config import (
+    AVAILABLE_RESEARCH_EVALUATION_PROFILES,
+    DEFAULT_RESEARCH_EVALUATION_CONFIG,
+)
 
 from .pipeline import run_single_factor_case
 
@@ -17,7 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="alpha-lab real-case single-factor",
         description=(
-            "Run one real-case single-factor study from spec to standardized artifacts."
+            "Run one Level 1/2 single-factor workflow from spec to auditable artifacts "
+            "(Level 1 evaluation -> campaign triage -> Level 2 promotion gate -> "
+            "Level 2 portfolio validation)."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -29,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     run_parser.add_argument("spec_path", help="Path to single-factor case YAML/JSON spec.")
+    run_parser.add_argument(
+        "--evaluation-profile",
+        default=DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name,
+        choices=sorted(AVAILABLE_RESEARCH_EVALUATION_PROFILES),
+        help=(
+            "Research evaluation profile controlling factor verdict standards, "
+            "campaign triage, Level 2 promotion gate thresholds, and Level 2 "
+            "portfolio-validation guardrails."
+        ),
+    )
     run_parser.add_argument(
         "--output-root-dir",
         default=None,
@@ -75,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_single_factor_case(
             Path(args.spec_path),
             output_root_dir=args.output_root_dir,
+            evaluation_profile=args.evaluation_profile,
             vault_root=args.vault_root,
             vault_export_mode=args.vault_export_mode,
         )
@@ -100,9 +119,35 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Metrics  : {result.artifact_paths['metrics']}")
     print(f"  Summary  : {result.artifact_paths['summary']}")
     print(f"  Card     : {result.artifact_paths['experiment_card']}")
+    print(f"  Level 2  : {result.output_dir / 'level2_portfolio_validation'}")
 
     manifest_payload = json.loads(result.artifact_paths["run_manifest"].read_text(encoding="utf-8"))
+    metrics_payload = json.loads(result.artifact_paths["metrics"].read_text(encoding="utf-8"))
+    if not isinstance(manifest_payload, dict):
+        raise AlphaLabDataError("run_manifest.json root must be an object")
+    if not isinstance(metrics_payload, dict):
+        raise AlphaLabDataError("metrics.json root must be an object")
+    validate_level12_artifact_payload(
+        manifest_payload,
+        artifact_name=result.artifact_paths["run_manifest"].name,
+        source=result.artifact_paths["run_manifest"],
+    )
+    validate_level12_artifact_payload(
+        metrics_payload,
+        artifact_name=result.artifact_paths["metrics"].name,
+        source=result.artifact_paths["metrics"],
+    )
+    metrics = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
+    evaluation_profile = _fmt_text(metrics.get("research_evaluation_profile"))
+    triage_label = _fmt_text(metrics.get("campaign_triage"))
+    promotion_label = _fmt_text(metrics.get("promotion_decision"))
+    portfolio_status = _fmt_text(metrics.get("portfolio_validation_status"))
+    portfolio_reco = _fmt_text(metrics.get("portfolio_validation_recommendation"))
     vault_meta = manifest_payload.get("vault_export", {})
+    print(f"  Evaluation Profile : {evaluation_profile}")
+    print(f"  Campaign Triage    : {triage_label}")
+    print(f"  Level 2 Promotion  : {promotion_label}")
+    print(f"  Level 2 Validation : {portfolio_status} ({portfolio_reco})")
     print(f"  Vault Export Status : {vault_meta.get('status')}")
     print(f"  Vault Export Mode   : {vault_meta.get('mode')}")
     print(f"  Report Render Status: {manifest_payload.get('render_status')}")
@@ -154,8 +199,13 @@ def _update_run_manifest(
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
-            raise ValueError("run_manifest.json root must be an object")
+            raise AlphaLabDataError("run_manifest.json root must be an object")
         payload.update(render_meta)
+        validate_level12_artifact_payload(
+            payload,
+            artifact_name=manifest_path.name,
+            source=manifest_path,
+        )
         manifest_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -166,6 +216,11 @@ def _update_run_manifest(
             manifest_path,
             exc,
         )
+
+
+def _fmt_text(value: object) -> str:
+    text = str(value).strip() if value is not None else ""
+    return text if text else "N/A"
 
 
 if __name__ == "__main__":
