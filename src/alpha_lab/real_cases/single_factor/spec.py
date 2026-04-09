@@ -1,43 +1,27 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabExperimentError
+from alpha_lab.real_cases.common_spec import (
+    NeutralizationSpec,
+    OutputSpec,
+    TargetSpec,
+    TransactionCostSpec,
+    UniverseSpec,
+    mapping_kwargs,
+    parse_long_short_direction,
+    parse_mapping_payload,
+    required_str,
+    resolve_optional_path,
+    resolve_required_path,
+)
+
 Direction = Literal["long", "short"]
 Standardization = Literal["zscore", "rank", "none"]
-TargetKind = Literal["forward_return"]
-
-
-@dataclass(frozen=True)
-class UniverseSpec:
-    """Optional universe filter for PIT-safe row selection."""
-
-    name: str = "default"
-    path: str | None = None
-    in_universe_column: str = "in_universe"
-
-    def __post_init__(self) -> None:
-        if not self.name.strip():
-            raise ValueError("universe.name must be non-empty")
-        if not self.in_universe_column.strip():
-            raise ValueError("universe.in_universe_column must be non-empty")
-
-
-@dataclass(frozen=True)
-class TargetSpec:
-    """Target/label definition."""
-
-    kind: TargetKind = "forward_return"
-    horizon: int = 5
-
-    def __post_init__(self) -> None:
-        if self.kind != "forward_return":
-            raise ValueError("target.kind currently supports only 'forward_return'")
-        if self.horizon <= 0:
-            raise ValueError("target.horizon must be > 0")
 
 
 @dataclass(frozen=True)
@@ -53,68 +37,19 @@ class PreprocessSpec:
 
     def __post_init__(self) -> None:
         if self.winsorize_lower < 0 or self.winsorize_upper > 1:
-            raise ValueError("preprocess winsorize bounds must be within [0, 1]")
+            raise AlphaLabConfigError("preprocess winsorize bounds must be within [0, 1]")
         if self.winsorize_lower >= self.winsorize_upper:
-            raise ValueError("preprocess.winsorize_lower must be < winsorize_upper")
+            raise AlphaLabConfigError("preprocess.winsorize_lower must be < winsorize_upper")
         if self.standardization not in {"zscore", "rank", "none"}:
-            raise ValueError(
+            raise AlphaLabConfigError(
                 "preprocess.standardization must be one of ['zscore', 'rank', 'none']"
             )
         if self.min_group_size <= 0:
-            raise ValueError("preprocess.min_group_size must be > 0")
+            raise AlphaLabConfigError("preprocess.min_group_size must be > 0")
         if self.min_coverage is not None and (
             self.min_coverage <= 0 or self.min_coverage > 1
         ):
-            raise ValueError("preprocess.min_coverage must be in (0, 1] when provided")
-
-
-@dataclass(frozen=True)
-class NeutralizationSpec:
-    """Optional exposure neutralization controls (size/industry)."""
-
-    enabled: bool = False
-    exposures_path: str | None = None
-    size_col: str | None = None
-    industry_col: str | None = None
-    min_obs: int = 20
-    ridge: float = 1e-8
-
-    def __post_init__(self) -> None:
-        if self.min_obs <= 0:
-            raise ValueError("neutralization.min_obs must be > 0")
-        if self.ridge < 0:
-            raise ValueError("neutralization.ridge must be >= 0")
-        if self.enabled:
-            if self.exposures_path is None or not self.exposures_path.strip():
-                raise ValueError(
-                    "neutralization.exposures_path is required when neutralization.enabled=True"
-                )
-            if self.size_col is None and self.industry_col is None:
-                raise ValueError(
-                    "neutralization requires at least one of size_col/industry_col"
-                )
-
-
-@dataclass(frozen=True)
-class TransactionCostSpec:
-    """Simple one-way transaction cost assumption."""
-
-    one_way_rate: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.one_way_rate < 0:
-            raise ValueError("transaction_cost.one_way_rate must be >= 0")
-
-
-@dataclass(frozen=True)
-class OutputSpec:
-    """Output root for case artifacts."""
-
-    root_dir: str = "outputs/real_cases"
-
-    def __post_init__(self) -> None:
-        if not self.root_dir.strip():
-            raise ValueError("output.root_dir must be non-empty")
+            raise AlphaLabConfigError("preprocess.min_coverage must be in (0, 1] when provided")
 
 
 @dataclass(frozen=True)
@@ -137,19 +72,19 @@ class SingleFactorCaseSpec:
 
     def __post_init__(self) -> None:
         if not self.name.strip():
-            raise ValueError("name must be non-empty")
+            raise AlphaLabConfigError("name must be non-empty")
         if not self.factor_name.strip():
-            raise ValueError("factor_name must be non-empty")
+            raise AlphaLabConfigError("factor_name must be non-empty")
         if not self.factor_path.strip():
-            raise ValueError("factor_path must be non-empty")
+            raise AlphaLabConfigError("factor_path must be non-empty")
         if not self.prices_path.strip():
-            raise ValueError("prices_path must be non-empty")
+            raise AlphaLabConfigError("prices_path must be non-empty")
         if self.direction not in {"long", "short"}:
-            raise ValueError("direction must be one of ['long', 'short']")
+            raise AlphaLabConfigError("direction must be one of ['long', 'short']")
         if not self.rebalance_frequency.strip():
-            raise ValueError("rebalance_frequency must be non-empty")
+            raise AlphaLabConfigError("rebalance_frequency must be non-empty")
         if self.n_quantiles < 2:
-            raise ValueError("n_quantiles must be >= 2")
+            raise AlphaLabConfigError("n_quantiles must be >= 2")
 
 
 def load_single_factor_case_spec(path: str | Path) -> SingleFactorCaseSpec:
@@ -160,7 +95,7 @@ def load_single_factor_case_spec(path: str | Path) -> SingleFactorCaseSpec:
         raise FileNotFoundError(f"spec file does not exist: {spec_path}")
 
     text = spec_path.read_text(encoding="utf-8")
-    parsed = _parse_mapping_payload(text, suffix=spec_path.suffix.lower())
+    parsed = parse_mapping_payload(text, suffix=spec_path.suffix.lower())
     spec = single_factor_case_spec_from_mapping(parsed)
     return resolve_spec_paths(spec, base_dir=spec_path.parent)
 
@@ -168,30 +103,28 @@ def load_single_factor_case_spec(path: str | Path) -> SingleFactorCaseSpec:
 def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFactorCaseSpec:
     """Build typed single-factor spec from raw mapping payload."""
 
-    name = _required_str(data, "name")
-    factor_name = _required_str(data, "factor_name")
-    factor_path = _required_str(data, "factor_path")
-    prices_path = _required_str(data, "prices_path")
-    rebalance_frequency = _required_str(data, "rebalance_frequency")
+    name = required_str(data, "name")
+    factor_name = required_str(data, "factor_name")
+    factor_path = required_str(data, "factor_path")
+    prices_path = required_str(data, "prices_path")
+    rebalance_frequency = required_str(data, "rebalance_frequency")
 
-    universe = UniverseSpec(**_mapping_kwargs(data.get("universe", {}), field_name="universe"))
-    target = TargetSpec(**_mapping_kwargs(data.get("target", {}), field_name="target"))
+    universe = UniverseSpec(**mapping_kwargs(data.get("universe", {}), field_name="universe"))
+    target = TargetSpec(**mapping_kwargs(data.get("target", {}), field_name="target"))
     preprocess = PreprocessSpec(
-        **_mapping_kwargs(data.get("preprocess", {}), field_name="preprocess")
+        **mapping_kwargs(data.get("preprocess", {}), field_name="preprocess")
     )
     neutralization = NeutralizationSpec(
-        **_mapping_kwargs(data.get("neutralization", {}), field_name="neutralization")
+        **mapping_kwargs(data.get("neutralization", {}), field_name="neutralization")
     )
     transaction_cost = TransactionCostSpec(
-        **_mapping_kwargs(data.get("transaction_cost", {}), field_name="transaction_cost")
+        **mapping_kwargs(data.get("transaction_cost", {}), field_name="transaction_cost")
     )
-    output = OutputSpec(**_mapping_kwargs(data.get("output", {}), field_name="output"))
-
-    direction = _parse_direction(data.get("direction", "long"))
+    output = OutputSpec(**mapping_kwargs(data.get("output", {}), field_name="output"))
 
     raw_n_quantiles = data.get("n_quantiles", 5)
     if not isinstance(raw_n_quantiles, int):
-        raise ValueError("n_quantiles must be an integer")
+        raise AlphaLabConfigError("n_quantiles must be an integer")
 
     return SingleFactorCaseSpec(
         name=name,
@@ -200,7 +133,7 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
         prices_path=prices_path,
         universe=universe,
         target=target,
-        direction=direction,
+        direction=parse_long_short_direction(data.get("direction", "long")),
         preprocess=preprocess,
         neutralization=neutralization,
         rebalance_frequency=rebalance_frequency,
@@ -213,31 +146,29 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
 def resolve_spec_paths(spec: SingleFactorCaseSpec, *, base_dir: Path) -> SingleFactorCaseSpec:
     """Resolve relative file paths in spec against config directory."""
 
-    def _resolve(path_value: str) -> str:
-        p = Path(path_value)
-        if not p.is_absolute():
-            p = (base_dir / p).resolve()
-        else:
-            p = p.resolve()
-        return str(p)
-
     universe = spec.universe
     if universe.path is not None:
-        universe = replace(universe, path=_resolve(universe.path))
+        universe = replace(universe, path=resolve_optional_path(universe.path, base_dir=base_dir))
 
     neutralization = spec.neutralization
     if neutralization.exposures_path is not None:
         neutralization = replace(
             neutralization,
-            exposures_path=_resolve(neutralization.exposures_path),
+            exposures_path=resolve_optional_path(
+                neutralization.exposures_path,
+                base_dir=base_dir,
+            ),
         )
 
-    output = replace(spec.output, root_dir=_resolve(spec.output.root_dir))
+    output = replace(
+        spec.output,
+        root_dir=resolve_required_path(spec.output.root_dir, base_dir=base_dir),
+    )
 
     return replace(
         spec,
-        factor_path=_resolve(spec.factor_path),
-        prices_path=_resolve(spec.prices_path),
+        factor_path=resolve_required_path(spec.factor_path, base_dir=base_dir),
+        prices_path=resolve_required_path(spec.prices_path, base_dir=base_dir),
         universe=universe,
         neutralization=neutralization,
         output=output,
@@ -254,9 +185,9 @@ def dump_spec_yaml(spec: SingleFactorCaseSpec) -> str:
     """Serialize spec as YAML text."""
 
     try:
-        import yaml
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("PyYAML is required to serialize YAML specs") from exc
+        import yaml  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise AlphaLabExperimentError("PyYAML is required to serialize YAML specs") from exc
 
     return str(
         yaml.safe_dump(
@@ -265,59 +196,3 @@ def dump_spec_yaml(spec: SingleFactorCaseSpec) -> str:
             allow_unicode=False,
         )
     )
-
-
-def _parse_mapping_payload(text: str, *, suffix: str) -> Mapping[str, object]:
-    parsed: object
-    if suffix == ".json":
-        parsed = json.loads(text)
-    elif suffix in {".yml", ".yaml"}:
-        parsed = _yaml_load(text)
-    else:
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            parsed = _yaml_load(text)
-
-    if not isinstance(parsed, Mapping):
-        raise ValueError("spec root must be a mapping/object")
-    return cast(Mapping[str, object], parsed)
-
-
-def _yaml_load(text: str) -> object:
-    try:
-        import yaml
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError(
-            "PyYAML is required for YAML specs; use JSON or install PyYAML"
-        ) from exc
-
-    return yaml.safe_load(text)
-
-
-def _required_str(data: Mapping[str, object], key: str) -> str:
-    raw = data.get(key)
-    if not isinstance(raw, str) or not raw.strip():
-        raise ValueError(f"{key} must be a non-empty string")
-    return raw
-
-
-def _mapping_kwargs(value: object, *, field_name: str) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{field_name} must be an object")
-    out: dict[str, object] = {}
-    for key, raw in value.items():
-        if not isinstance(key, str):
-            raise ValueError(f"{field_name} keys must be strings")
-        out[key] = raw
-    return out
-
-
-def _parse_direction(value: object) -> Direction:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"long", "positive", "+", "1"}:
-            return "long"
-        if normalized in {"short", "negative", "-", "-1"}:
-            return "short"
-    raise ValueError("direction must be one of ['long', 'short']")

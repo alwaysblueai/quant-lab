@@ -1,43 +1,23 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
+from alpha_lab.real_cases.common_spec import (
+    OutputSpec,
+    TargetSpec,
+    TransactionCostSpec,
+    UniverseSpec,
+    mapping_kwargs,
+    parse_mapping_payload,
+    required_str,
+    resolve_required_path,
+)
+
 Direction = Literal["positive", "negative"]
 ComponentTransform = Literal["zscore", "rank", "none"]
-TargetKind = Literal["forward_return"]
-
-
-@dataclass(frozen=True)
-class UniverseSpec:
-    """Optional universe filter for PIT-safe row selection."""
-
-    name: str = "default"
-    path: str | None = None
-    in_universe_column: str = "in_universe"
-
-    def __post_init__(self) -> None:
-        if not self.name.strip():
-            raise ValueError("universe.name must be non-empty")
-        if not self.in_universe_column.strip():
-            raise ValueError("universe.in_universe_column must be non-empty")
-
-
-@dataclass(frozen=True)
-class TargetSpec:
-    """Target/label configuration."""
-
-    kind: TargetKind = "forward_return"
-    horizon: int = 5
-
-    def __post_init__(self) -> None:
-        if self.kind != "forward_return":
-            raise ValueError("target.kind currently supports only 'forward_return'")
-        if self.horizon <= 0:
-            raise ValueError("target.horizon must be > 0")
 
 
 @dataclass(frozen=True)
@@ -95,7 +75,10 @@ class PreprocessSpec:
 
 @dataclass(frozen=True)
 class NeutralizationSpec:
-    """Optional exposure neutralization controls."""
+    """Neutralization spec with beta_col for composite factors.
+
+    Extends the common spec fields with an additional ``beta_col`` option.
+    """
 
     enabled: bool = False
     exposures_path: str | None = None
@@ -119,28 +102,6 @@ class NeutralizationSpec:
                 raise ValueError(
                     "neutralization requires at least one of size_col/industry_col/beta_col"
                 )
-
-
-@dataclass(frozen=True)
-class TransactionCostSpec:
-    """Simple one-way transaction cost assumption."""
-
-    one_way_rate: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.one_way_rate < 0:
-            raise ValueError("transaction_cost.one_way_rate must be >= 0")
-
-
-@dataclass(frozen=True)
-class OutputSpec:
-    """Output root for case artifacts."""
-
-    root_dir: str = "outputs/real_cases"
-
-    def __post_init__(self) -> None:
-        if not self.root_dir.strip():
-            raise ValueError("output.root_dir must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -186,7 +147,7 @@ def load_composite_case_spec(path: str | Path) -> CompositeCaseSpec:
         raise FileNotFoundError(f"spec file does not exist: {spec_path}")
 
     text = spec_path.read_text(encoding="utf-8")
-    parsed = _parse_mapping_payload(text, suffix=spec_path.suffix.lower())
+    parsed = parse_mapping_payload(text, suffix=spec_path.suffix.lower())
     spec = composite_case_spec_from_mapping(parsed)
     return resolve_spec_paths(spec, base_dir=spec_path.parent)
 
@@ -194,29 +155,29 @@ def load_composite_case_spec(path: str | Path) -> CompositeCaseSpec:
 def composite_case_spec_from_mapping(data: Mapping[str, object]) -> CompositeCaseSpec:
     """Build a typed spec from a raw mapping payload."""
 
-    name = _required_str(data, "name")
-    prices_path = _required_str(data, "prices_path")
-    rebalance_frequency = _required_str(data, "rebalance_frequency")
+    name = required_str(data, "name")
+    prices_path = required_str(data, "prices_path")
+    rebalance_frequency = required_str(data, "rebalance_frequency")
 
-    universe = UniverseSpec(**_mapping_kwargs(data.get("universe", {}), field_name="universe"))
-    target = TargetSpec(**_mapping_kwargs(data.get("target", {}), field_name="target"))
+    universe = UniverseSpec(**mapping_kwargs(data.get("universe", {}), field_name="universe"))
+    target = TargetSpec(**mapping_kwargs(data.get("target", {}), field_name="target"))
     preprocess = PreprocessSpec(
-        **_mapping_kwargs(data.get("preprocess", {}), field_name="preprocess")
+        **mapping_kwargs(data.get("preprocess", {}), field_name="preprocess")
     )
     neutralization = NeutralizationSpec(
-        **_mapping_kwargs(data.get("neutralization", {}), field_name="neutralization")
+        **mapping_kwargs(data.get("neutralization", {}), field_name="neutralization")
     )
     transaction_cost = TransactionCostSpec(
-        **_mapping_kwargs(data.get("transaction_cost", {}), field_name="transaction_cost")
+        **mapping_kwargs(data.get("transaction_cost", {}), field_name="transaction_cost")
     )
-    output = OutputSpec(**_mapping_kwargs(data.get("output", {}), field_name="output"))
+    output = OutputSpec(**mapping_kwargs(data.get("output", {}), field_name="output"))
 
     raw_components = data.get("components")
     if not isinstance(raw_components, list) or not raw_components:
         raise ValueError("components must be a non-empty list")
     components: list[ComponentSpec] = []
     for idx, raw in enumerate(raw_components):
-        kwargs = _mapping_kwargs(raw, field_name=f"components[{idx}]")
+        kwargs = mapping_kwargs(raw, field_name=f"components[{idx}]")
         direction = _parse_direction(kwargs.get("direction", "positive"), idx=idx)
         transform = _parse_transform(kwargs.get("transform", "zscore"), idx=idx)
         kwargs["direction"] = direction
@@ -246,12 +207,7 @@ def resolve_spec_paths(spec: CompositeCaseSpec, *, base_dir: Path) -> CompositeC
     """Resolve relative file paths in spec against config directory."""
 
     def _resolve(path_value: str) -> str:
-        p = Path(path_value)
-        if not p.is_absolute():
-            p = (base_dir / p).resolve()
-        else:
-            p = p.resolve()
-        return str(p)
+        return resolve_required_path(path_value, base_dir=base_dir)
 
     components = tuple(
         replace(component, path=_resolve(component.path)) for component in spec.components
@@ -291,10 +247,7 @@ def spec_to_dict(spec: CompositeCaseSpec) -> dict[str, object]:
 def dump_spec_yaml(spec: CompositeCaseSpec) -> str:
     """Serialize spec as YAML text."""
 
-    try:
-        import yaml
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("PyYAML is required to serialize YAML specs") from exc
+    import yaml  # type: ignore[import-untyped]
 
     return str(
         yaml.safe_dump(
@@ -303,52 +256,6 @@ def dump_spec_yaml(spec: CompositeCaseSpec) -> str:
             allow_unicode=False,
         )
     )
-
-
-def _parse_mapping_payload(text: str, *, suffix: str) -> Mapping[str, object]:
-    parsed: object
-    if suffix == ".json":
-        parsed = json.loads(text)
-    elif suffix in {".yml", ".yaml"}:
-        parsed = _yaml_load(text)
-    else:
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            parsed = _yaml_load(text)
-
-    if not isinstance(parsed, Mapping):
-        raise ValueError("spec root must be a mapping/object")
-    return cast(Mapping[str, object], parsed)
-
-
-def _yaml_load(text: str) -> object:
-    try:
-        import yaml
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError(
-            "PyYAML is required for YAML specs; use JSON or install PyYAML"
-        ) from exc
-
-    return yaml.safe_load(text)
-
-
-def _mapping_kwargs(value: object, *, field_name: str) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{field_name} must be an object")
-    out: dict[str, object] = {}
-    for key, raw in value.items():
-        if not isinstance(key, str):
-            raise ValueError(f"{field_name} keys must be strings")
-        out[key] = raw
-    return out
-
-
-def _required_str(data: Mapping[str, object], key: str) -> str:
-    raw = data.get(key)
-    if not isinstance(raw, str) or not raw.strip():
-        raise ValueError(f"{key} must be a non-empty string")
-    return raw
 
 
 def _parse_direction(value: object, *, idx: int) -> Direction:
