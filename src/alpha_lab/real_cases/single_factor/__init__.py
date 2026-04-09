@@ -1,4 +1,4 @@
-"""Real-case single-factor research package (v1)."""
+"""Real-case single-factor research-validation package (v1)."""
 
 from .pipeline import SingleFactorCaseRunResult, run_single_factor_case
 from .spec import (

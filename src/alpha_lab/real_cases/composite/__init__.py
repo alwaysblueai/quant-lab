@@ -1,4 +1,4 @@
-"""Real-case composite research package (v1)."""
+"""Real-case composite research-validation package (v1)."""
 
 from .pipeline import CompositeCaseRunResult, run_composite_case
 from .spec import (
