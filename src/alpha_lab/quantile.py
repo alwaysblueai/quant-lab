@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS, validate_factor_output
 
 _QUANTILE_ASSIGNMENT_COLUMNS = ("date", "asset", "factor", "quantile")
 _QUANTILE_RETURN_COLUMNS = ("date", "factor", "quantile", "mean_return")
@@ -43,11 +44,11 @@ def quantile_assignments(
         assignment.  ``quantile`` is an integer in ``[1, n_quantiles]``.
     """
     if n_quantiles < 2:
-        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+        raise AlphaLabConfigError(f"n_quantiles must be >= 2, got {n_quantiles}")
     if factors.empty:
         return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
 
-    _validate_canonical(factors, "factors")
+    validate_factor_output(factors)
     factor_name = _single_factor_name(factors, "factors")
 
     df = factors[["date", "asset", "value"]].dropna(subset=["value"]).copy()
@@ -108,13 +109,13 @@ def quantile_returns(
         NaN-dropping are excluded entirely.
     """
     if n_quantiles < 2:
-        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+        raise AlphaLabConfigError(f"n_quantiles must be >= 2, got {n_quantiles}")
 
     if factors.empty or labels.empty:
         return pd.DataFrame(columns=list(_QUANTILE_RETURN_COLUMNS))
 
-    _validate_canonical(factors, "factors")
-    _validate_canonical(labels, "labels")
+    validate_factor_output(factors)
+    validate_factor_output(labels)
 
     factor_name = _single_factor_name(factors, "factors")
     # Enforce a single label name so the merge below stays one-to-one.
@@ -173,7 +174,7 @@ def long_short_return(quantile_ret: pd.DataFrame) -> pd.DataFrame:
 
     missing = set(_QUANTILE_RETURN_COLUMNS) - set(quantile_ret.columns)
     if missing:
-        raise ValueError(f"Missing columns in quantile_ret: {missing}")
+        raise AlphaLabDataError(f"Missing columns in quantile_ret: {missing}")
 
     def _ls(group: pd.DataFrame) -> float:
         q_min = int(group["quantile"].min())
@@ -245,33 +246,17 @@ def _assign_quantile(series: pd.Series, n_quantiles: int) -> pd.Series:
     # Row-order invariant because the rank depends only on relative value ordering.
     dense_rank = series.rank(method="dense", na_option="keep")
 
-    def _bucket(r: float) -> float:
-        # Linear map: rank 1 → bucket 1, rank n_distinct → bucket effective_q.
-        # Endpoints are always exact integers by construction.  Half-way values
-        # (exact .5) use "round half up" via int(q + 0.5), which is explicit
-        # and auditable — Python's built-in round() uses banker's rounding
-        # (round-half-to-even) and would be harder to reason about here.
-        q = (r - 1) / (n_distinct - 1) * (effective_q - 1) + 1
-        return float(int(q + 0.5))
-
-    return dense_rank.apply(lambda r: _bucket(r) if pd.notna(r) else float("nan"))
-
-
-def _validate_canonical(df: pd.DataFrame, table_name: str) -> None:
-    missing = set(FACTOR_OUTPUT_COLUMNS) - set(df.columns)
-    if missing:
-        raise ValueError(f"{table_name} is missing required columns: {missing}")
-    if df["date"].isna().any():
-        raise ValueError(f"{table_name} contains NaT in 'date'")
-    if df["asset"].isna().any():
-        raise ValueError(f"{table_name} contains NaN in 'asset'")
-    dupes = df.duplicated(subset=["date", "asset", "factor"])
-    if dupes.any():
-        raise ValueError(f"{table_name} contains duplicate (date, asset, factor) rows")
+    # Vectorised bucket assignment (replaces per-element .apply(lambda)).
+    # Linear map: rank 1 → bucket 1, rank n_distinct → bucket effective_q.
+    # Round-half-up via (q + 0.5).astype(int) matches the original int(q + 0.5).
+    r = dense_rank.to_numpy(dtype=float)
+    q = (r - 1) / (n_distinct - 1) * (effective_q - 1) + 1
+    buckets = np.where(np.isnan(r), np.nan, np.floor(q + 0.5))
+    return pd.Series(buckets, index=series.index, dtype=float)
 
 
 def _single_factor_name(df: pd.DataFrame, table_name: str) -> str:
     names = pd.unique(df["factor"])
     if len(names) != 1:
-        raise ValueError(f"{table_name} must contain exactly one factor name")
+        raise AlphaLabDataError(f"{table_name} must contain exactly one factor name")
     return str(names[0])

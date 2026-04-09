@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.research_integrity.contracts import IntegrityCheckResult
+from alpha_lab.research_integrity.leakage_checks import (
+    check_asof_inputs_not_after_signal_date,
+    check_cross_section_transform_scope,
+)
 
 
 @dataclass(frozen=True)
@@ -12,6 +20,7 @@ class NeutralizationResult:
 
     data: pd.DataFrame
     diagnostics: pd.DataFrame
+    integrity_checks: tuple[IntegrityCheckResult, ...] = ()
 
 
 def neutralize_signal(
@@ -25,6 +34,8 @@ def neutralize_signal(
     min_obs: int = 20,
     ridge: float = 1e-8,
     output_col: str = "value_neutralized",
+    known_at_col: str | None = None,
+    enforce_integrity: bool = True,
 ) -> NeutralizationResult:
     """Neutralize a signal by cross-sectional regression within each date.
 
@@ -36,25 +47,57 @@ def neutralize_signal(
     required = {by, "asset", value_col}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"neutralize_signal input missing columns: {sorted(missing)}")
+        raise AlphaLabDataError(f"neutralize_signal input missing columns: {sorted(missing)}")
     if min_obs <= 0:
-        raise ValueError("min_obs must be > 0")
+        raise AlphaLabConfigError("min_obs must be > 0")
     if ridge < 0:
-        raise ValueError("ridge must be >= 0")
+        raise AlphaLabConfigError("ridge must be >= 0")
+    integrity_checks: list[IntegrityCheckResult] = []
 
     exposure_families: list[tuple[str, str]] = []
     if size_col is not None:
         if size_col not in df.columns:
-            raise ValueError(f"size_col not found: {size_col}")
+            raise AlphaLabDataError(f"size_col not found: {size_col}")
         exposure_families.append(("size", size_col))
     if beta_col is not None:
         if beta_col not in df.columns:
-            raise ValueError(f"beta_col not found: {beta_col}")
+            raise AlphaLabDataError(f"beta_col not found: {beta_col}")
         exposure_families.append(("beta", beta_col))
     if industry_col is not None:
         if industry_col not in df.columns:
-            raise ValueError(f"industry_col not found: {industry_col}")
+            raise AlphaLabDataError(f"industry_col not found: {industry_col}")
         exposure_families.append(("industry", industry_col))
+    if known_at_col is not None and known_at_col not in df.columns:
+        raise AlphaLabDataError(f"known_at_col not found: {known_at_col}")
+
+    if enforce_integrity and known_at_col is not None and by == "date":
+        signal_dates = df[[by, "asset"]].copy().rename(columns={by: "date"})
+        aux_dates = (
+            df[[by, "asset", known_at_col]]
+            .copy()
+            .rename(columns={by: "effective_date"})
+        )
+        asof_check = check_asof_inputs_not_after_signal_date(
+            signal_dates,
+            aux_dates,
+            by=("asset",),
+            signal_date_col="date",
+            aux_effective_date_col="effective_date",
+            aux_known_at_col=known_at_col,
+            object_name="neutralization_exposure_asof",
+        )
+        integrity_checks.append(asof_check)
+        if asof_check.status == "fail":
+            raise AlphaLabDataError(
+                "neutralization exposure timing failed integrity check: "
+                f"{asof_check.message}"
+            )
+        if asof_check.status == "warn":
+            warnings.warn(
+                f"neutralize_signal integrity warning: {asof_check.message}",
+                UserWarning,
+                stacklevel=2,
+            )
 
     out = df.copy()
     y_all = pd.to_numeric(out[value_col], errors="coerce")
@@ -151,7 +194,34 @@ def neutralize_signal(
         ],
     )
 
-    return NeutralizationResult(data=out, diagnostics=diagnostics)
+    if enforce_integrity and by == "date":
+        scope_check = check_cross_section_transform_scope(
+            raw_df=df[[by, "asset"]].rename(columns={by: "date"}),
+            transformed_df=out[[by, "asset", output_col]].rename(
+                columns={by: "date", output_col: "value"}
+            ),
+            date_col="date",
+            asset_col="asset",
+            object_name="neutralize_signal_scope",
+        )
+        integrity_checks.append(scope_check)
+        if scope_check.status == "fail":
+            raise AlphaLabDataError(
+                "neutralize_signal output scope failed integrity check: "
+                f"{scope_check.message}"
+            )
+        if scope_check.status == "warn":
+            warnings.warn(
+                f"neutralize_signal integrity warning: {scope_check.message}",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    return NeutralizationResult(
+        data=out,
+        diagnostics=diagnostics,
+        integrity_checks=tuple(integrity_checks),
+    )
 
 
 def _mean_abs_corr(y: pd.Series, x_frame: pd.DataFrame) -> float:
