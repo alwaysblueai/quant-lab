@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 
 _REQUIRED_COLS = {"date", "asset", "close"}
@@ -26,27 +27,27 @@ def low_volatility(
 
     missing = _REQUIRED_COLS - set(df.columns)
     if missing:
-        raise KeyError(f"Input DataFrame is missing required columns: {missing}")
+        raise AlphaLabDataError(f"Input DataFrame is missing required columns: {missing}")
 
     if window <= 0:
-        raise ValueError("'window' must be a positive integer")
+        raise AlphaLabConfigError("'window' must be a positive integer")
 
     if df["date"].isna().any():
-        raise ValueError("Input 'date' column contains NaN/NaT values.")
+        raise AlphaLabDataError("Input 'date' column contains NaN/NaT values.")
 
     if df["asset"].isna().any():
-        raise ValueError("Input 'asset' column contains NaN values.")
+        raise AlphaLabDataError("Input 'asset' column contains NaN values.")
 
     dupes = df.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise ValueError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
+        raise AlphaLabDataError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
 
     if min_periods is None:
         min_periods = window
     if min_periods <= 0:
-        raise ValueError("'min_periods' must be a positive integer")
+        raise AlphaLabConfigError("'min_periods' must be a positive integer")
     if min_periods > window:
-        raise ValueError("'min_periods' cannot exceed window")
+        raise AlphaLabConfigError("'min_periods' cannot exceed window")
 
     df_copy = df.copy()
     df_copy["date"] = pd.to_datetime(df_copy["date"])
