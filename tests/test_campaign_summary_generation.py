@@ -43,6 +43,26 @@ def test_campaign_summary_marks_failed_case_without_fabricating_metrics(tmp_path
     summary_text = result.artifact_paths["campaign_summary"].read_text(encoding="utf-8")
     assert "## 5. Comparative Observations" in summary_text
     assert "value_quality_lowvol_v1 | composite" in summary_text
+    assert "| Rank | Case |" in summary_text
+    assert "IC 95% CI" in summary_text
+    assert "Rolling IC+" in summary_text
+    assert "Verdict" in summary_text
+    assert "Campaign Triage" in summary_text
+    assert "Triage Reasons" in summary_text
+    assert "Level 2 Promotion" in summary_text
+    assert "Promotion Reasons" in summary_text
+    assert "Promotion Blockers" in summary_text
+    assert "L1->L2 Transition" in summary_text
+    assert "Level 2 Portfolio Validation" in summary_text
+    assert "Portfolio Robustness" in summary_text
+    assert "Portfolio Benchmark Relative" in summary_text
+    assert "Portfolio Validation Risks" in summary_text
+    assert "Neutralization" in summary_text
+    assert "Level 1->Level 2 Transition Distribution" in summary_text
+    assert "Cases total / observed transition labels / missing labels" in summary_text
+    assert "Dominant transition reasons by label" in summary_text
+    assert "Transition distribution support:" in summary_text
+    assert "## 6. Campaign Triage Ranking" in summary_text
     assert "N/A" in summary_text
     assert "failed" in summary_text
 

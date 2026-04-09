@@ -15,6 +15,8 @@ from alpha_lab.reporting import (
     summarise_experiment_result,
     to_obsidian_markdown,
 )
+from alpha_lab.reporting.factor_verdict import FACTOR_VERDICT_TAXONOMY
+from alpha_lab.research_evaluation_config import ResearchEvaluationConfig, UncertaintyConfig
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -51,6 +53,14 @@ def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 def _standard_result() -> ExperimentResult:
     return run_factor_experiment(_make_prices(), _momentum_fn)
+
+
+def _close_or_both_nan(a: float, b: float) -> bool:
+    if math.isnan(a) and math.isnan(b):
+        return True
+    if math.isnan(a) or math.isnan(b):
+        return False
+    return math.isclose(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +156,140 @@ def test_summarise_long_short_hit_rate_matches_summary():
         float(df["long_short_hit_rate"].iloc[0]),
         result.summary.long_short_hit_rate,
     )
+
+
+def test_summarise_long_short_ir_matches_summary():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    actual = float(df["long_short_ir"].iloc[0])
+    if math.isnan(result.summary.long_short_ir):
+        assert math.isnan(actual)
+    else:
+        assert math.isclose(actual, result.summary.long_short_ir)
+
+
+def test_summarise_subperiod_metrics_match_summary():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    assert _close_or_both_nan(
+        float(df["subperiod_ic_positive_share"].iloc[0]),
+        result.summary.subperiod_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["subperiod_long_short_positive_share"].iloc[0]),
+        result.summary.subperiod_long_short_positive_share,
+    )
+
+
+def test_summarise_rolling_metrics_match_summary():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    assert _close_or_both_nan(
+        float(df["rolling_ic_positive_share"].iloc[0]),
+        result.summary.rolling_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_rank_ic_positive_share"].iloc[0]),
+        result.summary.rolling_rank_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_long_short_positive_share"].iloc[0]),
+        result.summary.rolling_long_short_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_ic_min_mean"].iloc[0]),
+        result.summary.rolling_ic_min_mean,
+    )
+
+
+def test_summarise_instability_flags_serialized_as_semicolon_list():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    expected = ";".join(result.summary.instability_flags)
+    assert str(df["instability_flags"].iloc[0]) == expected
+
+
+def test_summarise_rolling_instability_flags_serialized_as_semicolon_list():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    expected = ";".join(result.summary.rolling_instability_flags)
+    assert str(df["rolling_instability_flags"].iloc[0]) == expected
+
+
+def test_summarise_factor_verdict_fields_are_populated():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    verdict = str(df["factor_verdict"].iloc[0])
+    reasons = str(df["factor_verdict_reasons"].iloc[0])
+    assert verdict in FACTOR_VERDICT_TAXONOMY
+    assert reasons.strip() != ""
+
+
+def test_summarise_uncertainty_ci_fields_are_present():
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    for column in (
+        "mean_ic_ci_lower",
+        "mean_ic_ci_upper",
+        "mean_rank_ic_ci_lower",
+        "mean_rank_ic_ci_upper",
+        "mean_long_short_return_ci_lower",
+        "mean_long_short_return_ci_upper",
+        "uncertainty_flags",
+        "uncertainty_method",
+        "uncertainty_confidence_level",
+        "uncertainty_bootstrap_resamples",
+        "uncertainty_bootstrap_block_length",
+    ):
+        assert column in df.columns
+
+
+def test_summarise_uncertainty_flags_show_unavailable_ci_for_constant_factor():
+    result = run_factor_experiment(_make_prices(), _constant_fn)
+    df = summarise_experiment_result(result)
+    flags = str(df["uncertainty_flags"].iloc[0])
+    assert "ic_ci_unavailable" in flags
+
+
+def test_summarise_defaults_to_normal_uncertainty_mode() -> None:
+    df = summarise_experiment_result(_standard_result())
+    assert str(df["uncertainty_method"].iloc[0]) == "normal"
+    assert float(df["uncertainty_confidence_level"].iloc[0]) == pytest.approx(0.95)
+    assert math.isnan(float(df["uncertainty_bootstrap_resamples"].iloc[0]))
+    assert math.isnan(float(df["uncertainty_bootstrap_block_length"].iloc[0]))
+
+
+def test_summarise_propagates_bootstrap_uncertainty_metadata() -> None:
+    cfg = ResearchEvaluationConfig(
+        uncertainty=UncertaintyConfig(
+            method="bootstrap",
+            bootstrap_resamples=220,
+            bootstrap_confidence_level=0.90,
+            bootstrap_random_seed=17,
+        )
+    )
+    df = summarise_experiment_result(_standard_result(), evaluation_config=cfg)
+    assert str(df["uncertainty_method"].iloc[0]) == "bootstrap"
+    assert float(df["uncertainty_confidence_level"].iloc[0]) == pytest.approx(0.90)
+    assert int(df["uncertainty_bootstrap_resamples"].iloc[0]) == 220
+    assert math.isnan(float(df["uncertainty_bootstrap_block_length"].iloc[0]))
+
+
+def test_summarise_propagates_block_bootstrap_uncertainty_metadata() -> None:
+    cfg = ResearchEvaluationConfig(
+        uncertainty=UncertaintyConfig(
+            method="block_bootstrap",
+            bootstrap_resamples=180,
+            bootstrap_confidence_level=0.90,
+            bootstrap_random_seed=13,
+            block_bootstrap_block_length=6,
+        )
+    )
+    df = summarise_experiment_result(_standard_result(), evaluation_config=cfg)
+    assert str(df["uncertainty_method"].iloc[0]) == "block_bootstrap"
+    assert float(df["uncertainty_confidence_level"].iloc[0]) == pytest.approx(0.90)
+    assert int(df["uncertainty_bootstrap_resamples"].iloc[0]) == 180
+    assert int(df["uncertainty_bootstrap_block_length"].iloc[0]) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +526,30 @@ def test_obsidian_markdown_contains_summary_metrics_section():
     assert "## Summary Metrics" in md
 
 
+def test_obsidian_markdown_contains_factor_verdict_lines():
+    result = _standard_result()
+    md = to_obsidian_markdown(result)
+    assert "Factor Verdict" in md
+    assert "Verdict Reasons" in md
+
+
+def test_obsidian_markdown_contains_uncertainty_lines():
+    result = _standard_result()
+    md = to_obsidian_markdown(result)
+    assert "Mean IC 95% CI" in md
+    assert "Mean Rank IC 95% CI" in md
+    assert "Mean L/S Return 95% CI" in md
+    assert "Uncertainty Flags" in md
+
+
+def test_obsidian_markdown_contains_rolling_stability_lines():
+    result = _standard_result()
+    md = to_obsidian_markdown(result)
+    assert "Rolling Stability Window" in md
+    assert "Worst Rolling Mean" in md
+    assert "Rolling Stability Flags" in md
+
+
 def test_obsidian_markdown_contains_mean_ic_value():
     result = _standard_result()
     md = to_obsidian_markdown(result)
@@ -443,16 +611,82 @@ def test_summary_df_is_consistent_with_experiment_result():
     df = summarise_experiment_result(result)
     s = result.summary
 
-    def _close_or_both_nan(a: float, b: float) -> bool:
-        if math.isnan(a) and math.isnan(b):
-            return True
-        if math.isnan(a) or math.isnan(b):
-            return False
-        return math.isclose(a, b)
-
     assert _close_or_both_nan(float(df["mean_ic"].iloc[0]), s.mean_ic)
     assert _close_or_both_nan(float(df["mean_rank_ic"].iloc[0]), s.mean_rank_ic)
     assert _close_or_both_nan(float(df["ic_ir"].iloc[0]), s.ic_ir)
+    assert _close_or_both_nan(float(df["ic_positive_rate"].iloc[0]), s.ic_positive_rate)
+    assert _close_or_both_nan(
+        float(df["rank_ic_positive_rate"].iloc[0]), s.rank_ic_positive_rate
+    )
+    assert _close_or_both_nan(float(df["ic_valid_ratio"].iloc[0]), s.ic_valid_ratio)
+    assert _close_or_both_nan(
+        float(df["rank_ic_valid_ratio"].iloc[0]), s.rank_ic_valid_ratio
+    )
     assert _close_or_both_nan(float(df["mean_long_short_return"].iloc[0]), s.mean_long_short_return)
+    assert _close_or_both_nan(float(df["long_short_ir"].iloc[0]), s.long_short_ir)
     assert _close_or_both_nan(float(df["long_short_hit_rate"].iloc[0]), s.long_short_hit_rate)
+    assert _close_or_both_nan(
+        float(df["long_short_return_per_turnover"].iloc[0]),
+        s.long_short_return_per_turnover,
+    )
+    assert _close_or_both_nan(
+        float(df["subperiod_ic_positive_share"].iloc[0]),
+        s.subperiod_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["subperiod_long_short_positive_share"].iloc[0]),
+        s.subperiod_long_short_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["subperiod_ic_min_mean"].iloc[0]),
+        s.subperiod_ic_min_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["subperiod_long_short_min_mean"].iloc[0]),
+        s.subperiod_long_short_min_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_ic_positive_share"].iloc[0]),
+        s.rolling_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_rank_ic_positive_share"].iloc[0]),
+        s.rolling_rank_ic_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_long_short_positive_share"].iloc[0]),
+        s.rolling_long_short_positive_share,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_ic_min_mean"].iloc[0]),
+        s.rolling_ic_min_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_rank_ic_min_mean"].iloc[0]),
+        s.rolling_rank_ic_min_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["rolling_long_short_min_mean"].iloc[0]),
+        s.rolling_long_short_min_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["mean_eval_assets_per_date"].iloc[0]),
+        s.mean_eval_assets_per_date,
+    )
+    assert _close_or_both_nan(
+        float(df["min_eval_assets_per_date"].iloc[0]),
+        s.min_eval_assets_per_date,
+    )
+    assert _close_or_both_nan(
+        float(df["eval_coverage_ratio_mean"].iloc[0]),
+        s.eval_coverage_ratio_mean,
+    )
+    assert _close_or_both_nan(
+        float(df["eval_coverage_ratio_min"].iloc[0]),
+        s.eval_coverage_ratio_min,
+    )
+    assert str(df["rolling_instability_flags"].iloc[0]) == ";".join(
+        s.rolling_instability_flags
+    )
+    assert str(df["instability_flags"].iloc[0]) == ";".join(s.instability_flags)
     assert int(df["n_dates_used"].iloc[0]) == s.n_dates
