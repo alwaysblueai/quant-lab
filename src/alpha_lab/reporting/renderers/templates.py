@@ -28,12 +28,27 @@ CAMPAIGN_SECTION_TITLES: tuple[str, ...] = (
 )
 
 COMPARISON_TABLE_COLUMNS: tuple[str, ...] = (
+    "Rank",
     "Case Name",
     "Type (single/composite)",
     "IC / ICIR",
+    "IC 95% CI",
     "Long-Short Performance",
     "Turnover",
     "Coverage",
+    "Uncertainty",
+    "Neutralization Comparison",
+    "Verdict",
+    "Campaign Triage",
+    "Triage Reasons",
+    "Level 2 Promotion",
+    "Promotion Reasons",
+    "Promotion Blockers",
+    "L1->L2 Transition",
+    "Level 2 Portfolio Validation",
+    "Portfolio Robustness",
+    "Portfolio Benchmark Relative",
+    "Portfolio Validation Risks",
     "Status",
 )
 
@@ -41,7 +56,7 @@ PLACEHOLDER_INTERPRETATION = (
     "[Placeholder] Add an interpretation of statistical and economic significance."
 )
 PLACEHOLDER_NEXT_STEPS = (
-    "[Placeholder] Add concrete follow-up experiments or production-readiness checks."
+    "[Placeholder] Add concrete follow-up experiments or research-validation checks."
 )
 PLACEHOLDER_OBJECTIVE = (
     "[Placeholder] Objective not found in artifacts. Add research intent manually."
@@ -84,4 +99,3 @@ def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> 
         rendered = [format_text(value) for value in row]
         lines.append("| " + " | ".join(rendered) + " |")
     return lines
-
