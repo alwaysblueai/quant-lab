@@ -2733,6 +2733,41 @@ def _index_html_raw() -> str:
       display: inline-block;
       flex-shrink: 0;
     }
+    .artifact-overview-shell {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .artifact-overview-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    }
+    .artifact-overview-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 10px 12px;
+    }
+    .artifact-overview-card strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.03em;
+    }
+    .artifact-overview-card span {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .artifact-overview-charts {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .project-diagnostics-box {
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -2945,6 +2980,7 @@ def _index_html_raw() -> str:
       .layout { grid-template-columns: 1fr; }
       .sidebar { height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--line); }
       .grid, .row, .grid-3, .row-3, .bridge-layout { grid-template-columns: 1fr; }
+      .artifact-overview-charts { grid-template-columns: 1fr; }
       .main { padding: 16px; max-width: 100vw; overflow-x: hidden; }
       .bridge-layout { gap: 16px; }
       .project-hub-sticky { position: static; width: 100%; max-width: 800px; margin: 0 auto; }
@@ -3880,6 +3916,7 @@ def _index_html_raw() -> str:
     const state = {
       view: "dashboard",
       projects: [],
+      runs: [],
       selectedProject: "",
       projectDetail: null,
       autoRefreshTimer: null,
@@ -4344,6 +4381,7 @@ def _index_html_raw() -> str:
       try {
         const data = await api(`/api/projects/${enc(state.selectedProject)}/runs`);
         const runs = data.runs || [];
+        state.runs = runs;
         renderRunTable(runs);
         await loadProjectDiagnostics();
         const hasActiveRuns = runs.some(r => r.status === "queued" || r.status === "running");
@@ -4896,6 +4934,228 @@ def _index_html_raw() -> str:
       </div>`;
     }
 
+    function getRunRecord(runId) {
+      return (Array.isArray(state.runs) ? state.runs : []).find((run) => run.run_id === runId) || null;
+    }
+
+    async function fetchArtifactText(runId, key) {
+      const res = await fetch(`/api/projects/${enc(state.selectedProject)}/runs/${enc(runId)}/artifact/${enc(key)}`);
+      if (!res.ok) {
+        throw new Error(`artifact fetch failed: ${key}`);
+      }
+      return {
+        contentType: res.headers.get("Content-Type") || "",
+        text: await res.text(),
+      };
+    }
+
+    async function loadRunOverviewSnapshot(run) {
+      if (!run || !run.run_id) return {};
+      const keys = [
+        "backtest_result_json",
+        "ic_timeseries",
+        "rolling_stability",
+        "ic_decay",
+        "factor_autocorrelation",
+        "turnover",
+      ];
+      const available = keys.filter((key) => run.artifact_paths && run.artifact_paths[key]);
+      const loaded = await Promise.all(available.map(async (key) => {
+        try {
+          const artifact = await fetchArtifactText(run.run_id, key);
+          return [key, artifact.text];
+        } catch (_) {
+          return [key, null];
+        }
+      }));
+      const snapshot = {};
+      for (const [key, text] of loaded) {
+        if (!text) continue;
+        if (key === "backtest_result_json") {
+          try {
+            snapshot.backtest = JSON.parse(text);
+          } catch (_) {
+            snapshot.backtest = null;
+          }
+        } else if (key === "ic_timeseries") {
+          snapshot.icRows = parseCsvRows(text);
+        } else if (key === "rolling_stability") {
+          snapshot.rollingRows = parseCsvRows(text);
+        } else if (key === "ic_decay") {
+          snapshot.decayRows = parseCsvRows(text);
+        } else if (key === "factor_autocorrelation") {
+          snapshot.autocorrRows = parseCsvRows(text);
+        } else if (key === "turnover") {
+          snapshot.turnoverRows = parseCsvRows(text);
+        }
+      }
+      return snapshot;
+    }
+
+    function renderOverviewLineChart(title, lines, markers = []) {
+      const chart = renderMultiLineChart(title, lines, markers);
+      if (chart.startsWith("<div class=\"artifact-chart-card\">")) return chart;
+      return `<div class="artifact-chart-card">
+        <p class="artifact-chart-title">${escHtml(title)}</p>
+        ${chart}
+      </div>`;
+    }
+
+    function renderRunOverviewSection(run, snapshot) {
+      if (!run || !snapshot) return "";
+      const summary = run.summary && typeof run.summary === "object" ? run.summary : {};
+      const backtest = snapshot.backtest && typeof snapshot.backtest === "object" ? snapshot.backtest : {};
+      const backtestSummary = backtest.summary && typeof backtest.summary === "object" ? backtest.summary : {};
+      const navPointsRaw = Array.isArray(backtestSummary.nav_points) ? backtestSummary.nav_points : [];
+      const navRows = navPointsRaw
+        .map((row, idx) => ({
+          idx: idx + 1,
+          date: Array.isArray(row) ? String(row[0] || "") : "",
+          value: Array.isArray(row) ? Number(row[1]) : Number.NaN,
+        }))
+        .filter((row) => row.date && Number.isFinite(row.value));
+      const icRows = Array.isArray(snapshot.icRows) ? snapshot.icRows : [];
+      const rollingRows = Array.isArray(snapshot.rollingRows) ? snapshot.rollingRows : [];
+      const decayRows = Array.isArray(snapshot.decayRows) ? snapshot.decayRows : [];
+      const autocorrRows = Array.isArray(snapshot.autocorrRows) ? snapshot.autocorrRows : [];
+      const turnoverRows = Array.isArray(snapshot.turnoverRows) ? snapshot.turnoverRows : [];
+      const splitDate = parseTestStartDate(summary.split_description);
+
+      const navMarker = buildDateMarker(navRows.map((row) => row.date), splitDate, "样本外起点");
+      const navChart = renderOverviewLineChart(
+        "收益率曲线",
+        [{
+          label: "NAV",
+          color: "#0f766e",
+          points: navRows.map((row) => ({x: row.idx, y: row.value})),
+        }],
+        navMarker ? [navMarker] : [],
+      );
+
+      const rankIcMarker = buildDateMarker(
+        icRows.map((row) => String(row.date || "")),
+        splitDate,
+        "样本外起点",
+      );
+      const rankIcChart = renderOverviewLineChart(
+        "RankIC 时序",
+        [{
+          label: "RankIC",
+          color: "#2563eb",
+          points: icRows
+            .map((row, idx) => ({x: idx + 1, y: toFiniteNumber(row.rank_ic)}))
+            .filter((point) => point.y !== null)
+            .map((point) => ({x: point.x, y: Number(point.y)})),
+        }],
+        rankIcMarker ? [rankIcMarker] : [],
+      );
+
+      const rollingIcMarker = buildDateMarker(
+        rollingRows.map((row) => String(row.date || "")),
+        splitDate,
+        "样本外起点",
+      );
+      const rollingIcChart = renderOverviewLineChart(
+        "Rolling IC",
+        [{
+          label: "Rolling Mean IC",
+          color: "#ea580c",
+          points: rollingRows
+            .map((row, idx) => ({x: idx + 1, y: toFiniteNumber(row.rolling_mean_ic)}))
+            .filter((point) => point.y !== null)
+            .map((point) => ({x: point.x, y: Number(point.y)})),
+        }],
+        rollingIcMarker ? [rollingIcMarker] : [],
+      );
+      const decayChart = renderOverviewLineChart(
+        "IC Decay",
+        [
+          {
+            label: "Mean IC",
+            color: "#0ea5e9",
+            points: makeLinePoints(decayRows, "horizon", "mean_ic"),
+          },
+          {
+            label: "Mean RankIC",
+            color: "#22c55e",
+            points: makeLinePoints(decayRows, "horizon", "mean_rank_ic"),
+          },
+        ],
+      );
+      const autocorrChart = renderOverviewLineChart(
+        "因子自相关",
+        [{
+          label: "Mean Autocorr",
+          color: "#7c3aed",
+          points: makeLinePoints(autocorrRows, "lag", "mean_autocorr"),
+        }],
+      );
+      const turnoverMarker = buildDateMarker(
+        turnoverRows.map((row) => String(row.date || "")),
+        splitDate,
+        "样本外起点",
+      );
+      const turnoverChart = renderOverviewLineChart(
+        "换手率时序",
+        [{
+          label: "Turnover",
+          color: "#0891b2",
+          points: turnoverRows
+            .map((row, idx) => ({x: idx + 1, y: toFiniteNumber(row.turnover)}))
+            .filter((point) => point.y !== null)
+            .map((point) => ({x: point.x, y: Number(point.y)})),
+        }],
+        turnoverMarker ? [turnoverMarker] : [],
+      );
+
+      const topCards = [
+        ["因子结论", summary.factor_verdict || "-"],
+        ["Mean RankIC", fmtMetric(summary.mean_rank_ic)],
+        ["IC t-stat", fmtMetric(summary.ic_t_stat)],
+        ["IC p-value", fmtMetric(summary.ic_p_value)],
+        ["DSR p-value", fmtMetric(summary.dsr_pvalue)],
+        ["拆分", summary.split_description || "未标注"],
+      ].map(([label, value]) =>
+        `<div class="artifact-overview-card"><strong>${escHtml(String(label))}</strong><span>${escHtml(String(value))}</span></div>`
+      ).join("");
+
+      return `<section class="artifact-overview-shell">
+        <div class="artifact-viewer-head">
+          <div class="artifact-viewer-title">
+            <strong style="color:var(--brand)">Factor Snapshot</strong>
+            <span class="artifact-viewer-kind">研究员总览</span>
+          </div>
+        </div>
+        <div class="artifact-overview-grid">${topCards}</div>
+        <div class="artifact-viewer-meta">固定 6 图：收益率曲线、RankIC 时序、Rolling IC、IC Decay、因子自相关、换手率时序。</div>
+        <div class="artifact-overview-charts">
+          ${navChart}
+          ${rankIcChart}
+          ${rollingIcChart}
+          ${decayChart}
+          ${autocorrChart}
+          ${turnoverChart}
+        </div>
+      </section>`;
+    }
+
+    function parseTestStartDate(splitDescription) {
+      const text = String(splitDescription || "");
+      const match = text.match(/test>=(\\d{4}-\\d{2}-\\d{2})/);
+      return match ? match[1] : "";
+    }
+
+    function buildDateMarker(dateRows, splitDate, label) {
+      if (!splitDate || !Array.isArray(dateRows) || !dateRows.length) return null;
+      const index = dateRows.findIndex((value) => String(value || "") >= splitDate);
+      if (index < 0) return null;
+      return {
+        x: index + 1,
+        label: label || "",
+        color: "#dc2626",
+      };
+    }
+
     function renderPlainArtifact(key, text, kindLabel = "文本") {
       return renderArtifactViewerShell(
         key,
@@ -5096,7 +5356,7 @@ def _index_html_raw() -> str:
         .sort((a, b) => a.x - b.x);
     }
 
-    function renderMultiLineChart(title, lines) {
+    function renderMultiLineChart(title, lines, markers = []) {
       const lineRows = lines.filter((line) => Array.isArray(line.points) && line.points.length >= 2);
       if (!lineRows.length) return `<div class="muted">图表数据不足（至少需要 2 个有效点）。</div>`;
 
@@ -5135,6 +5395,16 @@ def _index_html_raw() -> str:
       const xPos = (x) => padL + ((x - xMin) / (xMax - xMin)) * innerW;
       const yPos = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * innerH;
       const zeroY = (yMin <= 0 && yMax >= 0) ? yPos(0) : null;
+      const markerLines = (Array.isArray(markers) ? markers : [])
+        .filter((marker) => Number.isFinite(Number(marker.x)))
+        .map((marker) => {
+          const x = xPos(Number(marker.x)).toFixed(2);
+          const color = escAttr(marker.color || "#ef4444");
+          const label = escHtml(marker.label || "");
+          return `<line x1="${x}" x2="${x}" y1="${padT}" y2="${height - padB}" stroke="${color}" stroke-width="1.2" stroke-dasharray="4 3" />
+            ${label ? `<text x="${x}" y="${padT + 10}" fill="${color}" font-size="11" text-anchor="start">${label}</text>` : ""}`;
+        })
+        .join("");
 
       const svgLines = lineRows.map((line) => {
         const points = line.points.map((p) => `${xPos(p.x).toFixed(2)},${yPos(p.y).toFixed(2)}`).join(" ");
@@ -5154,6 +5424,7 @@ def _index_html_raw() -> str:
           <line x1="${padL}" x2="${width - padR}" y1="${height - padB}" y2="${height - padB}" stroke="#cbd5e1" stroke-width="1" />
           <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${height - padB}" stroke="#e2e8f0" stroke-width="1" />
           ${zeroY === null ? "" : `<line x1="${padL}" x2="${width - padR}" y1="${zeroY.toFixed(2)}" y2="${zeroY.toFixed(2)}" stroke="#fecaca" stroke-width="1" stroke-dasharray="4 3" />`}
+          ${markerLines}
           ${svgLines}
           <text x="${padL}" y="${height - 8}" fill="#64748b" font-size="11">${escHtml(xTicks[0])}</text>
           <text x="${width - padR}" y="${height - 8}" fill="#64748b" font-size="11" text-anchor="end">${escHtml(xTicks[1])}</text>
@@ -5487,27 +5758,33 @@ def _index_html_raw() -> str:
 
     async function viewArtifact(runId, key) {
       if (!state.selectedProject) return;
+      const run = getRunRecord(runId);
       try {
-        const res = await fetch(`/api/projects/${enc(state.selectedProject)}/runs/${enc(runId)}/artifact/${enc(key)}`);
-        const ctype = res.headers.get("Content-Type") || "";
+        $("artifactViewer").innerHTML = `<div class="muted">加载 artifact 与因子总览中…</div>`;
+        const [artifact, snapshot] = await Promise.all([
+          fetchArtifactText(runId, key),
+          loadRunOverviewSnapshot(run),
+        ]);
+        const ctype = artifact.contentType || "";
+        const text = artifact.text || "";
+        const overviewHtml = renderRunOverviewSection(run, snapshot);
+        let artifactHtml = "";
         if (ctype.includes("text") || ctype.includes("json") || ctype.includes("yaml") || ctype.includes("markdown")) {
-          const text = await res.text();
           const kind = inferArtifactKind(key, ctype);
           if (kind === "markdown") {
-            $("artifactViewer").innerHTML = renderMarkdownArtifact(key, text);
+            artifactHtml = renderMarkdownArtifact(key, text);
           } else if (kind === "json") {
-            $("artifactViewer").innerHTML = renderJsonArtifact(key, text);
+            artifactHtml = renderJsonArtifact(key, text);
           } else if (kind === "csv") {
-            $("artifactViewer").innerHTML = renderCsvArtifact(key, text);
+            artifactHtml = renderCsvArtifact(key, text);
           } else if (kind === "yaml") {
-            $("artifactViewer").innerHTML = renderPlainArtifact(key, text, "YAML");
+            artifactHtml = renderPlainArtifact(key, text, "YAML");
           } else {
-            $("artifactViewer").innerHTML = renderPlainArtifact(key, text, "文本");
+            artifactHtml = renderPlainArtifact(key, text, "文本");
           }
         } else if (ctype.includes("html")) {
-          const text = await res.text();
           state.artifactRawText = text;
-          $("artifactViewer").innerHTML = renderArtifactViewerShell(
+          artifactHtml = renderArtifactViewerShell(
             key,
             "HTML",
             `<iframe srcdoc="${escAttr(text)}" style="width:100%;height:600px;border:1px solid var(--line);border-radius:8px;background:#ffffff"></iframe>`,
@@ -5515,8 +5792,9 @@ def _index_html_raw() -> str:
           );
         } else {
           state.artifactRawText = "";
-          $("artifactViewer").innerHTML = `<div class="muted">Binary artifact: ${key} (${ctype})</div>`;
+          artifactHtml = `<div class="muted">Binary artifact: ${key} (${ctype})</div>`;
         }
+        $("artifactViewer").innerHTML = `${overviewHtml}${artifactHtml}`;
       } catch(e) { $("artifactViewer").innerHTML = `<div class="muted">Error: ${e.message}</div>`; }
     }
 

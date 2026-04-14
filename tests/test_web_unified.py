@@ -339,6 +339,17 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     html = _index_html_raw()
 
     assert "IC显著性" in html
+    assert "Factor Snapshot" in html
+    assert "收益率曲线" in html
+    assert "RankIC 时序" in html
+    assert "Rolling IC" in html
+    assert "IC Decay" in html
+    assert "因子自相关" in html
+    assert "换手率时序" in html
+    assert "artifact-overview-charts" in html
+    assert "loadRunOverviewSnapshot" in html
+    assert "renderRunOverviewSection" in html
+    assert "renderOverviewLineChart" in html
     assert "purged_kfold_summary" in html
     assert "purged_kfold_folds" in html
     assert "renderPurgedKfoldSummaryJson" in html
