@@ -35,7 +35,7 @@ from alpha_lab.research_integrity.reporting import (
 from alpha_lab.vault_export import export_to_vault, resolve_vault_root
 
 from .evaluate import SingleFactorEvaluationResult
-from .spec import SingleFactorCaseSpec, dump_spec_yaml, spec_to_dict
+from .spec import SingleFactorCaseSpec
 from .templates import render_experiment_card_markdown, render_summary_markdown
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "portfolio_recipe.json",
     "backtest_result.json",
     "ic_timeseries.csv",
+    "ic_decay.csv",
+    "factor_autocorrelation.csv",
     "rolling_stability.csv",
     "group_returns.csv",
     "turnover.csv",
@@ -72,6 +74,8 @@ class SingleFactorArtifactPaths(TypedDict):
     portfolio_recipe_json: Path
     backtest_result_json: Path
     ic_timeseries: Path
+    ic_decay: Path
+    factor_autocorrelation: Path
     rolling_stability: Path
     group_returns: Path
     turnover: Path
@@ -111,6 +115,8 @@ def export_artifact_bundle(
         "portfolio_recipe_json": out_dir / "portfolio_recipe.json",
         "backtest_result_json": out_dir / "backtest_result.json",
         "ic_timeseries": out_dir / "ic_timeseries.csv",
+        "ic_decay": out_dir / "ic_decay.csv",
+        "factor_autocorrelation": out_dir / "factor_autocorrelation.csv",
         "rolling_stability": out_dir / "rolling_stability.csv",
         "group_returns": out_dir / "group_returns.csv",
         "turnover": out_dir / "turnover.csv",
@@ -135,13 +141,18 @@ def export_artifact_bundle(
     }
 
     evaluation_result.ic_timeseries.to_csv(paths["ic_timeseries"], index=False)
+    evaluation_result.ic_decay.to_csv(paths["ic_decay"], index=False)
+    evaluation_result.factor_autocorrelation.to_csv(
+        paths["factor_autocorrelation"],
+        index=False,
+    )
     evaluation_result.rolling_stability.to_csv(paths["rolling_stability"], index=False)
     evaluation_result.group_returns.to_csv(paths["group_returns"], index=False)
     evaluation_result.turnover.to_csv(paths["turnover"], index=False)
     evaluation_result.coverage.to_csv(paths["coverage"], index=False)
 
-    spec_yaml = dump_spec_yaml(spec)
-    paths["factor_definition"].write_text(spec_yaml, encoding="utf-8")
+    factor_definition_yaml = _dump_yaml_payload(_compact_spec_payload(spec))
+    paths["factor_definition"].write_text(factor_definition_yaml, encoding="utf-8")
 
     summary_md = render_summary_markdown(
         spec=spec,
@@ -294,7 +305,7 @@ def export_artifact_bundle(
     ]
 
     metrics_payload = {
-        "metrics": _to_jsonable(metrics_for_payload),
+        "metrics": _to_jsonable(_compact_metrics_payload(metrics_for_payload)),
         "coverage_by_date_summary": {
             "n_dates": int(evaluation_result.coverage["date"].nunique())
             if not evaluation_result.coverage.empty
@@ -310,18 +321,6 @@ def export_artifact_bundle(
                 else float("nan")
             ),
         },
-        "neutralization_summary": _to_jsonable(
-            evaluation_result.neutralization_summary.to_dict(orient="records")
-        ),
-        "portfolio_validation_summary": _to_jsonable(
-            portfolio_validation_payload["portfolio_validation_summary"]
-        ),
-        "portfolio_validation_metrics": _to_jsonable(
-            portfolio_validation_payload["portfolio_validation_metrics"]
-        ),
-        "portfolio_validation_package": _to_jsonable(
-            portfolio_validation_payload["portfolio_validation_package"]
-        ),
     }
     _write_json(paths["metrics"], metrics_payload)
 
@@ -367,7 +366,6 @@ def export_artifact_bundle(
             "universe_path": spec.universe.path,
             "neutralization_exposures_path": spec.neutralization.exposures_path,
         },
-        "spec": _to_jsonable(spec_to_dict(spec)),
         "outputs": {name: str(path) for name, path in paths.items()},
         "required_bundle_files": list(REQUIRED_BUNDLE_FILES),
         "integrity_summary": report.summary.to_dict(),
@@ -424,7 +422,7 @@ def _build_factor_definition_payload(
         "case_name": spec.name,
         "package_type": "single_factor",
         "factor_name": spec.factor_name,
-        "spec": _to_jsonable(spec_to_dict(spec)),
+        "spec": _compact_spec_payload(spec),
         "source_artifacts": {
             "factor_definition_yaml_path": str(output_paths["factor_definition"]),
             "run_manifest_path": str(output_paths["run_manifest"]),
@@ -444,14 +442,15 @@ def _build_signal_validation_payload(
         "artifact_type": "alpha_lab_signal_validation",
         "case_name": spec.name,
         "package_type": "single_factor",
-        "metrics": _to_jsonable(_as_object(metrics_payload.get("metrics"))),
+        "metrics": _to_jsonable(_compact_signal_validation_metrics(_as_object(metrics_payload.get("metrics")))),
         "coverage_by_date_summary": _to_jsonable(
             _as_object(metrics_payload.get("coverage_by_date_summary"))
         ),
-        "neutralization_summary": _to_jsonable(metrics_payload.get("neutralization_summary") or []),
         "source_artifacts": {
             "metrics_path": str(output_paths["metrics"]),
             "ic_timeseries_path": str(output_paths["ic_timeseries"]),
+            "ic_decay_path": str(output_paths["ic_decay"]),
+            "factor_autocorrelation_path": str(output_paths["factor_autocorrelation"]),
             "rolling_stability_path": str(output_paths["rolling_stability"]),
             "coverage_path": str(output_paths["coverage"]),
         },
@@ -527,19 +526,25 @@ def _build_backtest_result_payload(
         rebalance_frequency=spec.rebalance_frequency,
         metrics_for_payload=metrics_for_payload,
     )
+    compact_summary = _compact_backtest_summary(summary)
+    compact_fallback_fields = [
+        field
+        for field in fallback_fields
+        if field in compact_summary and field not in _BACKTEST_OMITTED_DETAIL_FIELDS
+    ]
     return {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_backtest_result",
         "case_name": spec.name,
         "package_type": "single_factor",
         "rebalance_frequency": spec.rebalance_frequency,
-        "summary": summary,
+        "summary": compact_summary,
         "source_artifacts": {
             "group_returns_path": str(output_paths["group_returns"]),
             "turnover_path": str(output_paths["turnover"]),
             "metrics_path": str(output_paths["metrics"]),
         },
-        "fallback_derived_fields": fallback_fields,
+        "fallback_derived_fields": compact_fallback_fields,
     }
 
 
@@ -575,6 +580,20 @@ def _to_jsonable(value: object) -> object:
     return value
 
 
+def _dump_yaml_payload(payload: Mapping[str, object]) -> str:
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise AlphaLabDataError("PyYAML is required to serialize YAML artifacts") from exc
+
+    text = yaml.safe_dump(
+        _to_jsonable(dict(payload)),
+        sort_keys=False,
+        allow_unicode=False,
+    )
+    return str(text)
+
+
 def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
@@ -596,6 +615,183 @@ def _text_or_none(value: object) -> str | None:
 
 def _as_object(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _compact_metrics_payload(metrics: Mapping[str, object]) -> dict[str, object]:
+    keep = (
+        "research_evaluation_profile",
+        "factor_verdict",
+        "factor_verdict_reasons",
+        "campaign_triage",
+        "campaign_triage_reasons",
+        "promotion_decision",
+        "promotion_reasons",
+        "promotion_blockers",
+        "level12_transition_label",
+        "level12_transition_interpretation",
+        "level12_transition_reasons",
+        "portfolio_validation_status",
+        "portfolio_validation_recommendation",
+        "portfolio_validation_major_risks",
+        "mean_ic",
+        "mean_rank_ic",
+        "ic_ir",
+        "ic_t_stat",
+        "ic_p_value",
+        "dsr_pvalue",
+        "split_description",
+        "mean_long_short_return",
+        "long_short_ir",
+        "mean_long_short_turnover",
+        "long_short_return_per_turnover",
+        "ic_positive_rate",
+        "rank_ic_positive_rate",
+        "subperiod_ic_positive_share",
+        "subperiod_long_short_positive_share",
+        "rolling_ic_positive_share",
+        "rolling_rank_ic_positive_share",
+        "rolling_long_short_positive_share",
+        "rolling_ic_min_mean",
+        "rolling_rank_ic_min_mean",
+        "rolling_long_short_min_mean",
+        "rolling_instability_flags",
+        "eval_coverage_ratio_mean",
+        "eval_coverage_ratio_min",
+        "coverage_mean",
+        "coverage_min",
+        "data_quality_status",
+        "data_quality_suspended_rows",
+        "data_quality_stale_rows",
+        "data_quality_suspected_split_rows",
+        "data_quality_integrity_warn_count",
+        "data_quality_integrity_fail_count",
+        "data_quality_hard_fail_count",
+        "neutralization_mean_corr_reduction",
+        "uncertainty_method",
+        "uncertainty_confidence_level",
+        "uncertainty_flags",
+        "instability_flags",
+        "n_dates_used",
+    )
+    return {key: metrics[key] for key in keep if key in metrics}
+
+
+def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object]:
+    keep = (
+        "annualized_return",
+        "annualized_volatility",
+        "sharpe",
+        "sortino",
+        "max_drawdown",
+        "calmar",
+        "win_rate",
+        "turnover",
+        "information_ratio",
+        "excess_return_vs_benchmark",
+        "tracking_error",
+        "pre_cost_return",
+        "post_cost_return",
+    )
+    compact = {key: summary[key] for key in keep if key in summary}
+    compact.update(
+        {
+            "rolling_sharpe": None,
+            "rolling_drawdown": None,
+            "nav_points": [],
+            "monthly_return_table": [],
+            "drawdown_table": [],
+            "subperiod_analysis": None,
+            "regime_analysis": None,
+        }
+    )
+    return compact
+
+
+def _compact_signal_validation_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
+    keep = (
+        "research_evaluation_profile",
+        "factor_verdict",
+        "campaign_triage",
+        "promotion_decision",
+        "mean_ic",
+        "mean_rank_ic",
+        "ic_ir",
+        "mean_long_short_return",
+        "mean_long_short_turnover",
+        "eval_coverage_ratio_mean",
+        "eval_coverage_ratio_min",
+        "rolling_instability_flags",
+        "uncertainty_flags",
+        "instability_flags",
+    )
+    return {key: metrics[key] for key in keep if key in metrics}
+
+
+def _compact_spec_payload(spec: SingleFactorCaseSpec) -> dict[str, object]:
+    payload = {
+        "name": spec.name,
+        "factor_name": spec.factor_name,
+        "direction": spec.direction,
+        "rebalance_frequency": spec.rebalance_frequency,
+        "n_quantiles": spec.n_quantiles,
+        "target": {
+            "kind": spec.target.kind,
+            "horizon": spec.target.horizon,
+        },
+        "universe": {
+            "name": spec.universe.name,
+            "path": spec.universe.path,
+        },
+        "neutralization": {
+            "enabled": bool(spec.neutralization.enabled),
+            "exposures_path": spec.neutralization.exposures_path,
+        },
+        "paths": {
+            "prices_path": spec.prices_path,
+            "factor_path": spec.factor_path,
+        },
+        "transaction_cost": {
+            "one_way_rate": spec.transaction_cost.one_way_rate,
+        },
+    }
+    factor_input = _compact_factor_input_payload(spec.factor_input)
+    if factor_input is not None:
+        payload["factor_input"] = factor_input
+    return payload
+
+
+def _compact_factor_input_payload(factor_input: object) -> dict[str, object] | None:
+    if factor_input is None:
+        return None
+    mode = _text_or_none(getattr(factor_input, "mode", None))
+    disable_pipeline_preprocess = getattr(factor_input, "disable_pipeline_preprocess", None)
+    recipe = getattr(factor_input, "recipe", None)
+    recipe_mapping = recipe if isinstance(recipe, Mapping) else {}
+    payload: dict[str, object] = {
+        "mode": mode or "file",
+        "disable_pipeline_preprocess": bool(disable_pipeline_preprocess),
+    }
+    if recipe_mapping:
+        base = recipe_mapping.get("base")
+        base_mapping = base if isinstance(base, Mapping) else {}
+        payload["recipe_summary"] = {
+            "method": _text_or_none(base_mapping.get("method")),
+            "fields": sorted(str(key) for key in recipe_mapping.keys()),
+        }
+    return payload
+
+
+_BACKTEST_OMITTED_DETAIL_FIELDS = frozenset(
+    {
+        "rolling_sharpe",
+        "rolling_drawdown",
+        "nav_points",
+        "monthly_return_table",
+        "drawdown_table",
+        "subperiod_analysis",
+        "regime_analysis",
+    }
+)
 
 
 def _sync_exported_manifest_copies(

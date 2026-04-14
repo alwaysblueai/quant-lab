@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.real_cases.single_factor.pipeline import run_single_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
@@ -21,6 +23,8 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "portfolio_recipe.json",
         "backtest_result.json",
         "ic_timeseries.csv",
+        "ic_decay.csv",
+        "factor_autocorrelation.csv",
         "rolling_stability.csv",
         "group_returns.csv",
         "turnover.csv",
@@ -53,46 +57,41 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert "metrics" in metrics_payload
     assert "mean_rank_ic" in metrics_payload["metrics"]
     assert "mean_long_short_return" in metrics_payload["metrics"]
-    assert "mean_ic_ci_lower" in metrics_payload["metrics"]
-    assert "mean_ic_ci_upper" in metrics_payload["metrics"]
-    assert "mean_rank_ic_ci_lower" in metrics_payload["metrics"]
-    assert "mean_rank_ic_ci_upper" in metrics_payload["metrics"]
-    assert "mean_long_short_return_ci_lower" in metrics_payload["metrics"]
-    assert "mean_long_short_return_ci_upper" in metrics_payload["metrics"]
+    assert "ic_t_stat" in metrics_payload["metrics"]
+    assert "ic_p_value" in metrics_payload["metrics"]
+    assert "dsr_pvalue" in metrics_payload["metrics"]
+    assert "split_description" in metrics_payload["metrics"]
+    assert "coverage_min" in metrics_payload["metrics"]
+    assert "data_quality_status" in metrics_payload["metrics"]
+    assert "data_quality_suspended_rows" in metrics_payload["metrics"]
+    assert "data_quality_stale_rows" in metrics_payload["metrics"]
+    assert "data_quality_suspected_split_rows" in metrics_payload["metrics"]
+    assert "data_quality_integrity_warn_count" in metrics_payload["metrics"]
+    assert "data_quality_integrity_fail_count" in metrics_payload["metrics"]
+    assert "data_quality_hard_fail_count" in metrics_payload["metrics"]
     assert "uncertainty_flags" in metrics_payload["metrics"]
     assert "uncertainty_method" in metrics_payload["metrics"]
     assert "uncertainty_confidence_level" in metrics_payload["metrics"]
-    assert "uncertainty_bootstrap_block_length" in metrics_payload["metrics"]
     assert "factor_verdict" in metrics_payload["metrics"]
     assert "factor_verdict_reasons" in metrics_payload["metrics"]
     assert "campaign_triage" in metrics_payload["metrics"]
     assert "campaign_triage_reasons" in metrics_payload["metrics"]
-    assert "campaign_triage_priority" in metrics_payload["metrics"]
-    assert "campaign_rank_primary_metric" in metrics_payload["metrics"]
-    assert "campaign_rank_secondary_metric" in metrics_payload["metrics"]
-    assert "campaign_rank_stability_metric" in metrics_payload["metrics"]
-    assert "campaign_rank_support_count" in metrics_payload["metrics"]
-    assert "campaign_rank_risk_count" in metrics_payload["metrics"]
     assert "promotion_decision" in metrics_payload["metrics"]
     assert "promotion_reasons" in metrics_payload["metrics"]
     assert "promotion_blockers" in metrics_payload["metrics"]
-    assert "level12_transition_summary" in metrics_payload["metrics"]
     assert "level12_transition_label" in metrics_payload["metrics"]
     assert "level12_transition_interpretation" in metrics_payload["metrics"]
     assert "level12_transition_reasons" in metrics_payload["metrics"]
-    assert "level12_transition_confirmation_note" in metrics_payload["metrics"]
     assert "portfolio_validation_status" in metrics_payload["metrics"]
     assert "portfolio_validation_recommendation" in metrics_payload["metrics"]
     assert "portfolio_validation_major_risks" in metrics_payload["metrics"]
-    assert "portfolio_validation_benchmark_relative_status" in metrics_payload["metrics"]
-    assert "portfolio_validation_benchmark_relative_risks" in metrics_payload["metrics"]
     assert metrics_payload["metrics"]["research_evaluation_profile"] == "default_research"
     assert "rolling_ic_positive_share" in metrics_payload["metrics"]
     assert "rolling_ic_min_mean" in metrics_payload["metrics"]
     assert "rolling_instability_flags" in metrics_payload["metrics"]
-    assert "portfolio_validation_summary" in metrics_payload
-    assert "portfolio_validation_metrics" in metrics_payload
-    assert "portfolio_validation_package" in metrics_payload
+    assert "portfolio_validation_summary" not in metrics_payload
+    assert "portfolio_validation_metrics" not in metrics_payload
+    assert "portfolio_validation_package" not in metrics_payload
 
     manifest_payload = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest_payload["artifact_type"] == "real_case_single_factor_bundle"
@@ -135,15 +134,30 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         assert portfolio_recipe_payload.get(key)
         assert key not in recipe_fallback_fields
 
+    factor_definition_yaml = yaml.safe_load(
+        (output_dir / "factor_definition.yaml").read_text(encoding="utf-8")
+    )
+    assert isinstance(factor_definition_yaml, dict)
+    assert factor_definition_yaml["factor_name"] == "roe_ttm"
+    assert factor_definition_yaml["n_quantiles"] == 5
+    assert "preprocess" not in factor_definition_yaml
+    assert "output" not in factor_definition_yaml
+    assert factor_definition_yaml["transaction_cost"]["one_way_rate"] == 0.001
+
     backtest_payload = json.loads((output_dir / "backtest_result.json").read_text(encoding="utf-8"))
     summary = backtest_payload["summary"]
     assert isinstance(summary, dict)
     for key in (
         "annualized_return",
         "annualized_volatility",
+        "sharpe",
         "sortino",
         "max_drawdown",
         "calmar",
+        "win_rate",
+        "turnover",
+        "pre_cost_return",
+        "post_cost_return",
         "rolling_sharpe",
         "rolling_drawdown",
         "nav_points",
@@ -153,46 +167,36 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "regime_analysis",
     ):
         assert key in summary
+    assert summary["rolling_sharpe"] is None
+    assert summary["rolling_drawdown"] is None
+    assert summary["nav_points"] == []
+    assert summary["monthly_return_table"] == []
+    assert summary["drawdown_table"] == []
+    assert summary["subperiod_analysis"] is None
+    assert summary["regime_analysis"] is None
     backtest_fallback_fields = set(backtest_payload.get("fallback_derived_fields", []))
     for key in (
         "annualized_return",
         "annualized_volatility",
+        "sharpe",
         "sortino",
         "max_drawdown",
         "calmar",
-        "rolling_sharpe",
-        "rolling_drawdown",
-        "nav_points",
-        "monthly_return_table",
-        "drawdown_table",
-        "subperiod_analysis",
-        "regime_analysis",
+        "win_rate",
+        "turnover",
+        "pre_cost_return",
+        "post_cost_return",
     ):
         assert key not in backtest_fallback_fields
 
     summary_md = (output_dir / "summary.md").read_text(encoding="utf-8")
     card_md = (output_dir / "experiment_card.md").read_text(encoding="utf-8")
-    assert "## Metrics" in summary_md
-    assert "Mean IC 95% CI" in summary_md
-    assert "Uncertainty Method" in summary_md
-    assert "Uncertainty Flags" in summary_md
-    assert "Rolling Stability Window" in summary_md
-    assert "Factor Verdict" in summary_md
-    assert "Research Evaluation Profile" in summary_md
-    assert "Campaign Triage" in summary_md
-    assert "Level 2 Promotion" in summary_md
-    assert "Level 1->Level 2 Transition" in summary_md
-    assert "Level 2 Portfolio Validation" in summary_md
-    assert "## Setup" in card_md
-    assert "## Results" in card_md
-    assert "Mean IC 95% CI" in card_md
-    assert "Uncertainty Method" in card_md
-    assert "Uncertainty Flags" in card_md
-    assert "Rolling Stability Window" in card_md
-    assert "Factor Verdict" in card_md
-    assert "Research Evaluation Profile" in card_md
-    assert "Campaign Triage" in card_md
-    assert "Level 2 Promotion" in card_md
-    assert "Level 1->Level 2 Transition" in card_md
-    assert "Level 2 Portfolio Validation" in card_md
-    assert "Interpretation" in card_md
+    assert "## 基本信息" in summary_md
+    assert "## 初筛结论" in summary_md
+    assert "主要阻断项" in summary_md
+    assert "## 产物路径" in summary_md
+    assert "## 基本信息" in card_md
+    assert "## 关键结果" in card_md
+    assert "## 解释" in card_md
+    assert "## 下一步" in card_md
+    assert "## 备注" in card_md

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from alpha_lab.costs import cost_adjusted_long_short
+from alpha_lab.data_quality.corporate_actions import detect_unadjusted_splits
+from alpha_lab.data_quality.outlier_detection import detect_stale_prices, filter_zero_volume
+from alpha_lab.decay import compute_factor_autocorrelation, compute_ic_decay
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
 from alpha_lab.reporting import summarise_experiment_result
 from alpha_lab.reporting.campaign_triage import build_campaign_triage
@@ -21,6 +25,7 @@ from alpha_lab.research_evaluation_config import (
     ResearchEvaluationConfig,
     research_evaluation_audit_snapshot,
 )
+from alpha_lab.validation.deflated_sharpe import deflated_sharpe_ratio
 
 from .spec import SingleFactorCaseSpec
 
@@ -32,6 +37,8 @@ class SingleFactorEvaluationResult:
     experiment_result: ExperimentResult
     metrics: dict[str, object]
     ic_timeseries: pd.DataFrame
+    ic_decay: pd.DataFrame
+    factor_autocorrelation: pd.DataFrame
     rolling_stability: pd.DataFrame
     group_returns: pd.DataFrame
     turnover: pd.DataFrame
@@ -88,6 +95,15 @@ def evaluate_single_factor_case(
         on="date",
         how="outer",
         sort=True,
+    )
+    ic_decay = compute_ic_decay(
+        factor_df=factor_df,
+        prices_df=prices,
+        horizons=_build_decay_horizons(spec.target.horizon),
+    )
+    factor_autocorrelation = compute_factor_autocorrelation(
+        factor_df=factor_df,
+        lags=_build_autocorr_lags(),
     )
     rolling_stability = result.rolling_stability_df.copy()
 
@@ -147,6 +163,26 @@ def evaluate_single_factor_case(
             result.long_short_turnover_df,
             cost_rate=cost_rate,
         )
+    data_quality_summary = _build_data_quality_summary(
+        prices=prices,
+        integrity_checks=result.integrity_checks,
+    )
+    dsr_pvalue = _parse_optional_float(row.get("dsr_pvalue"))
+    if dsr_pvalue is None:
+        long_short_ir = _parse_optional_float(row.get("long_short_ir"))
+        n_dates_used = _parse_optional_int(row.get("n_dates_used"))
+        if (
+            long_short_ir is not None
+            and n_dates_used is not None
+            and n_dates_used >= 2
+        ):
+            dsr_pvalue = deflated_sharpe_ratio(
+                observed_sr=long_short_ir,
+                n_trials=1,
+                n_obs=n_dates_used,
+            )
+    if dsr_pvalue is None:
+        dsr_pvalue = float("nan")
 
     metrics: dict[str, object] = {
         "case_name": spec.name,
@@ -163,10 +199,14 @@ def evaluate_single_factor_case(
         "mean_rank_ic_ci_lower": float(row["mean_rank_ic_ci_lower"]),
         "mean_rank_ic_ci_upper": float(row["mean_rank_ic_ci_upper"]),
         "ic_ir": float(row["ic_ir"]),
+        "ic_t_stat": float(row["ic_t_stat"]),
+        "ic_p_value": float(row["ic_p_value"]),
+        "dsr_pvalue": float(dsr_pvalue),
         "ic_positive_rate": float(row["ic_positive_rate"]),
         "rank_ic_positive_rate": float(row["rank_ic_positive_rate"]),
         "ic_valid_ratio": float(row["ic_valid_ratio"]),
         "rank_ic_valid_ratio": float(row["rank_ic_valid_ratio"]),
+        "split_description": str(row["split_description"]),
         "mean_long_short_return": float(row["mean_long_short_return"]),
         "mean_long_short_return_ci_lower": float(row["mean_long_short_return_ci_lower"]),
         "mean_long_short_return_ci_upper": float(row["mean_long_short_return_ci_upper"]),
@@ -214,10 +254,33 @@ def evaluate_single_factor_case(
         "neutralization_exposure_count": neutralization_exposure_count,
         "neutralization_mean_corr_reduction": neutralization_mean_corr_reduction,
         "neutralization_min_corr_reduction": neutralization_min_corr_reduction,
+        "neutralization_comparison": {
+            "raw": {},
+            "neutralized": {},
+            "delta": {},
+            "interpretation_flags": [],
+            "interpretation_reasons": [],
+        },
+        "neutralization_comparison_flags": [],
+        "neutralization_comparison_reasons": [],
+        "neutralization_raw_mean_ic": float("nan"),
+        "neutralization_raw_mean_rank_ic": float("nan"),
+        "neutralization_raw_mean_long_short_return": float("nan"),
+        "neutralization_raw_ic_ir": float("nan"),
+        "neutralization_mean_ic_delta": float("nan"),
+        "neutralization_mean_rank_ic_delta": float("nan"),
+        "neutralization_mean_long_short_return_delta": float("nan"),
+        "neutralization_ic_ir_delta": float("nan"),
+        "neutralization_valid_ratio_min_delta": float("nan"),
+        "neutralization_eval_coverage_ratio_mean_delta": float("nan"),
+        "neutralization_uncertainty_overlap_zero_count_delta": float("nan"),
+        "neutralization_rolling_positive_share_min_delta": float("nan"),
+        "neutralization_rolling_worst_mean_min_delta": float("nan"),
         "research_evaluation_profile": evaluation_config.profile_name,
         "research_evaluation_snapshot": research_evaluation_audit_snapshot(
             evaluation_config
         ),
+        **data_quality_summary,
     }
     if raw_row is not None:
         comparison = _build_neutralization_comparison(
@@ -253,6 +316,11 @@ def evaluate_single_factor_case(
         ic_timeseries=ic_timeseries.sort_values("date", kind="mergesort").reset_index(
             drop=True
         ),
+        ic_decay=ic_decay.sort_values("horizon", kind="mergesort").reset_index(drop=True),
+        factor_autocorrelation=factor_autocorrelation.sort_values(
+            "lag",
+            kind="mergesort",
+        ).reset_index(drop=True),
         rolling_stability=rolling_stability.sort_values(
             "date",
             kind="mergesort",
@@ -296,6 +364,116 @@ def _parse_optional_int(value: object) -> int | None:
     if not np.isfinite(numeric):
         return None
     return int(numeric)
+
+
+def _parse_optional_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            numeric = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _build_decay_horizons(target_horizon: int) -> tuple[int, ...]:
+    base_horizons = {1, 2, 3, 5, 10, 20}
+    if target_horizon > 0:
+        base_horizons.add(int(target_horizon))
+    return tuple(sorted(base_horizons))
+
+
+def _build_autocorr_lags() -> tuple[int, ...]:
+    return (1, 2, 3, 5, 10)
+
+
+def _build_data_quality_summary(
+    *,
+    prices: pd.DataFrame,
+    integrity_checks: Iterable[object],
+) -> dict[str, object]:
+    suspended_rows = _count_suspended_rows(prices)
+    stale_rows = _count_stale_rows(prices)
+    suspected_split_rows = _count_suspected_split_rows(prices)
+    warn_count, fail_count, hard_fail_count = _integrity_status_counts(integrity_checks)
+
+    status = "pass"
+    if fail_count > 0 or (suspected_split_rows is not None and suspected_split_rows > 0):
+        status = "fail"
+    elif (
+        warn_count > 0
+        or (suspended_rows is not None and suspended_rows > 0)
+        or (stale_rows is not None and stale_rows > 0)
+    ):
+        status = "warn"
+
+    return {
+        "data_quality_status": status,
+        "data_quality_suspended_rows": suspended_rows,
+        "data_quality_stale_rows": stale_rows,
+        "data_quality_suspected_split_rows": suspected_split_rows,
+        "data_quality_integrity_warn_count": warn_count,
+        "data_quality_integrity_fail_count": fail_count,
+        "data_quality_hard_fail_count": hard_fail_count,
+    }
+
+
+def _count_suspended_rows(prices: pd.DataFrame) -> int | None:
+    required = {"date", "asset", "volume"}
+    if not required.issubset(set(prices.columns)):
+        return None
+    flagged = filter_zero_volume(prices, action="flag")
+    if "is_suspended" not in flagged.columns:
+        return None
+    return int(flagged["is_suspended"].fillna(False).astype(bool).sum())
+
+
+def _count_stale_rows(prices: pd.DataFrame) -> int | None:
+    required = {"date", "asset", "close"}
+    if not required.issubset(set(prices.columns)):
+        return None
+    flagged = detect_stale_prices(prices, max_identical_days=5)
+    if "is_stale_price" not in flagged.columns:
+        return None
+    return int(flagged["is_stale_price"].fillna(False).astype(bool).sum())
+
+
+def _count_suspected_split_rows(prices: pd.DataFrame) -> int | None:
+    required = {"date", "asset", "close"}
+    if not required.issubset(set(prices.columns)):
+        return None
+    flagged = detect_unadjusted_splits(prices, threshold=0.45)
+    if "suspected_split" not in flagged.columns:
+        return None
+    return int(flagged["suspected_split"].fillna(False).astype(bool).sum())
+
+
+def _integrity_status_counts(
+    checks: Iterable[object],
+) -> tuple[int, int, int]:
+    warn_count = 0
+    fail_count = 0
+    hard_fail_count = 0
+    for check in checks:
+        status = str(getattr(check, "status", "")).strip().lower()
+        severity = str(getattr(check, "severity", "")).strip().lower()
+        if status == "warn":
+            warn_count += 1
+        if status == "fail":
+            fail_count += 1
+            if severity == "error":
+                hard_fail_count += 1
+    return warn_count, fail_count, hard_fail_count
 
 
 def _build_neutralization_comparison(

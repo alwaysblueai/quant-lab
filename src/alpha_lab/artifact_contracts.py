@@ -154,6 +154,27 @@ def validate_metrics_payload(
         "portfolio_validation_benchmark_relative_risks",
         f"{label}.metrics",
     )
+    _validate_finite_number_or_none_if_present(metrics, "ic_t_stat", f"{label}.metrics")
+    _validate_finite_number_or_none_if_present(metrics, "ic_p_value", f"{label}.metrics")
+    _validate_finite_number_or_none_if_present(metrics, "dsr_pvalue", f"{label}.metrics")
+    if "split_description" in metrics:
+        _require_non_empty_string(metrics, "split_description", f"{label}.metrics")
+    if "data_quality_status" in metrics:
+        status = _require_non_empty_string(metrics, "data_quality_status", f"{label}.metrics")
+        if status not in {"pass", "warn", "fail"}:
+            _raise(
+                f"{label}.metrics.data_quality_status",
+                "must be one of ['fail', 'pass', 'warn']",
+            )
+    for key in (
+        "data_quality_suspended_rows",
+        "data_quality_stale_rows",
+        "data_quality_suspected_split_rows",
+        "data_quality_integrity_warn_count",
+        "data_quality_integrity_fail_count",
+        "data_quality_hard_fail_count",
+    ):
+        _validate_int_or_none_if_present(metrics, key, f"{label}.metrics")
 
     coverage = _require_object(payload, "coverage_by_date_summary", label)
     _require_int(coverage, "n_dates", f"{label}.coverage_by_date_summary")
