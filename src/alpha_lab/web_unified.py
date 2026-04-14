@@ -4544,6 +4544,17 @@ def _index_html_raw() -> str:
           )
         );
       }
+      const icTStat = Number(summary.ic_t_stat);
+      const icPValue = Number(summary.ic_p_value);
+      if (Number.isFinite(icTStat) || Number.isFinite(icPValue)) {
+        chips.push(
+          renderMetricsChip(
+            "IC显著性",
+            buildIcSignificanceLabel(icTStat, icPValue),
+            classifyIcSignificance(icTStat, icPValue),
+          )
+        );
+      }
 
       const kvPairs = [];
       if (summary.mean_rank_ic !== undefined) kvPairs.push(`RankIC ${fmtMetric(summary.mean_rank_ic)}`);
@@ -5153,6 +5164,84 @@ def _index_html_raw() -> str:
       </div>`;
     }
 
+    function renderStackedAreaChart(title, layers) {
+      const rows = layers.filter((layer) => Array.isArray(layer.points) && layer.points.length >= 2);
+      if (!rows.length) return `<div class="muted">图表数据不足（至少需要 2 个有效点）。</div>`;
+
+      const width = 520;
+      const height = 220;
+      const padL = 44;
+      const padR = 16;
+      const padT = 16;
+      const padB = 30;
+      const innerW = width - padL - padR;
+      const innerH = height - padT - padB;
+
+      let xMin = Infinity;
+      let xMax = -Infinity;
+      let yMin = Infinity;
+      let yMax = -Infinity;
+      for (const layer of rows) {
+        for (const point of layer.points) {
+          if (point.x < xMin) xMin = point.x;
+          if (point.x > xMax) xMax = point.x;
+          if (point.y0 < yMin) yMin = point.y0;
+          if (point.y1 < yMin) yMin = point.y1;
+          if (point.y0 > yMax) yMax = point.y0;
+          if (point.y1 > yMax) yMax = point.y1;
+        }
+      }
+      if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+        return `<div class="muted">图表数据不可解析。</div>`;
+      }
+      if (Math.abs(xMax - xMin) < 1e-12) {
+        xMax = xMin + 1.0;
+      }
+      if (Math.abs(yMax - yMin) < 1e-12) {
+        yMax += 1.0;
+        yMin -= 1.0;
+      }
+
+      const xPos = (x) => padL + ((x - xMin) / (xMax - xMin)) * innerW;
+      const yPos = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * innerH;
+      const zeroY = (yMin <= 0 && yMax >= 0) ? yPos(0) : null;
+
+      const areas = rows.map((layer) => {
+        const upper = layer.points.map((p) => `${xPos(p.x).toFixed(2)},${yPos(p.y1).toFixed(2)}`);
+        const lower = [...layer.points]
+          .reverse()
+          .map((p) => `${xPos(p.x).toFixed(2)},${yPos(p.y0).toFixed(2)}`);
+        const polygon = upper.concat(lower).join(" ");
+        const topLine = layer.points
+          .map((p) => `${xPos(p.x).toFixed(2)},${yPos(p.y1).toFixed(2)}`)
+          .join(" ");
+        return `<polygon points="${polygon}" fill="${escAttr(layer.color)}" fill-opacity="0.30" stroke="none" />
+          <polyline points="${topLine}" fill="none" stroke="${escAttr(layer.color)}" stroke-width="1.5" />`;
+      }).join("");
+
+      const legend = rows.map((layer) =>
+        `<span class="artifact-chart-legend-item"><span class="artifact-chart-dot" style="background:${escAttr(layer.color)}"></span>${escHtml(layer.label)}</span>`
+      ).join("");
+
+      const xTicks = [xMin, xMax].map((value) => Number.isInteger(value) ? String(value) : value.toFixed(2));
+      const yTicks = [yMin, yMax].map((value) => value.toFixed(4));
+
+      return `<div class="artifact-chart-card">
+        <p class="artifact-chart-title">${escHtml(title)}</p>
+        <svg class="artifact-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escAttr(title)}">
+          <line x1="${padL}" x2="${width - padR}" y1="${height - padB}" y2="${height - padB}" stroke="#cbd5e1" stroke-width="1" />
+          <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${height - padB}" stroke="#e2e8f0" stroke-width="1" />
+          ${zeroY === null ? "" : `<line x1="${padL}" x2="${width - padR}" y1="${zeroY.toFixed(2)}" y2="${zeroY.toFixed(2)}" stroke="#fecaca" stroke-width="1" stroke-dasharray="4 3" />`}
+          ${areas}
+          <text x="${padL}" y="${height - 8}" fill="#64748b" font-size="11">${escHtml(xTicks[0])}</text>
+          <text x="${width - padR}" y="${height - 8}" fill="#64748b" font-size="11" text-anchor="end">${escHtml(xTicks[1])}</text>
+          <text x="${padL - 6}" y="${padT + 4}" fill="#64748b" font-size="11" text-anchor="end">${escHtml(yTicks[1])}</text>
+          <text x="${padL - 6}" y="${height - padB + 4}" fill="#64748b" font-size="11" text-anchor="end">${escHtml(yTicks[0])}</text>
+        </svg>
+        <div class="artifact-chart-legend">${legend}</div>
+      </div>`;
+    }
+
     function renderCategoryBarChart(title, rows) {
       const items = (Array.isArray(rows) ? rows : [])
         .map((row) => ({
@@ -5240,16 +5329,34 @@ def _index_html_raw() -> str:
         if (name === "date") return false;
         return rows.some((row) => Number.isFinite(Number(row[name])));
       });
-      const selected = numericColumns.slice(0, 4);
-      const lines = selected.map((col, idx) => ({
+      const selected = numericColumns.slice(0, 5);
+      const palette = ["#0ea5e9", "#22c55e", "#f97316", "#a855f7", "#ef4444"];
+      const layers = selected.map((col, idx) => ({
         label: col,
-        color: ["#0ea5e9", "#22c55e", "#f97316", "#a855f7"][idx % 4],
-        points: rows
-          .map((row, pos) => ({x: pos + 1, y: Number(row[col])}))
-          .filter((p) => Number.isFinite(p.y)),
+        color: palette[idx % palette.length],
+        points: [],
       }));
-      const chart = renderMultiLineChart("Barra 归因时序（实验）", lines);
-      const bodyHtml = `<div class="artifact-viewer-meta">实验隔离：默认展示前 4 列贡献时序（按行序号作为横轴）。</div>
+      for (let i = 0; i < rows.length; i += 1) {
+        let cumulative = 0.0;
+        for (let k = 0; k < selected.length; k += 1) {
+          const valueRaw = Number(rows[i][selected[k]]);
+          const value = Number.isFinite(valueRaw) ? valueRaw : 0.0;
+          const y0 = cumulative;
+          cumulative += value;
+          layers[k].points.push({
+            x: i + 1,
+            y0,
+            y1: cumulative,
+          });
+        }
+      }
+      const startDate = rows.length ? String(rows[0].date || "").trim() : "";
+      const endDate = rows.length ? String(rows[rows.length - 1].date || "").trim() : "";
+      const axisHint = startDate && endDate
+        ? `横轴区间：${escHtml(startDate)} → ${escHtml(endDate)}`
+        : "横轴使用样本序号（1..N）";
+      const chart = renderStackedAreaChart("Barra 归因时序（实验）- 堆叠面积", layers);
+      const bodyHtml = `<div class="artifact-viewer-meta">实验隔离：按贡献项展示堆叠面积分解。${axisHint}</div>
         ${chart}
         ${renderCsvPreviewTable(parsed, text)}`;
       return renderArtifactViewerShell(key, "CSV · 实验归因", bodyHtml, text);
@@ -5301,6 +5408,28 @@ def _index_html_raw() -> str:
       if (text === "pass") return "good";
       if (text === "fail") return "bad";
       return "warn";
+    }
+
+    function classifyIcSignificance(tStat, pValue) {
+      const hasP = Number.isFinite(pValue);
+      const hasT = Number.isFinite(tStat);
+      if (hasP && pValue < 0.05 && (!hasT || Math.abs(tStat) >= 2.0)) return "good";
+      if ((hasP && pValue < 0.10) || (hasT && Math.abs(tStat) >= 1.64)) return "warn";
+      return "bad";
+    }
+
+    function buildIcSignificanceLabel(tStat, pValue) {
+      if (Number.isFinite(pValue)) {
+        if (pValue < 0.05) return "显著";
+        if (pValue < 0.10) return "边缘显著";
+        return "不显著";
+      }
+      if (Number.isFinite(tStat)) {
+        if (Math.abs(tStat) >= 2.0) return "显著";
+        if (Math.abs(tStat) >= 1.64) return "边缘显著";
+        return "不显著";
+      }
+      return "未知";
     }
 
     function renderRunProgress(run) {

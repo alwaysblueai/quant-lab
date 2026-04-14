@@ -338,6 +338,7 @@ def test_project_factor_diagnostics_returns_not_ok_when_runs_insufficient(
 def test_index_html_includes_new_diagnostics_renderers() -> None:
     html = _index_html_raw()
 
+    assert "IC显著性" in html
     assert "purged_kfold_summary" in html
     assert "purged_kfold_folds" in html
     assert "renderPurgedKfoldSummaryJson" in html
@@ -346,6 +347,8 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "renderBarraAttributionSummaryJson" in html
     assert "renderMarketImpactSummaryJson" in html
     assert "renderBarraAttributionTimeseriesCsv" in html
+    assert "renderStackedAreaChart" in html
+    assert "堆叠面积" in html
     assert "实验隔离 (L3)" in html
 
 
