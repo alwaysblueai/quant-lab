@@ -20,6 +20,8 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
         "signal_validation.json",
         "portfolio_recipe.json",
         "backtest_result.json",
+        "purged_kfold_summary.json",
+        "purged_kfold_folds.csv",
         "ic_timeseries.csv",
         "rolling_stability.csv",
         "group_returns.csv",
@@ -93,6 +95,12 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     assert "portfolio_validation_summary" in metrics_payload
     assert "portfolio_validation_metrics" in metrics_payload
     assert "portfolio_validation_package" in metrics_payload
+
+    purged_summary = json.loads(
+        (output_dir / "purged_kfold_summary.json").read_text(encoding="utf-8")
+    )
+    assert purged_summary["artifact_type"] == "alpha_lab_purged_kfold_summary"
+    assert purged_summary["status"] in {"ok", "not_available"}
 
     manifest_payload = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest_payload["artifact_type"] == "real_case_composite_bundle"
@@ -183,8 +191,8 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     assert "Level 2 Promotion" in summary_md
     assert "Level 1->Level 2 Transition" in summary_md
     assert "Level 2 Portfolio Validation" in summary_md
-    assert "## Setup" in card_md
-    assert "## Results" in card_md
+    assert "## 基本信息" in card_md
+    assert "## 结果" in card_md
     assert "Mean IC 95% CI" in card_md
     assert "Uncertainty Method" in card_md
     assert "Uncertainty Flags" in card_md
@@ -195,4 +203,4 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     assert "Level 2 Promotion" in card_md
     assert "Level 1->Level 2 Transition" in card_md
     assert "Level 2 Portfolio Validation" in card_md
-    assert "Interpretation" in card_md
+    assert "## 解释" in card_md

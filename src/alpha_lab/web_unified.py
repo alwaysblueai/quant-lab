@@ -2701,6 +2701,31 @@ def _index_html_raw() -> str:
       align-items: center;
       gap: 6px;
     }
+    .artifact-bar-list {
+      display: grid;
+      gap: 8px;
+    }
+    .artifact-bar-row {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .artifact-bar-head {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+    .artifact-bar-track {
+      height: 9px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .artifact-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #0ea5e9, #22c55e);
+    }
     .artifact-chart-dot {
       width: 10px;
       height: 10px;
@@ -4599,6 +4624,12 @@ def _index_html_raw() -> str:
         factor_definition: "因子定义",
         factor_definition_json: "因子定义JSON",
         portfolio_recipe_json: "组合配方",
+        purged_kfold_summary: "Purged K-Fold 摘要",
+        purged_kfold_folds: "Purged K-Fold 分折明细",
+        barra_attribution_summary: "Barra 归因摘要（实验）",
+        barra_attribution_timeseries: "Barra 归因时序（实验）",
+        market_impact_summary: "冲击成本摘要（实验）",
+        market_impact_orders: "冲击成本明细（实验）",
         ic_timeseries: "IC时序",
         integrity_report_json: "完整性JSON",
       };
@@ -4624,6 +4655,12 @@ def _index_html_raw() -> str:
         factor_definition: "artifact-detail",
         factor_definition_json: "artifact-detail",
         portfolio_recipe_json: "artifact-detail",
+        purged_kfold_summary: "artifact-data",
+        purged_kfold_folds: "artifact-data",
+        barra_attribution_summary: "artifact-data",
+        barra_attribution_timeseries: "artifact-data",
+        market_impact_summary: "artifact-data",
+        market_impact_orders: "artifact-detail",
         ic_timeseries: "artifact-detail",
         integrity_report_json: "artifact-detail",
       };
@@ -4640,6 +4677,8 @@ def _index_html_raw() -> str:
         "group_returns",
         "ic_decay",
         "factor_autocorrelation",
+        "purged_kfold_summary",
+        "purged_kfold_folds",
         "rolling_stability",
         "turnover",
         "coverage",
@@ -4657,6 +4696,12 @@ def _index_html_raw() -> str:
         "portfolio_validation_metrics",
         "portfolio_validation_markdown",
         "portfolio_validation_package",
+      ];
+      const experimentalKeys = [
+        "barra_attribution_summary",
+        "barra_attribution_timeseries",
+        "market_impact_summary",
+        "market_impact_orders",
       ];
       const decorate = (keys) => keys
         .filter((key) => Boolean(artifactPaths[key]))
@@ -4695,6 +4740,14 @@ def _index_html_raw() -> str:
         groups.push({
           title: "L2 结果",
           entries: decorate(portfolioKeys),
+          folded: true,
+        });
+      }
+      const experimentalEntries = decorate(experimentalKeys);
+      if (experimentalEntries.length) {
+        groups.push({
+          title: "实验隔离 (L3)",
+          entries: experimentalEntries,
           folded: true,
         });
       }
@@ -4853,6 +4906,18 @@ def _index_html_raw() -> str:
     function renderJsonArtifact(key, text) {
       try {
         const parsed = JSON.parse(text);
+        if (key === "purged_kfold_summary") {
+          return renderPurgedKfoldSummaryJson(key, parsed, text);
+        }
+        if (key === "portfolio_validation_metrics") {
+          return renderPortfolioValidationMetricsJson(key, parsed, text);
+        }
+        if (key === "barra_attribution_summary") {
+          return renderBarraAttributionSummaryJson(key, parsed, text);
+        }
+        if (key === "market_impact_summary") {
+          return renderMarketImpactSummaryJson(key, parsed, text);
+        }
         const entries = parsed && typeof parsed === "object" && !Array.isArray(parsed)
           ? Object.entries(parsed).slice(0, 12)
           : [];
@@ -4869,6 +4934,103 @@ def _index_html_raw() -> str:
       } catch (_) {
         return renderPlainArtifact(key, text, "JSON");
       }
+    }
+
+    function renderPurgedKfoldSummaryJson(key, parsed, rawText) {
+      const nFolds = Number(parsed.n_folds);
+      const nUsed = Number(parsed.n_splits_used);
+      const meanIc = Number(parsed.mean_ic);
+      const meanRankIc = Number(parsed.mean_rank_ic);
+      const meanSharpe = Number(parsed.mean_sharpe);
+      const verdict = String(parsed.verdict || "-");
+      const status = String(parsed.status || "-");
+      const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 4) : [];
+      const body = `<div class="artifact-json-grid">
+          <div class="artifact-json-card"><strong>Status</strong><pre>${escHtml(status)}</pre></div>
+          <div class="artifact-json-card"><strong>Verdict</strong><pre>${escHtml(verdict)}</pre></div>
+          <div class="artifact-json-card"><strong>n_folds</strong><pre>${Number.isFinite(nFolds) ? nFolds : "-"}</pre></div>
+          <div class="artifact-json-card"><strong>n_splits_used</strong><pre>${Number.isFinite(nUsed) ? nUsed : "-"}</pre></div>
+          <div class="artifact-json-card"><strong>mean_ic</strong><pre>${Number.isFinite(meanIc) ? meanIc.toFixed(4) : "-"}</pre></div>
+          <div class="artifact-json-card"><strong>mean_rank_ic</strong><pre>${Number.isFinite(meanRankIc) ? meanRankIc.toFixed(4) : "-"}</pre></div>
+          <div class="artifact-json-card"><strong>mean_sharpe</strong><pre>${Number.isFinite(meanSharpe) ? meanSharpe.toFixed(4) : "-"}</pre></div>
+          <div class="artifact-json-card"><strong>purge/embargo</strong><pre>${escHtml(String(parsed.purge_days ?? "-"))}/${escHtml(String(parsed.embargo_days ?? "-"))}</pre></div>
+        </div>
+        ${reasons.length ? `<div class="artifact-viewer-meta">原因：${escHtml(reasons.join("；"))}</div>` : ""}
+        <details><summary>查看完整 JSON</summary><pre id="artifactText" class="artifact-viewer-raw">${escHtml(rawText)}</pre></details>`;
+      return renderArtifactViewerShell(key, "JSON · Purged K-Fold", body, rawText);
+    }
+
+    function renderPortfolioValidationMetricsJson(key, parsed, rawText) {
+      const concentration = parsed && typeof parsed === "object" && parsed.concentration_exposure_diagnostics && typeof parsed.concentration_exposure_diagnostics === "object"
+        ? parsed.concentration_exposure_diagnostics
+        : {};
+      const scenarioRows = Array.isArray(parsed.scenario_metrics) ? parsed.scenario_metrics : [];
+      const holdingRows = Array.isArray(parsed.holding_period_sensitivity) ? parsed.holding_period_sensitivity : [];
+      const weightingRows = Array.isArray(parsed.weighting_sensitivity) ? parsed.weighting_sensitivity : [];
+
+      const concentrationCards = [
+        ["max_abs_weight_mean", concentration.max_abs_weight_mean],
+        ["top5_abs_weight_share_mean", concentration.top5_abs_weight_share_mean],
+        ["effective_names_mean", concentration.effective_names_mean],
+        ["gross_exposure_mean", concentration.gross_exposure_mean],
+        ["net_exposure_mean", concentration.net_exposure_mean],
+      ].map(([name, value]) =>
+        `<div class="artifact-json-card"><strong>${escHtml(String(name))}</strong><pre>${Number.isFinite(Number(value)) ? Number(value).toFixed(4) : "-"}</pre></div>`
+      ).join("");
+
+      const holdingChart = renderMultiLineChart("Holding Period 敏感性", [
+        {label: "Mean Return", color: "#0ea5e9", points: makeLinePoints(holdingRows, "holding_period", "mean_portfolio_return")},
+        {label: "Cost-Adjusted Return", color: "#22c55e", points: makeLinePoints(holdingRows, "holding_period", "mean_cost_adjusted_return_review_rate")},
+      ]);
+
+      const byMethodReturns = weightingRows.map((row) => ({
+        label: String(row.weighting_method || "unknown"),
+        value: Number(row.mean_portfolio_return),
+      }));
+      const byMethodConcentration = averageByMethod(scenarioRows, "max_abs_weight_mean");
+      const returnBars = renderCategoryBarChart("不同权重法：Mean Portfolio Return", byMethodReturns);
+      const concentrationBars = renderCategoryBarChart("不同权重法：Max |Weight|", byMethodConcentration);
+
+      const body = `<div class="artifact-viewer-meta">组合约束诊断（MVO / 风险约束近似）：关注集中度、敏感性与不同权重法表现。</div>
+        <div class="artifact-json-grid">${concentrationCards}</div>
+        ${holdingChart}
+        ${returnBars}
+        ${concentrationBars}
+        <details><summary>查看完整 JSON</summary><pre id="artifactText" class="artifact-viewer-raw">${escHtml(rawText)}</pre></details>`;
+      return renderArtifactViewerShell(key, "JSON · 组合约束诊断", body, rawText);
+    }
+
+    function renderBarraAttributionSummaryJson(key, parsed, rawText) {
+      const cards = [
+        ["start_date", parsed.start_date],
+        ["end_date", parsed.end_date],
+        ["total_return", parsed.total_return],
+        ["specific_return", parsed.specific_return],
+        ["residual_return", parsed.residual_return],
+      ].map(([name, value]) =>
+        `<div class="artifact-json-card"><strong>${escHtml(String(name))}</strong><pre>${escHtml(String(value ?? "-"))}</pre></div>`
+      ).join("");
+      const body = `<div class="artifact-viewer-meta">实验隔离（Level 3）: Barra 归因仅用于实验诊断，不进入默认结论门控。</div>
+        <div class="artifact-json-grid">${cards}</div>
+        <details><summary>查看完整 JSON</summary><pre id="artifactText" class="artifact-viewer-raw">${escHtml(rawText)}</pre></details>`;
+      return renderArtifactViewerShell(key, "JSON · 实验归因", body, rawText);
+    }
+
+    function renderMarketImpactSummaryJson(key, parsed, rawText) {
+      const cards = [
+        ["model_name", parsed.model_name],
+        ["avg_impact_bps", parsed.avg_impact_bps],
+        ["median_impact_bps", parsed.median_impact_bps],
+        ["p95_impact_bps", parsed.p95_impact_bps],
+        ["max_impact_bps", parsed.max_impact_bps],
+        ["n_orders", parsed.n_orders],
+      ].map(([name, value]) =>
+        `<div class="artifact-json-card"><strong>${escHtml(String(name))}</strong><pre>${escHtml(String(value ?? "-"))}</pre></div>`
+      ).join("");
+      const body = `<div class="artifact-viewer-meta">实验隔离（Level 3）: 预估冲击成本仅作实验参考，不进入默认推荐结论。</div>
+        <div class="artifact-json-grid">${cards}</div>
+        <details><summary>查看完整 JSON</summary><pre id="artifactText" class="artifact-viewer-raw">${escHtml(rawText)}</pre></details>`;
+      return renderArtifactViewerShell(key, "JSON · 实验冲击成本", body, rawText);
     }
 
     function parseCsvLines(text) {
@@ -4991,6 +5153,45 @@ def _index_html_raw() -> str:
       </div>`;
     }
 
+    function renderCategoryBarChart(title, rows) {
+      const items = (Array.isArray(rows) ? rows : [])
+        .map((row) => ({
+          label: String(row.label || "").trim(),
+          value: Number(row.value),
+        }))
+        .filter((row) => row.label && Number.isFinite(row.value));
+      if (!items.length) {
+        return `<div class="artifact-chart-card"><p class="artifact-chart-title">${escHtml(title)}</p><div class="muted">暂无可视化数据。</div></div>`;
+      }
+      const maxAbs = Math.max(...items.map((row) => Math.abs(row.value)), 1e-9);
+      const body = items.map((row) => {
+        const ratio = Math.max(0, Math.min(1, Math.abs(row.value) / maxAbs));
+        return `<div class="artifact-bar-row">
+          <div class="artifact-bar-head"><span>${escHtml(row.label)}</span><span>${escHtml(row.value.toFixed(4))}</span></div>
+          <div class="artifact-bar-track"><div class="artifact-bar-fill" style="width:${(ratio * 100).toFixed(1)}%"></div></div>
+        </div>`;
+      }).join("");
+      return `<div class="artifact-chart-card">
+        <p class="artifact-chart-title">${escHtml(title)}</p>
+        <div class="artifact-bar-list">${body}</div>
+      </div>`;
+    }
+
+    function averageByMethod(rows, metricKey) {
+      const bucket = {};
+      for (const row of (Array.isArray(rows) ? rows : [])) {
+        const method = String(row.weighting_method || "").trim();
+        const value = Number(row[metricKey]);
+        if (!method || !Number.isFinite(value)) continue;
+        if (!bucket[method]) bucket[method] = [];
+        bucket[method].push(value);
+      }
+      return Object.entries(bucket).map(([label, values]) => ({
+        label,
+        value: values.reduce((acc, item) => acc + item, 0) / values.length,
+      }));
+    }
+
     function renderIcDecayCsv(key, text, parsed) {
       const rows = parseCsvRows(text);
       const icPoints = makeLinePoints(rows, "horizon", "mean_ic");
@@ -5017,6 +5218,43 @@ def _index_html_raw() -> str:
       return renderArtifactViewerShell(key, "CSV · 诊断图", bodyHtml, text);
     }
 
+    function renderPurgedKfoldFoldsCsv(key, text, parsed) {
+      const rows = parseCsvRows(text);
+      const icChart = renderMultiLineChart("Purged K-Fold: IC / RankIC", [
+        {label: "Mean IC", color: "#0ea5e9", points: makeLinePoints(rows, "fold_id", "mean_ic")},
+        {label: "Mean RankIC", color: "#22c55e", points: makeLinePoints(rows, "fold_id", "mean_rank_ic")},
+      ]);
+      const sharpeChart = renderMultiLineChart("Purged K-Fold: Long-Short Sharpe", [
+        {label: "Fold Sharpe", color: "#f97316", points: makeLinePoints(rows, "fold_id", "long_short_sharpe")},
+      ]);
+      const bodyHtml = `<div class="artifact-viewer-meta">OOS 多折诊断：观察各 fold 的 IC 与 Sharpe 一致性。</div>
+        ${icChart}
+        ${sharpeChart}
+        ${renderCsvPreviewTable(parsed, text)}`;
+      return renderArtifactViewerShell(key, "CSV · Purged K-Fold", bodyHtml, text);
+    }
+
+    function renderBarraAttributionTimeseriesCsv(key, text, parsed) {
+      const rows = parseCsvRows(text);
+      const numericColumns = parsed.header.filter((name) => {
+        if (name === "date") return false;
+        return rows.some((row) => Number.isFinite(Number(row[name])));
+      });
+      const selected = numericColumns.slice(0, 4);
+      const lines = selected.map((col, idx) => ({
+        label: col,
+        color: ["#0ea5e9", "#22c55e", "#f97316", "#a855f7"][idx % 4],
+        points: rows
+          .map((row, pos) => ({x: pos + 1, y: Number(row[col])}))
+          .filter((p) => Number.isFinite(p.y)),
+      }));
+      const chart = renderMultiLineChart("Barra 归因时序（实验）", lines);
+      const bodyHtml = `<div class="artifact-viewer-meta">实验隔离：默认展示前 4 列贡献时序（按行序号作为横轴）。</div>
+        ${chart}
+        ${renderCsvPreviewTable(parsed, text)}`;
+      return renderArtifactViewerShell(key, "CSV · 实验归因", bodyHtml, text);
+    }
+
     function renderCsvArtifact(key, text) {
       const parsed = parseCsvLines(text);
       if (!parsed) return renderPlainArtifact(key, text, "CSV");
@@ -5025,6 +5263,12 @@ def _index_html_raw() -> str:
       }
       if (key === "factor_autocorrelation") {
         return renderFactorAutocorrCsv(key, text, parsed);
+      }
+      if (key === "purged_kfold_folds") {
+        return renderPurgedKfoldFoldsCsv(key, text, parsed);
+      }
+      if (key === "barra_attribution_timeseries") {
+        return renderBarraAttributionTimeseriesCsv(key, text, parsed);
       }
       const bodyHtml = renderCsvPreviewTable(parsed, text);
       return renderArtifactViewerShell(key, "CSV", bodyHtml, text);

@@ -22,6 +22,8 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "signal_validation.json",
         "portfolio_recipe.json",
         "backtest_result.json",
+        "purged_kfold_summary.json",
+        "purged_kfold_folds.csv",
         "ic_timeseries.csv",
         "ic_decay.csv",
         "factor_autocorrelation.csv",
@@ -92,6 +94,14 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert "portfolio_validation_summary" not in metrics_payload
     assert "portfolio_validation_metrics" not in metrics_payload
     assert "portfolio_validation_package" not in metrics_payload
+
+    purged_summary = json.loads(
+        (output_dir / "purged_kfold_summary.json").read_text(encoding="utf-8")
+    )
+    assert purged_summary["artifact_type"] == "alpha_lab_purged_kfold_summary"
+    assert purged_summary["status"] in {"ok", "not_available"}
+    assert "n_folds" in purged_summary
+    assert "mean_ic" in purged_summary
 
     manifest_payload = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest_payload["artifact_type"] == "real_case_single_factor_bundle"

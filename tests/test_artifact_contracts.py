@@ -100,6 +100,31 @@ def _valid_metrics_payload() -> dict[str, object]:
     }
 
 
+def _valid_purged_kfold_summary_payload() -> dict[str, object]:
+    return {
+        "schema_version": "1.0.0",
+        "artifact_type": "alpha_lab_purged_kfold_summary",
+        "status": "ok",
+        "message": "",
+        "n_eval_dates": 84,
+        "n_splits_requested": 5,
+        "n_splits_used": 5,
+        "label_horizon": 5,
+        "embargo_pct": 0.01,
+        "embargo_days": 1,
+        "purge_days": 5,
+        "n_folds": 5,
+        "fold_metrics_available": 5,
+        "mean_ic": 0.013,
+        "mean_rank_ic": 0.018,
+        "mean_sharpe": 0.24,
+        "ic_positive_folds": 4,
+        "rank_ic_positive_folds": 4,
+        "verdict": "robust",
+        "reasons": ["most folds show positive IC and RankIC"],
+    }
+
+
 def _valid_factor_definition_payload() -> dict[str, object]:
     return {
         "schema_version": "1.0.0",
@@ -733,6 +758,7 @@ def _valid_research_artifact_manifest_payload() -> dict[str, object]:
     [
         ("run_manifest.json", _valid_run_manifest_payload()),
         ("metrics.json", _valid_metrics_payload()),
+        ("purged_kfold_summary.json", _valid_purged_kfold_summary_payload()),
         ("factor_definition.json", _valid_factor_definition_payload()),
         ("signal_validation.json", _valid_signal_validation_payload()),
         ("portfolio_recipe.json", _valid_portfolio_recipe_payload()),
@@ -809,6 +835,17 @@ def test_level12_artifact_validator_rejects_non_numeric_dsr_pvalue() -> None:
 
     with pytest.raises(ValueError, match=r"metrics\.json\.metrics\.dsr_pvalue"):
         validate_level12_artifact_payload(payload, artifact_name="metrics.json")
+
+
+def test_level12_artifact_validator_rejects_invalid_purged_kfold_status() -> None:
+    payload = _valid_purged_kfold_summary_payload()
+    payload["status"] = "unknown"
+
+    with pytest.raises(ValueError, match=r"purged_kfold_summary\.json\.status"):
+        validate_level12_artifact_payload(
+            payload,
+            artifact_name="purged_kfold_summary.json",
+        )
 
 
 def test_level12_artifact_validator_rejects_malformed_campaign_case() -> None:

@@ -22,6 +22,7 @@ from alpha_lab.reporting.level2_portfolio_validation import (
     build_level2_portfolio_validation_bundle,
     export_level2_portfolio_validation_bundle,
 )
+from alpha_lab.reporting.purged_kfold_diagnostics import build_purged_kfold_diagnostics
 from alpha_lab.research_evaluation_config import (
     ResearchEvaluationConfig,
     research_evaluation_audit_snapshot,
@@ -47,6 +48,8 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "signal_validation.json",
     "portfolio_recipe.json",
     "backtest_result.json",
+    "purged_kfold_summary.json",
+    "purged_kfold_folds.csv",
     "ic_timeseries.csv",
     "ic_decay.csv",
     "factor_autocorrelation.csv",
@@ -73,6 +76,8 @@ class SingleFactorArtifactPaths(TypedDict):
     signal_validation_json: Path
     portfolio_recipe_json: Path
     backtest_result_json: Path
+    purged_kfold_summary: Path
+    purged_kfold_folds: Path
     ic_timeseries: Path
     ic_decay: Path
     factor_autocorrelation: Path
@@ -114,6 +119,8 @@ def export_artifact_bundle(
         "signal_validation_json": out_dir / "signal_validation.json",
         "portfolio_recipe_json": out_dir / "portfolio_recipe.json",
         "backtest_result_json": out_dir / "backtest_result.json",
+        "purged_kfold_summary": out_dir / "purged_kfold_summary.json",
+        "purged_kfold_folds": out_dir / "purged_kfold_folds.csv",
         "ic_timeseries": out_dir / "ic_timeseries.csv",
         "ic_decay": out_dir / "ic_decay.csv",
         "factor_autocorrelation": out_dir / "factor_autocorrelation.csv",
@@ -352,6 +359,13 @@ def export_artifact_bundle(
         output_paths=paths,
     )
     _write_json(paths["backtest_result_json"], backtest_result_payload)
+
+    purged_kfold = build_purged_kfold_diagnostics(
+        experiment_result=evaluation_result.experiment_result,
+        label_horizon=int(spec.target.horizon),
+    )
+    _write_json(paths["purged_kfold_summary"], purged_kfold.summary)
+    purged_kfold.folds.to_csv(paths["purged_kfold_folds"], index=False)
 
     manifest = {
         "schema_version": "1.0.0",

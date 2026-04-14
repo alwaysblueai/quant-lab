@@ -14,6 +14,12 @@ from alpha_lab.reporting.factor_verdict import (
     build_factor_verdict,
     reasons_to_text,
 )
+from alpha_lab.reporting.factor_correlation import (
+    FactorCorrelationMatch,
+    FactorCorrelationSignal,
+    collect_run_factor_correlation_summary,
+    inspect_run_factor_correlation,
+)
 from alpha_lab.reporting.uncertainty import compute_core_uncertainty
 from alpha_lab.research_evaluation_config import (
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
@@ -33,6 +39,8 @@ SUMMARY_COLUMNS: tuple[str, ...] = (
     "mean_rank_ic_ci_lower",
     "mean_rank_ic_ci_upper",
     "ic_ir",
+    "ic_t_stat",
+    "ic_p_value",
     "ic_positive_rate",
     "rank_ic_positive_rate",
     "ic_valid_ratio",
@@ -156,6 +164,8 @@ def summarise_experiment_result(
         "mean_rank_ic_ci_lower": uncertainty.mean_rank_ic_ci_lower,
         "mean_rank_ic_ci_upper": uncertainty.mean_rank_ic_ci_upper,
         "ic_ir": s.ic_ir,
+        "ic_t_stat": s.ic_t_stat,
+        "ic_p_value": s.ic_p_value,
         "ic_positive_rate": s.ic_positive_rate,
         "rank_ic_positive_rate": s.rank_ic_positive_rate,
         "ic_valid_ratio": s.ic_valid_ratio,

@@ -7,7 +7,12 @@ from typing import Any
 
 import pytest
 
-from alpha_lab.web_unified import _RunRecord, _UnifiedService, _extract_metrics_summary
+from alpha_lab.web_unified import (
+    _RunRecord,
+    _UnifiedService,
+    _extract_metrics_summary,
+    _index_html_raw,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +333,20 @@ def test_project_factor_diagnostics_returns_not_ok_when_runs_insufficient(
     assert isinstance(dsr_rows, list)
     assert len(dsr_rows) == 1
     assert dsr_rows[0]["factor_name"] == "factor_a"
+
+
+def test_index_html_includes_new_diagnostics_renderers() -> None:
+    html = _index_html_raw()
+
+    assert "purged_kfold_summary" in html
+    assert "purged_kfold_folds" in html
+    assert "renderPurgedKfoldSummaryJson" in html
+    assert "renderPurgedKfoldFoldsCsv" in html
+    assert "renderPortfolioValidationMetricsJson" in html
+    assert "renderBarraAttributionSummaryJson" in html
+    assert "renderMarketImpactSummaryJson" in html
+    assert "renderBarraAttributionTimeseriesCsv" in html
+    assert "实验隔离 (L3)" in html
 
 
 # ---------------------------------------------------------------------------

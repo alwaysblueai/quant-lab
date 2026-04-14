@@ -33,6 +33,7 @@ _KNOWN_CASE_STATUSES: frozenset[str] = frozenset({"success", "failed", "skipped"
 CORE_LEVEL12_JSON_ARTIFACTS: tuple[str, ...] = (
     "run_manifest.json",
     "metrics.json",
+    "purged_kfold_summary.json",
     "factor_definition.json",
     "signal_validation.json",
     "portfolio_recipe.json",
@@ -69,6 +70,7 @@ def validate_level12_artifact_payload(
     dispatch = {
         "run_manifest.json": validate_run_manifest_payload,
         "metrics.json": validate_metrics_payload,
+        "purged_kfold_summary.json": validate_purged_kfold_summary_payload,
         "factor_definition.json": validate_factor_definition_payload,
         "signal_validation.json": validate_signal_validation_payload,
         "portfolio_recipe.json": validate_portfolio_recipe_payload,
@@ -188,6 +190,46 @@ def validate_metrics_payload(
     _validate_object_if_present(payload, "portfolio_validation_summary", label)
     _validate_object_if_present(payload, "portfolio_validation_metrics", label)
     _validate_object_if_present(payload, "portfolio_validation_package", label)
+
+
+def validate_purged_kfold_summary_payload(
+    payload: Mapping[str, object],
+    *,
+    source: str | Path | None = None,
+) -> None:
+    label = str(source) if source is not None else "purged_kfold_summary.json"
+    _require_non_empty_string(payload, "schema_version", label)
+    artifact_type = _require_non_empty_string(payload, "artifact_type", label)
+    if artifact_type != "alpha_lab_purged_kfold_summary":
+        _raise(
+            f"{label}.artifact_type",
+            "must be `alpha_lab_purged_kfold_summary`",
+        )
+    status = _require_non_empty_string(payload, "status", label)
+    if status not in {"ok", "not_available"}:
+        _raise(f"{label}.status", "must be one of ['not_available', 'ok']")
+    _require_non_empty_string(payload, "verdict", label)
+    _validate_string_list_if_present(payload, "reasons", label)
+    for key in (
+        "n_eval_dates",
+        "n_splits_requested",
+        "n_splits_used",
+        "label_horizon",
+        "embargo_days",
+        "purge_days",
+        "n_folds",
+        "fold_metrics_available",
+        "ic_positive_folds",
+        "rank_ic_positive_folds",
+    ):
+        _require_int(payload, key, label)
+    for key in (
+        "embargo_pct",
+        "mean_ic",
+        "mean_rank_ic",
+        "mean_sharpe",
+    ):
+        _validate_finite_number_or_none_if_present(payload, key, label)
 
 
 def validate_campaign_manifest_payload(
