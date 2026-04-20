@@ -40,12 +40,14 @@ def _make_multi_date_factor(n_dates: int = 5, n_assets: int = 4, seed: int = 0) 
     rows = []
     for date in dates:
         for i in range(n_assets):
-            rows.append({
-                "date": date,
-                "asset": f"A{i}",
-                "factor": "test_factor",
-                "value": float(rng.normal(0, 1)),
-            })
+            rows.append(
+                {
+                    "date": date,
+                    "asset": f"A{i}",
+                    "factor": "test_factor",
+                    "value": float(rng.normal(0, 1)),
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -86,10 +88,12 @@ def test_portfolio_weights_missing_columns_raises() -> None:
 
 
 def test_portfolio_weights_multiple_factors_raises() -> None:
-    df = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "factor": "f1", "value": 1.0},
-        {"date": pd.Timestamp("2024-01-01"), "asset": "B", "factor": "f2", "value": 2.0},
-    ])
+    df = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-01"), "asset": "A", "factor": "f1", "value": 1.0},
+            {"date": pd.Timestamp("2024-01-01"), "asset": "B", "factor": "f2", "value": 2.0},
+        ]
+    )
     with pytest.raises(ValueError, match="exactly one factor"):
         portfolio_weights(df)
 
@@ -287,14 +291,12 @@ def test_simulate_returns_h1_r1_matches_weighted_sum() -> None:
     labels = forward_return(prices, horizon=1)
 
     # Use the same dates from labels as factor dates.
-    factor_df = labels.rename(columns={"value": "_v"}).assign(
-        factor="f", value=labels["value"]
-    )[["date", "asset", "factor", "value"]]
+    factor_df = labels.rename(columns={"value": "_v"}).assign(factor="f", value=labels["value"])[
+        ["date", "asset", "factor", "value"]
+    ]
     weights = portfolio_weights(factor_df, method="equal")
 
-    result = simulate_portfolio_returns(
-        weights, labels, holding_period=1, rebalance_frequency=1
-    )
+    result = simulate_portfolio_returns(weights, labels, holding_period=1, rebalance_frequency=1)
 
     # Manual check for the first date in result.
     if result.empty:
@@ -354,14 +356,18 @@ def test_portfolio_turnover_first_date_is_nan() -> None:
 
 def test_portfolio_turnover_no_change_is_zero() -> None:
     """Identical weights across two dates → turnover = 0."""
-    w1 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 0.5},
-        {"date": pd.Timestamp("2024-01-01"), "asset": "B", "weight": 0.5},
-    ])
-    w2 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-02"), "asset": "A", "weight": 0.5},
-        {"date": pd.Timestamp("2024-01-02"), "asset": "B", "weight": 0.5},
-    ])
+    w1 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 0.5},
+            {"date": pd.Timestamp("2024-01-01"), "asset": "B", "weight": 0.5},
+        ]
+    )
+    w2 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-02"), "asset": "A", "weight": 0.5},
+            {"date": pd.Timestamp("2024-01-02"), "asset": "B", "weight": 0.5},
+        ]
+    )
     result = portfolio_turnover(pd.concat([w1, w2], ignore_index=True))
     assert math.isnan(float(result["portfolio_turnover"].iloc[0]))
     assert math.isclose(float(result["portfolio_turnover"].iloc[1]), 0.0, abs_tol=1e-9)
@@ -369,15 +375,19 @@ def test_portfolio_turnover_no_change_is_zero() -> None:
 
 def test_portfolio_turnover_complete_replacement_is_one() -> None:
     """Complete asset replacement → turnover = 1.0."""
-    w1 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 0.5},
-        {"date": pd.Timestamp("2024-01-01"), "asset": "B", "weight": 0.5},
-    ])
+    w1 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 0.5},
+            {"date": pd.Timestamp("2024-01-01"), "asset": "B", "weight": 0.5},
+        ]
+    )
     # Completely different assets.
-    w2 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-02"), "asset": "C", "weight": 0.5},
-        {"date": pd.Timestamp("2024-01-02"), "asset": "D", "weight": 0.5},
-    ])
+    w2 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-02"), "asset": "C", "weight": 0.5},
+            {"date": pd.Timestamp("2024-01-02"), "asset": "D", "weight": 0.5},
+        ]
+    )
     result = portfolio_turnover(pd.concat([w1, w2], ignore_index=True))
     # |w_new - w_old|: A: |0-0.5|=0.5, B: |0-0.5|=0.5, C: |0.5-0|=0.5, D: |0.5-0|=0.5
     # sum = 2.0, half = 1.0
@@ -386,13 +396,17 @@ def test_portfolio_turnover_complete_replacement_is_one() -> None:
 
 def test_portfolio_turnover_partial_rebalance() -> None:
     """Partial shift of weight from A to B."""
-    w1 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 1.0},
-    ])
-    w2 = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-02"), "asset": "A", "weight": 0.5},
-        {"date": pd.Timestamp("2024-01-02"), "asset": "B", "weight": 0.5},
-    ])
+    w1 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 1.0},
+        ]
+    )
+    w2 = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-02"), "asset": "A", "weight": 0.5},
+            {"date": pd.Timestamp("2024-01-02"), "asset": "B", "weight": 0.5},
+        ]
+    )
     result = portfolio_turnover(pd.concat([w1, w2], ignore_index=True))
     # |w_new - w_old|: A: |0.5-1|=0.5, B: |0.5-0|=0.5 → sum=1.0, half=0.5
     assert math.isclose(float(result["portfolio_turnover"].iloc[1]), 0.5, rel_tol=1e-9)
@@ -411,9 +425,11 @@ def test_portfolio_turnover_missing_columns_raises() -> None:
 
 
 def test_portfolio_turnover_one_date_gives_single_nan_row() -> None:
-    w = pd.DataFrame([
-        {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 1.0},
-    ])
+    w = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2024-01-01"), "asset": "A", "weight": 1.0},
+        ]
+    )
     result = portfolio_turnover(w)
     assert len(result) == 1
     assert math.isnan(float(result["portfolio_turnover"].iloc[0]))
@@ -500,12 +516,16 @@ def test_experiment_portfolio_return_uses_1period_labels_when_horizon_gt_1() -> 
         result_h1.portfolio_return_df["date"]
     )
     if common_dates:
-        df5 = result_h5.portfolio_return_df[
-            result_h5.portfolio_return_df["date"].isin(common_dates)
-        ].sort_values("date").reset_index(drop=True)
-        df1 = result_h1.portfolio_return_df[
-            result_h1.portfolio_return_df["date"].isin(common_dates)
-        ].sort_values("date").reset_index(drop=True)
+        df5 = (
+            result_h5.portfolio_return_df[result_h5.portfolio_return_df["date"].isin(common_dates)]
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+        df1 = (
+            result_h1.portfolio_return_df[result_h1.portfolio_return_df["date"].isin(common_dates)]
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
         np.testing.assert_allclose(
             df5["portfolio_return"].values,
             df1["portfolio_return"].values,
@@ -561,9 +581,7 @@ def test_experiment_portfolio_weighting_method_rank() -> None:
     # Rank weights at each date should sum to 1.
     for date, g in result.portfolio_weights_df.groupby("date"):
         total = g["weight"].sum()
-        assert math.isclose(total, 1.0, rel_tol=1e-6), (
-            f"Rank weights at {date} sum to {total}"
-        )
+        assert math.isclose(total, 1.0, rel_tol=1e-6), f"Rank weights at {date} sum to {total}"
 
 
 # ---------------------------------------------------------------------------
@@ -603,15 +621,19 @@ def test_cost_adj_returns_non_rebalance_date_zero_cost() -> None:
     """Evaluation dates not in turnover_df incur zero cost."""
     rebal_date = pd.Timestamp("2024-01-01")
     eval_date = pd.Timestamp("2024-01-02")
-    ret_df = pd.DataFrame({
-        "date": [rebal_date, eval_date],
-        "portfolio_return": [0.01, 0.02],
-    })
+    ret_df = pd.DataFrame(
+        {
+            "date": [rebal_date, eval_date],
+            "portfolio_return": [0.01, 0.02],
+        }
+    )
     # turnover_df only has the first date (the rebalance date).
-    to_df = pd.DataFrame({
-        "date": [rebal_date],
-        "portfolio_turnover": [math.nan],
-    })
+    to_df = pd.DataFrame(
+        {
+            "date": [rebal_date],
+            "portfolio_turnover": [math.nan],
+        }
+    )
     result = portfolio_cost_adjusted_returns(ret_df, to_df, cost_rate=0.001)
     # First date: NaN (first rebalance).
     assert math.isnan(float(result["adjusted_return"].iloc[0]))
@@ -806,9 +828,7 @@ def test_portfolio_summary_mean_return_matches_manual_mean() -> None:
     assert result.portfolio_summary is not None
     assert result.portfolio_return_df is not None
     manual = float(result.portfolio_return_df["portfolio_return"].dropna().mean())
-    assert math.isclose(
-        result.portfolio_summary.mean_portfolio_return, manual, rel_tol=1e-9
-    )
+    assert math.isclose(result.portfolio_summary.mean_portfolio_return, manual, rel_tol=1e-9)
 
 
 def test_portfolio_summary_mean_turnover_matches_manual_mean() -> None:
@@ -822,9 +842,7 @@ def test_portfolio_summary_mean_turnover_matches_manual_mean() -> None:
     assert result.portfolio_summary is not None
     assert result.portfolio_turnover_df is not None
     manual = float(result.portfolio_turnover_df["portfolio_turnover"].dropna().mean())
-    assert math.isclose(
-        result.portfolio_summary.mean_portfolio_turnover, manual, rel_tol=1e-9
-    )
+    assert math.isclose(result.portfolio_summary.mean_portfolio_turnover, manual, rel_tol=1e-9)
 
 
 def test_portfolio_summary_n_portfolio_dates_correct() -> None:

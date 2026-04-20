@@ -66,8 +66,7 @@ def build_portfolio_recipe_controls(
         position_limits = "N/A"
     else:
         position_limits = (
-            f"max|w|~{_fmt_number(max_abs_weight)}; "
-            f"effective names~{_fmt_number(effective_names)}"
+            f"max|w|~{_fmt_number(max_abs_weight)}; effective names~{_fmt_number(effective_names)}"
         )
 
     return {

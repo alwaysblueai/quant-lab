@@ -41,9 +41,7 @@ class ComponentSpec:
         if self.weight == 0:
             raise ValueError(f"component[{self.name}].weight must be non-zero")
         if self.direction not in {"positive", "negative"}:
-            raise ValueError(
-                f"component[{self.name}].direction must be 'positive' or 'negative'"
-            )
+            raise ValueError(f"component[{self.name}].direction must be 'positive' or 'negative'")
         if self.transform not in {"zscore", "rank", "none"}:
             raise ValueError(
                 f"component[{self.name}].transform must be one of ['zscore', 'rank', 'none']"
@@ -67,9 +65,7 @@ class PreprocessSpec:
             raise ValueError("preprocess.winsorize_lower must be < winsorize_upper")
         if self.min_group_size <= 0:
             raise ValueError("preprocess.min_group_size must be > 0")
-        if self.min_coverage is not None and (
-            self.min_coverage <= 0 or self.min_coverage > 1
-        ):
+        if self.min_coverage is not None and (self.min_coverage <= 0 or self.min_coverage > 1):
             raise ValueError("preprocess.min_coverage must be in (0, 1] when provided")
 
 
@@ -280,7 +276,5 @@ def _parse_transform(value: object, *, idx: int) -> ComponentTransform:
         raise ValueError(f"components[{idx}].transform must be a string")
     normalized = value.strip().lower()
     if normalized not in {"zscore", "rank", "none"}:
-        raise ValueError(
-            f"components[{idx}].transform must be one of ['zscore', 'rank', 'none']"
-        )
+        raise ValueError(f"components[{idx}].transform must be one of ['zscore', 'rank', 'none']")
     return cast(ComponentTransform, normalized)

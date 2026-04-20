@@ -1,14 +1,10 @@
-"""Temporal/leakage checks for Level 1/2 research integrity.
-
-Most checks here are core research checks. A small subset at the bottom of
-this module supports optional Level 3 replay semantics auditing and is not part
-of the default workflow.
-"""
+"""Temporal/leakage checks for Level 1/2 research integrity."""
 
 from __future__ import annotations
 
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError
@@ -168,8 +164,7 @@ def check_factor_label_temporal_order(
             module_name="research_integrity.leakage_checks",
             message=f"{n_violations} rows have factor_date later than label_date",
             remediation=(
-                "Ensure labels are attached to the same or later signal timestamp "
-                "than factors."
+                "Ensure labels are attached to the same or later signal timestamp than factors."
             ),
             metrics={
                 "violations": n_violations,
@@ -203,6 +198,193 @@ def check_factor_label_temporal_order(
         metrics={
             "rows_compared": int(len(merged)),
             "label_after_factor_rows": n_lagged_label,
+        },
+    )
+
+
+def check_factor_label_value_clone_risk(
+    factor_df: pd.DataFrame,
+    label_df: pd.DataFrame,
+    *,
+    join_keys: tuple[str, ...] = ("date", "asset"),
+    factor_value_col: str = "value",
+    label_value_col: str = "value",
+    min_rows_for_check: int = 30,
+    exact_match_ratio_fail: float = 0.98,
+    min_unique_ratio_for_fail: float = 0.10,
+    atol: float = 1e-12,
+    rtol: float = 1e-10,
+    object_name: str = "factor_label_value_leakage",
+) -> IntegrityCheckResult:
+    """Fail when factor values are near-identical to forward labels.
+
+    This catches an obvious leak pattern: constructing a factor directly from
+    forward returns while preserving the original timestamp.
+    """
+
+    required_factor = set([*join_keys, factor_value_col])
+    required_label = set([*join_keys, label_value_col])
+    factor_missing = sorted(required_factor - set(factor_df.columns))
+    label_missing = sorted(required_label - set(label_df.columns))
+    if factor_missing or label_missing:
+        details: list[str] = []
+        if factor_missing:
+            details.append(f"factor missing {factor_missing}")
+        if label_missing:
+            details.append(f"label missing {label_missing}")
+        return IntegrityCheckResult(
+            check_name="check_factor_label_value_clone_risk",
+            status="fail",
+            severity="error",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message="; ".join(details),
+            remediation="Provide join keys and value columns for leakage detection.",
+        )
+
+    factor_view = factor_df.loc[:, [*join_keys, factor_value_col]].rename(
+        columns={factor_value_col: "_factor_value"}
+    )
+    label_view = label_df.loc[:, [*join_keys, label_value_col]].rename(
+        columns={label_value_col: "_label_value"}
+    )
+    try:
+        merged = factor_view.merge(
+            label_view,
+            on=list(join_keys),
+            how="inner",
+            validate="one_to_one",
+        )
+    except ValueError as exc:
+        return IntegrityCheckResult(
+            check_name="check_factor_label_value_clone_risk",
+            status="fail",
+            severity="error",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message=f"factor/label join is not one-to-one: {exc}",
+            remediation=(
+                "Ensure factor and label tables contain unique rows per join key "
+                "before leakage checks."
+            ),
+        )
+
+    clean = merged.dropna(subset=["_factor_value", "_label_value"])
+    n_compared = int(len(clean))
+    if n_compared == 0:
+        return IntegrityCheckResult(
+            check_name="check_factor_label_value_clone_risk",
+            status="warn",
+            severity="warning",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message="no finite factor/label value pairs available for clone-risk check",
+            remediation=(
+                "Inspect factor/label missingness; clone-risk detection has no effective coverage."
+            ),
+            metrics={"rows_compared": 0},
+        )
+
+    factor_nunique = int(clean["_factor_value"].nunique())
+    label_nunique = int(clean["_label_value"].nunique())
+    unique_ratio = float(min(factor_nunique, label_nunique) / n_compared)
+    if factor_nunique < 2 or label_nunique < 2:
+        return IntegrityCheckResult(
+            check_name="check_factor_label_value_clone_risk",
+            status="warn",
+            severity="warning",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message=(
+                "clone-risk check is inconclusive because factor or label values are "
+                "cross-sectionally/time-series degenerate"
+            ),
+            remediation=("Use data with value variation when auditing factor-label clone risk."),
+            metrics={
+                "rows_compared": n_compared,
+                "factor_nunique": factor_nunique,
+                "label_nunique": label_nunique,
+                "min_unique_ratio": unique_ratio,
+            },
+        )
+
+    exact_mask = np.isclose(
+        clean["_factor_value"].to_numpy(dtype=float),
+        clean["_label_value"].to_numpy(dtype=float),
+        atol=atol,
+        rtol=rtol,
+        equal_nan=False,
+    )
+    exact_match_ratio = float(exact_mask.mean())
+
+    if (
+        n_compared >= min_rows_for_check
+        and exact_match_ratio >= exact_match_ratio_fail
+        and unique_ratio >= min_unique_ratio_for_fail
+    ):
+        return IntegrityCheckResult(
+            check_name="check_factor_label_value_clone_risk",
+            status="fail",
+            severity="error",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message=(
+                "factor values are near-identical to forward labels on the same timestamp; "
+                "possible future-data leakage"
+            ),
+            remediation=(
+                "Do not construct factors from forward returns or future prices at the same "
+                "signal timestamp."
+            ),
+            metrics={
+                "rows_compared": n_compared,
+                "factor_nunique": factor_nunique,
+                "label_nunique": label_nunique,
+                "min_unique_ratio": unique_ratio,
+                "exact_match_ratio": exact_match_ratio,
+                "exact_match_ratio_fail_threshold": exact_match_ratio_fail,
+                "min_rows_for_check": min_rows_for_check,
+                "min_unique_ratio_for_fail": min_unique_ratio_for_fail,
+            },
+        )
+
+    status: Literal["pass", "warn", "fail"] = "pass"
+    severity: Literal["info", "warning", "error"] = "info"
+    message = "factor/label value clone-risk check passed"
+    remediation: str | None = None
+    if n_compared < min_rows_for_check:
+        status = "warn"
+        severity = "warning"
+        message = (
+            "clone-risk check coverage is small; leak-like value equality may be under-detected"
+        )
+        remediation = "Use a larger evaluation window for stronger leakage detection power."
+    elif unique_ratio < min_unique_ratio_for_fail:
+        status = "warn"
+        severity = "warning"
+        message = (
+            "clone-risk check saw high value equality but low unique-value ratio; likely a "
+            "low-entropy series rather than direct label cloning"
+        )
+        remediation = "Use a richer sample/universe to verify whether equality persists."
+
+    return IntegrityCheckResult(
+        check_name="check_factor_label_value_clone_risk",
+        status=status,
+        severity=severity,
+        object_name=object_name,
+        module_name="research_integrity.leakage_checks",
+        message=message,
+        remediation=remediation,
+        metrics={
+            "rows_compared": n_compared,
+            "factor_nunique": factor_nunique,
+            "label_nunique": label_nunique,
+            "min_unique_ratio": unique_ratio,
+            "exact_match_ratio": exact_match_ratio,
+            "exact_match_ratio_fail_threshold": exact_match_ratio_fail,
+            "min_rows_for_check": min_rows_for_check,
+            "min_unique_ratio_for_fail": min_unique_ratio_for_fail,
         },
     )
 
@@ -277,8 +459,7 @@ def check_asof_inputs_not_after_signal_date(
                 "after signal date"
             ),
             remediation=(
-                "Filter auxiliary rows by known_at <= signal date before feature "
-                "construction."
+                "Filter auxiliary rows by known_at <= signal date before feature construction."
             ),
             metrics=summary.to_dict(),
         )
@@ -701,9 +882,7 @@ def check_multitimeframe_alignment(
             object_name=object_name,
             module_name="research_integrity.leakage_checks",
             message="uses_closed_higher_timeframe_only=False; early access risk is not bounded",
-            remediation=(
-                "Use completed higher-timeframe bars only when driving intraday signals."
-            ),
+            remediation=("Use completed higher-timeframe bars only when driving intraday signals."),
         )
 
     missing = sorted(
@@ -787,8 +966,7 @@ def check_intraday_to_daily_alignment(
             object_name=object_name,
             module_name="research_integrity.leakage_checks",
             message=(
-                f"{n_violations} rows use daily features before daily effective known-at "
-                "time"
+                f"{n_violations} rows use daily features before daily effective known-at time"
             ),
             remediation=(
                 "Align daily aggregates/fundamentals with explicit effective-time semantics in "
@@ -939,9 +1117,7 @@ def check_signal_execution_gap_is_respected(
             severity="warning",
             object_name=object_name,
             module_name="research_integrity.leakage_checks",
-            message=(
-                "cannot infer bar size from timestamps; execution-gap audit is advisory only"
-            ),
+            message=("cannot infer bar size from timestamps; execution-gap audit is advisory only"),
             remediation="Provide explicit bar_size for strict bar-gap validation.",
         )
 
@@ -1024,9 +1200,7 @@ def check_same_bar_close_execution_conflict(
             severity="error",
             object_name=object_name,
             module_name="research_integrity.leakage_checks",
-            message=(
-                f"{n_conflict} rows use same-bar close execution with close-derived signals"
-            ),
+            message=(f"{n_conflict} rows use same-bar close execution with close-derived signals"),
             remediation="Use next-bar or delayed execution when signals are computed on bar close.",
             metrics={"rows_compared": int(len(frame)), "conflicts": n_conflict},
         )
@@ -1231,8 +1405,7 @@ def check_participation_cap_metadata_present(
             module_name="research_integrity.leakage_checks",
             message="capacity_model is missing; execution liquidity assumptions are implicit",
             remediation=(
-                "Set capacity_model explicitly (for example unbounded or "
-                "participation_capped)."
+                "Set capacity_model explicitly (for example unbounded or participation_capped)."
             ),
         )
 

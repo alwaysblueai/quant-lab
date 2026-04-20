@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alpha_lab.evaluation import compute_ic, compute_rank_ic
+from alpha_lab.evaluation import compute_ic, compute_mutual_information, compute_rank_ic
 
 
 def _canonical(
@@ -66,6 +66,42 @@ def test_compute_rank_ic_basic_correctness():
     assert result.loc[0, "rank_ic"] == pytest.approx(-0.5)
 
 
+def test_compute_mutual_information_detects_nonlinear_dependence() -> None:
+    factors = _canonical(
+        dates=["2024-01-02"] * 9,
+        assets=[f"A{i}" for i in range(9)],
+        factor_name="f",
+        values=[-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02"] * 9,
+        assets=[f"A{i}" for i in range(9)],
+        factor_name="y",
+        values=[16.0, 9.0, 4.0, 1.0, 0.0, 1.0, 4.0, 9.0, 16.0],
+    )
+    result = compute_mutual_information(factors, labels)
+    assert list(result.columns) == ["date", "factor", "label", "mutual_information"]
+    mi = float(result.loc[0, "mutual_information"])
+    assert mi > 0.0
+
+
+def test_compute_mutual_information_returns_nan_for_degenerate_cross_section() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="f",
+        values=[1.0, 1.0, 1.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="y",
+        values=[0.5, 0.7, 0.9],
+    )
+    result = compute_mutual_information(factors, labels)
+    assert np.isnan(result.loc[0, "mutual_information"])
+
+
 def test_compute_ic_merges_only_on_date_and_asset():
     factors = _canonical(
         dates=["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
@@ -83,12 +119,10 @@ def test_compute_ic_merges_only_on_date_and_asset():
     result = compute_ic(factors, labels)
 
     assert len(result) == 2
-    assert np.isnan(
-        result.loc[result["date"] == pd.Timestamp("2024-01-02"), "ic"]
-    ).all()
-    assert result.loc[result["date"] == pd.Timestamp("2024-01-03"), "ic"].iloc[
-        0
-    ] == pytest.approx(1.0)
+    assert np.isnan(result.loc[result["date"] == pd.Timestamp("2024-01-02"), "ic"]).all()
+    assert result.loc[result["date"] == pd.Timestamp("2024-01-03"), "ic"].iloc[0] == pytest.approx(
+        1.0
+    )
 
 
 def test_compute_ic_drops_nan_pairs_within_date():
@@ -216,12 +250,9 @@ def test_compute_ic_raises_on_all_nan_factor_values():
         compute_ic(factors, labels)
 
 
-def test_compute_ic_omits_dates_where_all_merged_pairs_are_nan():
-    # When every factor value for a date is NaN, the inner merge produces
-    # no clean pairs for that date.  The vectorised path omits the date
-    # entirely (no NaN row) rather than emitting a NaN row as the old
-    # per-group path did.  A valid date is included to confirm the output
-    # frame is non-empty and correctly shaped.
+def test_compute_ic_keeps_dates_where_all_merged_pairs_are_nan_as_nan_rows():
+    # When every factor value for a date is NaN, the date must still appear
+    # in IC output as NaN so valid-ratio denominators remain auditable.
     factors = pd.DataFrame(
         {
             "date": pd.to_datetime(
@@ -240,6 +271,46 @@ def test_compute_ic_omits_dates_where_all_merged_pairs_are_nan():
     )
     result = compute_ic(factors, labels)
     assert list(result.columns) == ["date", "factor", "label", "ic"]
-    assert len(result) == 1
-    assert pd.Timestamp("2024-01-02") not in result["date"].values
-    assert result.loc[result["date"] == pd.Timestamp("2024-01-03"), "ic"].iloc[0] == pytest.approx(1.0)
+    assert len(result) == 2
+    assert pd.Timestamp("2024-01-02") in result["date"].values
+    assert np.isnan(result.loc[result["date"] == pd.Timestamp("2024-01-02"), "ic"].iloc[0])
+    assert result.loc[result["date"] == pd.Timestamp("2024-01-03"), "ic"].iloc[0] == pytest.approx(
+        1.0
+    )
+
+
+def test_merged_pairs_path_matches_default_for_ic_rankic_and_mi():
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
+        assets=["A", "B", "A", "B"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
+        assets=["A", "B", "A", "B"],
+        factor_name="y",
+        values=[2.0, 1.0, 4.0, 3.0],
+    )
+    merged_pairs = (
+        factors[["date", "asset", "value"]]
+        .rename(columns={"value": "value_factor"})
+        .merge(
+            labels[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
+            on=["date", "asset"],
+            how="inner",
+            validate="one_to_one",
+        )
+    )
+
+    ic_default = compute_ic(factors, labels)
+    ic_merged = compute_ic(factors, labels, merged_pairs=merged_pairs)
+    pd.testing.assert_frame_equal(ic_default, ic_merged)
+
+    rank_default = compute_rank_ic(factors, labels)
+    rank_merged = compute_rank_ic(factors, labels, merged_pairs=merged_pairs)
+    pd.testing.assert_frame_equal(rank_default, rank_merged)
+
+    mi_default = compute_mutual_information(factors, labels)
+    mi_merged = compute_mutual_information(factors, labels, merged_pairs=merged_pairs)
+    pd.testing.assert_frame_equal(mi_default, mi_merged)

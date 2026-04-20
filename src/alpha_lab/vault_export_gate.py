@@ -214,12 +214,16 @@ def apply_pending_vault_export_candidates(
 ) -> list[tuple[PendingVaultExportCandidate, ExportResult]]:
     resolved_vault = resolve_vault_root(vault_root)
     if resolved_vault is None:
-        raise AlphaLabConfigError("vault root is unresolved; pass --vault-root or set OBSIDIAN_VAULT_PATH")
+        raise AlphaLabConfigError(
+            "vault root is unresolved; pass --vault-root or set OBSIDIAN_VAULT_PATH"
+        )
 
     results: list[tuple[PendingVaultExportCandidate, ExportResult]] = []
     for candidate in candidates:
         applied_mode = mode or (
-            candidate.current_mode if candidate.current_mode and candidate.current_mode != "skip" else "versioned"
+            candidate.current_mode
+            if candidate.current_mode and candidate.current_mode != "skip"
+            else "versioned"
         )
         export_result = export_to_vault(
             {
@@ -233,9 +237,7 @@ def apply_pending_vault_export_candidates(
         )
         payload = json.loads(candidate.manifest_path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            payload["vault_export"] = export_result.to_manifest_dict(
-                enabled=applied_mode != "skip"
-            )
+            payload["vault_export"] = export_result.to_manifest_dict(enabled=applied_mode != "skip")
             candidate.manifest_path.write_text(
                 json.dumps(payload, indent=2, sort_keys=True),
                 encoding="utf-8",
@@ -306,7 +308,10 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument(
         "--transcript-path",
         default=None,
-        help="Optional Claude transcript path used to select pending manifests from the current session.",
+        help=(
+            "Optional Claude transcript path used to select pending manifests "
+            "from the current session."
+        ),
     )
     apply_parser.add_argument(
         "--since-hours",

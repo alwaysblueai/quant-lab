@@ -20,7 +20,15 @@ def winsorize_cross_section(
     min_group_size: int = 3,
     enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Winsorize `value` per date cross-section."""
+    """Winsorize ``value`` per date cross-section.
+
+    When a date has fewer than ``min_group_size`` valid rows the group is
+    **skipped** and raw values flow through untouched. This is deliberately
+    different from :func:`zscore_cross_section` / :func:`rank_cross_section`,
+    which NaN-out such groups: clipping is defined for any sample size ≥1,
+    whereas standardization/ranking require a meaningful cross-sectional
+    distribution.
+    """
 
     _validate_signal_frame(df)
     out = df.copy()
@@ -45,13 +53,64 @@ def winsorize_cross_section(
     )
 
 
+def mad_winsorize_cross_section(
+    df: pd.DataFrame,
+    *,
+    k: float = 3.0,
+    min_group_size: int = 3,
+    enforce_integrity: bool = True,
+) -> pd.DataFrame:
+    """MAD winsorize ``value`` per date cross-section."""
+    if k <= 0:
+        raise AlphaLabConfigError("k must be > 0")
+
+    _validate_signal_frame(df)
+    out = df.copy()
+
+    for idx in _date_groups(out):
+        values = pd.to_numeric(out.loc[idx, "value"], errors="coerce")
+        valid = values.notna()
+        if int(valid.sum()) < min_group_size:
+            continue
+
+        v = values.loc[valid]
+        median = float(v.median())
+        mad = float((v - median).abs().median())
+        if not np.isfinite(mad) or mad <= 0.0:
+            continue
+        lower = median - float(k) * mad
+        upper = median + float(k) * mad
+        out.loc[v.index, "value"] = v.clip(lower=lower, upper=upper)
+
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="mad_winsorize_cross_section",
+        enforce_integrity=enforce_integrity,
+    )
+
+
 def zscore_cross_section(
     df: pd.DataFrame,
     *,
     min_group_size: int = 3,
     enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Z-score standardize `value` per date cross-section."""
+    """Z-score standardize ``value`` per date cross-section.
+
+    Uses **population standard deviation** (``ddof=0``) via
+    :func:`~alpha_lab.preprocess.zscore_series`.  This is intentional:
+    the goal is within-date normalization, not estimating a population
+    parameter.  See ``zscore_series`` docstring for the full rationale
+    and contrast with ``compute_ic_summary`` (which uses ``ddof=1``).
+
+    Dates with fewer than ``min_group_size`` valid rows have the entire group
+    NaN-ed: a z-score computed from a handful of observations is not
+    informative and should not flow downstream. Contrast with
+    :func:`winsorize_cross_section`, which skips small groups without
+    nulling them.
+    """
 
     _validate_signal_frame(df)
     out = df.copy()
@@ -81,7 +140,12 @@ def rank_cross_section(
     pct: bool = True,
     enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Cross-sectional rank transform for `value` per date."""
+    """Cross-sectional rank transform for ``value`` per date.
+
+    Dates with fewer than ``min_group_size`` valid rows have the entire group
+    NaN-ed (ranks from a degenerate sample are not meaningful). Ties are
+    resolved with pandas' ``method="average"``.
+    """
 
     _validate_signal_frame(df)
     out = df.copy()

@@ -67,9 +67,7 @@ def compare_experiments(summaries: list[pd.DataFrame]) -> pd.DataFrame:
                 f"summaries[{i}] must be a pandas DataFrame, got {type(s).__name__}"
             )
         if len(s) != 1:
-            raise AlphaLabDataError(
-                f"summaries[{i}] must contain exactly one row, got {len(s)}"
-            )
+            raise AlphaLabDataError(f"summaries[{i}] must contain exactly one row, got {len(s)}")
         missing = set(SUMMARY_COLUMNS) - set(s.columns)
         if missing:
             raise AlphaLabDataError(
@@ -77,9 +75,7 @@ def compare_experiments(summaries: list[pd.DataFrame]) -> pd.DataFrame:
             )
         extra = set(s.columns) - set(SUMMARY_COLUMNS)
         if extra:
-            raise AlphaLabDataError(
-                f"summaries[{i}] contains unexpected columns: {sorted(extra)}"
-            )
+            raise AlphaLabDataError(f"summaries[{i}] contains unexpected columns: {sorted(extra)}")
 
     combined = pd.concat(summaries, ignore_index=True)
     combined = combined.rename(columns=_RENAME)
@@ -134,9 +130,6 @@ def rank_experiments(
     remaining = [c for c in comparison_df.columns if c != metric]
     sort_cols = [metric] + remaining
     sort_ascending = [ascending] + [True] * len(remaining)
-    return (
-        comparison_df.sort_values(
-            sort_cols, ascending=sort_ascending, na_position="last"
-        )
-        .reset_index(drop=True)
-    )
+    return comparison_df.sort_values(
+        sort_cols, ascending=sort_ascending, na_position="last"
+    ).reset_index(drop=True)

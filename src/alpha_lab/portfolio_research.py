@@ -112,9 +112,7 @@ def portfolio_weights(
 
         eff_top = min(top_k, n) if top_k is not None else n
         # Bottom_k cannot consume assets already in the long leg.
-        eff_bottom = (
-            min(bottom_k, n - eff_top) if bottom_k is not None else 0
-        )
+        eff_bottom = min(bottom_k, n - eff_top) if bottom_k is not None else 0
 
         long_vals = group["value"].iloc[:eff_top].to_numpy(dtype=float)
         long_assets = group["asset"].iloc[:eff_top].to_numpy()
@@ -131,11 +129,13 @@ def portfolio_weights(
             assets = long_assets
             weights = long_w
 
-        part = pd.DataFrame({
-            "date": date,
-            "asset": assets,
-            "weight": weights.astype(float),
-        })
+        part = pd.DataFrame(
+            {
+                "date": date,
+                "asset": assets,
+                "weight": weights.astype(float),
+            }
+        )
         parts.append(part)
 
     if not parts:
@@ -250,9 +250,7 @@ def simulate_portfolio_returns(
         return pd.DataFrame(columns=list(_PORTFOLIO_RETURN_COLUMNS))
 
     weight_wide = (
-        w_active.pivot(index="date", columns="asset", values="weight")
-        .sort_index()
-        .fillna(0.0)
+        w_active.pivot(index="date", columns="asset", values="weight").sort_index().fillna(0.0)
     )
     return_wide = r_df.pivot(index="date", columns="asset", values="value").sort_index()
     if weight_wide.empty or return_wide.empty:
@@ -281,9 +279,7 @@ def simulate_portfolio_returns(
     if holding_period < n_rebalance:
         expiring_cols = n_rebalance - holding_period
         expiry_dates = rebalance_dates[holding_period:]
-        active_mask[:, :expiring_cols] &= (
-            eval_dates[:, None] < expiry_dates[None, :]
-        )
+        active_mask[:, :expiring_cols] &= eval_dates[:, None] < expiry_dates[None, :]
 
     contribution_mask = active_mask & (position_valid_counts > 0.0)
     if not np.any(contribution_mask):

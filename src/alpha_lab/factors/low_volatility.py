@@ -40,7 +40,9 @@ def low_volatility(
 
     dupes = df.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise AlphaLabDataError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
+        raise AlphaLabDataError(
+            f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}"
+        )
 
     if min_periods is None:
         min_periods = window

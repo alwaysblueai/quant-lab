@@ -3,8 +3,8 @@
 This package intentionally exposes point-in-time, temporal, and leakage
 validation primitives that are required for default research workflows.
 
-Replay/implementability semantic-audit helpers are intentionally excluded from
-this core namespace and live under `alpha_lab.experimental_level3`.
+Replay/implementability helpers are out of scope for default workflows and are
+intentionally not included in this public Level 1/2 namespace.
 """
 
 from alpha_lab.research_integrity.asof import (
@@ -32,6 +32,7 @@ from alpha_lab.research_integrity.leakage_checks import (
     check_cross_section_transform_scope,
     check_daily_feature_asof_intraday,
     check_factor_label_temporal_order,
+    check_factor_label_value_clone_risk,
     check_higher_timeframe_feature_not_available_early,
     check_incomplete_bar_not_used,
     check_intraday_to_daily_alignment,
@@ -67,6 +68,7 @@ __all__ = [
     "check_cross_section_transform_scope",
     "check_daily_feature_asof_intraday",
     "check_factor_label_temporal_order",
+    "check_factor_label_value_clone_risk",
     "check_higher_timeframe_feature_not_available_early",
     "check_incomplete_bar_not_used",
     "check_intraday_to_daily_alignment",

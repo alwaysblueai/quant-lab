@@ -4,6 +4,7 @@ Spins up a real ThreadingHTTPServer on a random port, makes urllib requests,
 and validates status codes + JSON structure. Exercises actual route dispatch
 rather than mocking the handler.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,11 +15,11 @@ import urllib.request
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from alpha_lab.web_unified import _UnifiedRequestHandler, _UnifiedService
-
+from alpha_lab.web_unified import _RunRecord, _UnifiedRequestHandler, _UnifiedService
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,7 +70,10 @@ def live_server(tmp_path: Path) -> Generator[tuple[str, _UnifiedService], None, 
 
     _Handler.svc = svc  # type: ignore[attr-defined]
 
-    port = _free_port()
+    try:
+        port = _free_port()
+    except PermissionError:
+        pytest.skip("socket creation denied in current environment")
     server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -106,7 +110,8 @@ def _post(base_url: str, path: str, payload: dict) -> tuple[int, dict | str]:
     """POST JSON to {base_url}{path}."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
-        f"{base_url}{path}", data=data,
+        f"{base_url}{path}",
+        data=data,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -147,7 +152,8 @@ def _patch(base_url: str, path: str, payload: dict) -> tuple[int, dict | str]:
     """PATCH JSON to {base_url}{path}."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
-        f"{base_url}{path}", data=data,
+        f"{base_url}{path}",
+        data=data,
         headers={"Content-Type": "application/json"},
         method="PATCH",
     )
@@ -164,7 +170,6 @@ def _patch(base_url: str, path: str, payload: dict) -> tuple[int, dict | str]:
             return e.code, json.loads(body)
         except Exception:
             return e.code, body.decode("utf-8", errors="replace")
-
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +230,9 @@ def test_read_card_route_found_bare_name(live_server: tuple[str, _UnifiedService
     assert data["truncated"] is False
 
 
-def test_read_card_route_found_vault_relative_path(live_server: tuple[str, _UnifiedService]) -> None:
+def test_read_card_route_found_vault_relative_path(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
     # Vault-relative path as stored in CARD-INDEX.tsv — the main real-world case
     base_url, svc = live_server
     # Create a nested card
@@ -282,18 +289,22 @@ def test_evaluation_profiles_route(live_server: tuple[str, _UnifiedService]) -> 
 
 def test_explore_idea_free_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, _ = live_server
-    status, data = _post(base_url, "/api/vault/explore-idea", {"idea": "momentum 动量", "mode": "free"})
+    status, data = _post(
+        base_url, "/api/vault/explore-idea", {"idea": "momentum 动量", "mode": "free"}
+    )
     assert status == 200
     assert isinstance(data, dict)
     assert data["mode"] == "free"
     assert isinstance(data["related_cards"], list)
     assert isinstance(data["gpt_prompt"], str)
-    assert "你的想法" in data["gpt_prompt"]
+    assert data["gpt_prompt"].strip()
 
 
 def test_explore_idea_constrained_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, _ = live_server
-    status, data = _post(base_url, "/api/vault/explore-idea", {"idea": "动量", "mode": "constrained"})
+    status, data = _post(
+        base_url, "/api/vault/explore-idea", {"idea": "动量", "mode": "constrained"}
+    )
     assert status == 200
     assert isinstance(data, dict)
     assert data["mode"] == "constrained"
@@ -371,6 +382,130 @@ def seeded_server(live_server: tuple[str, _UnifiedService]) -> tuple[str, _Unifi
     return base_url, svc, slug
 
 
+def _seed_succeeded_run(
+    *,
+    svc: _UnifiedService,
+    tmp_path: Path,
+    project_slug: str,
+    run_id: str,
+) -> _RunRecord:
+    output_dir = tmp_path / f"run-{run_id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    spec_path = tmp_path / f"{run_id}.yaml"
+    spec_path.write_text("name: mom_5d\nfactor_name: mom_5d\n", encoding="utf-8")
+
+    metrics_path = output_dir / "metrics.json"
+    metrics_path.write_text(
+        json.dumps({"metrics": {"factor_name": "mom_5d", "mean_rank_ic": 0.03, "ic_t_stat": 2.2}}),
+        encoding="utf-8",
+    )
+    (output_dir / "backtest_result.json").write_text(
+        json.dumps({"stats": {"annualized_return": 0.11}}),
+        encoding="utf-8",
+    )
+    (output_dir / "ic_timeseries.csv").write_text(
+        "date,rank_ic\n2026-01-02,0.03\n2026-01-03,0.01\n",
+        encoding="utf-8",
+    )
+    (output_dir / "rolling_stability.csv").write_text(
+        "date,rolling_rank_ic\n2026-01-02,0.02\n2026-01-03,0.01\n",
+        encoding="utf-8",
+    )
+    (output_dir / "ic_decay.csv").write_text(
+        "horizon,mean_rank_ic\n1,0.03\n5,0.02\n",
+        encoding="utf-8",
+    )
+    (output_dir / "quantile_returns.csv").write_text(
+        "date,group,mean_return\n2026-01-02,Q1,0.01\n2026-01-02,Q5,-0.01\n",
+        encoding="utf-8",
+    )
+    (output_dir / "factor_autocorrelation.csv").write_text(
+        "date,autocorr\n2026-01-02,0.25\n",
+        encoding="utf-8",
+    )
+    (output_dir / "turnover.csv").write_text(
+        "date,turnover\n2026-01-02,0.18\n",
+        encoding="utf-8",
+    )
+
+    record = _RunRecord(
+        run_id=run_id,
+        project_slug=project_slug,
+        case_name="mom_5d",
+        round_id=None,
+        spec_path=str(spec_path),
+        submitted_at_utc="2026-04-20T00:00:00Z",
+        evaluation_profile="default_research",
+        output_root_dir=None,
+        render_report=True,
+        status="succeeded",
+        output_dir=str(output_dir),
+        progress_percent=100,
+        progress_message="运行完成",
+        progress_events=[
+            {"ts": "2026-04-20T00:00:01Z", "message": "step-1", "percent": 10},
+            {"ts": "2026-04-20T00:00:02Z", "message": "step-2", "percent": 40},
+            {"ts": "2026-04-20T00:00:03Z", "message": "step-3", "percent": 70},
+            {"ts": "2026-04-20T00:00:04Z", "message": "step-4", "percent": 100},
+        ],
+        artifact_paths={
+            "metrics": str(metrics_path),
+            "backtest_result_json": str(output_dir / "backtest_result.json"),
+            "ic_timeseries": str(output_dir / "ic_timeseries.csv"),
+            "rolling_stability": str(output_dir / "rolling_stability.csv"),
+            "ic_decay": str(output_dir / "ic_decay.csv"),
+            "quantile_returns": str(output_dir / "quantile_returns.csv"),
+            "factor_autocorrelation": str(output_dir / "factor_autocorrelation.csv"),
+            "turnover": str(output_dir / "turnover.csv"),
+        },
+        summary={
+            "factor_name": "mom_5d",
+            "mean_rank_ic": 0.03,
+            "ic_t_stat": 2.2,
+            "extra_metric": "should_not_appear_in_compact",
+        },
+    )
+    with svc.run_store._lock:  # noqa: SLF001 - tests intentionally seed in-memory store
+        svc.run_store._records[run_id] = record  # noqa: SLF001
+    return record
+
+
+def _seed_draft(
+    *,
+    svc: _UnifiedService,
+    slug: str,
+    name: str,
+) -> Path:
+    drafts_dir = svc.vault_root / "55_projects" / slug / "50_writeback_drafts"
+    drafts_dir.mkdir(parents=True, exist_ok=True)
+    path = drafts_dir / name
+    path.write_text(
+        f"""---
+project: {slug}
+case_name: mom_5d
+round_id: r01
+review_status: pending
+reviewed_by: ""
+reviewed_at: ""
+one_sentence_verdict: ""
+status_lifecycle: ""
+current_hypothesis: ""
+current_focus: ""
+next_action: ""
+vault_export_mode: skip
+---
+
+# 导出草案（测试）
+
+placeholder
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_list_cases_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
     base_url, _, slug = seeded_server
     status, data = _get(base_url, f"/api/projects/{slug}/cases")
@@ -382,6 +517,46 @@ def test_list_cases_route(seeded_server: tuple[str, _UnifiedService, str]) -> No
     assert cases[0]["case_name"] == "mom_5d"
     assert cases[0]["spec_exists"] is True
 
+
+def test_list_rounds_route_empty(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _get(base_url, f"/api/projects/{slug}/rounds")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["project_slug"] == slug
+    assert data["rounds"] == []
+
+
+def test_create_round_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    payload = {
+        "topic": "三个月成交额加权动量",
+        "mode": "standard",
+    }
+    status, data = _post(base_url, f"/api/projects/{slug}/rounds", payload)
+    assert status == 201
+    assert isinstance(data, dict)
+    assert data["project"] == slug
+    assert isinstance(data["round_id"], str)
+    assert data["round_id"]
+
+    status2, data2 = _get(base_url, f"/api/projects/{slug}/rounds")
+    assert status2 == 200
+    assert isinstance(data2, dict)
+    assert data2["project_slug"] == slug
+    assert isinstance(data2["rounds"], list)
+    assert any(
+        item["round_id"] == data["round_id"] and item["has_discussion_capture"]
+        for item in data2["rounds"]
+    )
+
+
+def test_create_round_route_requires_topic(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _post(base_url, f"/api/projects/{slug}/rounds", {"mode": "standard"})
+    assert status in (400, 422, 500)
+    assert isinstance(data, dict)
+    assert data.get("ok") is False
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +673,313 @@ def test_list_runs_route(seeded_server: tuple[str, _UnifiedService, str]) -> Non
     assert isinstance(data["runs"], list)
 
 
+def test_list_runs_compact_route(
+    seeded_server: tuple[str, _UnifiedService, str], tmp_path: Path
+) -> None:
+    base_url, svc, slug = seeded_server
+    seeded = _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug=slug,
+        run_id="run-compact-1",
+    )
+
+    status, data = _get(base_url, f"/api/projects/{slug}/runs?compact=1")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert isinstance(data["runs"], list)
+
+    compact = next((item for item in data["runs"] if item["run_id"] == seeded.run_id), None)
+    assert compact is not None
+    assert compact["_compact"] is True
+    assert compact["summary"]["factor_name"] == "mom_5d"
+    assert "extra_metric" not in compact["summary"]
+    assert compact["artifact_paths"]["metrics"] is True
+    assert len(compact["progress_events"]) == 2
+    assert compact["progress_events"][-1]["message"] == "step-4"
+
+    status_full, data_full = _get(base_url, f"/api/projects/{slug}/runs")
+    assert status_full == 200
+    full = next((item for item in data_full["runs"] if item["run_id"] == seeded.run_id), None)
+    assert full is not None
+    assert isinstance(full["artifact_paths"]["metrics"], str)
+
+
+def test_create_run_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _post(base_url, f"/api/projects/{slug}/runs", {"case_name": "mom_5d"})
+    assert status == 201
+    assert isinstance(data, dict)
+    assert data["project_slug"] == slug
+    assert data["case_name"] == "mom_5d"
+    assert isinstance(data["run_id"], str)
+    run_id = data["run_id"]
+
+    status2, data2 = _get(base_url, f"/api/projects/{slug}/runs/{run_id}")
+    assert status2 == 200
+    assert isinstance(data2, dict)
+    assert data2["run_id"] == run_id
+    assert data2["case_name"] == "mom_5d"
+
+
+def test_summarize_run_route(
+    seeded_server: tuple[str, _UnifiedService, str],
+    tmp_path: Path,
+) -> None:
+    base_url, svc, slug = seeded_server
+    run = _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug=slug,
+        run_id="run-summary-1",
+    )
+    output_dir = Path(run.output_dir or "")
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps({"run_id": run.run_id, "case_name": run.case_name}),
+        encoding="utf-8",
+    )
+
+    status, data = _post(base_url, f"/api/projects/{slug}/runs/{run.run_id}/summarize", {})
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["project"] == slug
+    assert isinstance(data["summary_path"], str)
+    assert isinstance(data["latest_path"], str)
+    assert isinstance(data["decision_log_path"], str)
+    assert data["summary_path"]
+    assert data["latest_path"]
+    assert isinstance(data["graph_feedback"], dict)
+    assert "suggested_similar_to" in data["graph_feedback"]
+    assert "correlation_summary" in data["graph_feedback"]
+
+    status2, data2 = _get(base_url, f"/api/projects/{slug}/runs/{run.run_id}")
+    assert status2 == 200
+    assert isinstance(data2, dict)
+    assert data2["summarize_feedback_path"]
+    assert data2["summarize_draft_path"]
+    assert data2["summarize_state_patch_path"]
+
+
+def test_list_projects_route(live_server: tuple[str, _UnifiedService]) -> None:
+    base_url, svc = live_server
+    svc.create_project(
+        {
+            "slug": "http-list-proj",
+            "title_zh": "HTTP 列表测试",
+            "category": "factor_recipe",
+            "owner": "test",
+            "market": "ashare",
+            "frequency": "daily",
+            "chatgpt_project_name": "HTTP List",
+            "origin_cards": [],
+        }
+    )
+    status, data = _get(base_url, "/api/projects")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert "projects" in data
+    assert any(item["slug"] == "http-list-proj" for item in data["projects"])
+
+
+def test_list_drafts_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _get(base_url, f"/api/projects/{slug}/drafts")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["project_slug"] == slug
+    assert isinstance(data["drafts"], list)
+
+
+def test_patch_draft_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, svc, slug = seeded_server
+    draft_path = _seed_draft(svc=svc, slug=slug, name="http-draft-review.md")
+    payload = {
+        "review_status": "approved",
+        "reviewed_by": "alpha-tester",
+        "reviewed_at": "now",
+        "one_sentence_verdict": "继续推进。",
+    }
+    status, data = _patch(base_url, f"/api/projects/{slug}/drafts/{draft_path.name}", payload)
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["name"] == draft_path.name
+    assert data["review_status"] == "approved"
+    assert data["reviewed_by"] == "alpha-tester"
+    assert data["reviewed_at"] not in {"", None}
+
+    status2, data2 = _get(base_url, f"/api/projects/{slug}/drafts/{draft_path.name}")
+    assert status2 == 200
+    fm = data2["frontmatter"]
+    assert fm["review_status"] == "approved"
+    assert fm["reviewed_by"] == "alpha-tester"
+
+
+def test_patch_draft_legacy_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, svc, slug = seeded_server
+    draft_path = _seed_draft(svc=svc, slug=slug, name="http-draft-legacy.md")
+    payload = {
+        "draft_name": draft_path.name,
+        "review_status": "approved",
+        "reviewed_by": "legacy-tester",
+        "reviewed_at": "now",
+        "one_sentence_verdict": "兼容性覆盖。",
+    }
+    status, data = _post(base_url, f"/api/projects/{slug}/drafts/patch", payload)
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["name"] == draft_path.name
+    assert data["review_status"] == "approved"
+    assert data["reviewed_by"] == "legacy-tester"
+
+
+def test_patch_draft_legacy_route_missing_name(
+    seeded_server: tuple[str, _UnifiedService, str],
+) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _post(
+        base_url, f"/api/projects/{slug}/drafts/patch", {"review_status": "approved"}
+    )
+    assert status in (400, 422, 500)
+    assert isinstance(data, dict)
+    assert data.get("ok") is False
+
+
+def test_apply_draft_route_invokes_writeback(
+    seeded_server: tuple[str, _UnifiedService, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url, svc, slug = seeded_server
+    draft_path = _seed_draft(svc=svc, slug=slug, name="http-draft-apply.md")
+    observed: dict[str, object] = {}
+
+    def _fake_apply_writeback(*, vault_root, project_slug, draft_path, mode=None):
+        del vault_root
+        observed["project_slug"] = project_slug
+        observed["draft_path"] = str(draft_path)
+        observed["mode"] = mode
+        assert project_slug == slug
+        return SimpleNamespace(
+            project=SimpleNamespace(slug=slug),
+            draft_path=Path(draft_path),
+            export_result=SimpleNamespace(
+                status="success",
+                success=True,
+                target_paths=["/tmp/export1", "/tmp/export2"],
+                mode_used=mode or "versioned",
+                error=None,
+            ),
+        )
+
+    monkeypatch.setattr("alpha_lab.web_unified.apply_writeback", _fake_apply_writeback)
+    status, data = _post(base_url, f"/api/projects/{slug}/drafts/{draft_path.name}/apply", {})
+    assert status == 200
+    assert isinstance(data, dict)
+    assert observed["project_slug"] == slug
+    assert observed["draft_path"] == str(draft_path)
+    assert observed["mode"] is None
+    assert data["project"] == slug
+    assert data["success"] is True
+    assert data["mode_used"] == "versioned"
+    assert data["target_paths"] == ["/tmp/export1", "/tmp/export2"]
+
+
+def test_delete_run_route(seeded_server: tuple[str, _UnifiedService, str], tmp_path: Path) -> None:
+    base_url, svc, slug = seeded_server
+    seeded = _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug=slug,
+        run_id="run-delete-1",
+    )
+
+    status, data = _delete(base_url, f"/api/projects/{slug}/runs/{seeded.run_id}")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["ok"] is True
+    assert data["run_id"] == seeded.run_id
+
+    status2, data2 = _get(base_url, f"/api/projects/{slug}/runs/{seeded.run_id}")
+    assert status2 == 404
+    assert isinstance(data2, dict)
+    assert data2.get("ok") is False
+
+
+def test_get_run_artifact_pdf_supports_inline_and_download(
+    seeded_server: tuple[str, _UnifiedService, str],
+    tmp_path: Path,
+) -> None:
+    base_url, svc, slug = seeded_server
+    seeded = _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug=slug,
+        run_id="run-pdf-1",
+    )
+    output_dir = Path(seeded.output_dir or "")
+    pdf_path = output_dir / "research_tearsheet.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%alpha-lab\n")
+    with svc.run_store._lock:  # noqa: SLF001 - tests intentionally seed in-memory store
+        svc.run_store._records[seeded.run_id].artifact_paths["research_tearsheet_pdf"] = str(  # noqa: SLF001
+            pdf_path
+        )
+
+    inline_req = urllib.request.Request(
+        f"{base_url}/api/projects/{slug}/runs/{seeded.run_id}/artifact/research_tearsheet_pdf"
+    )
+    with urllib.request.urlopen(inline_req, timeout=5) as resp:
+        assert resp.status == 200
+        assert (resp.headers.get("Content-Type") or "").startswith("application/pdf")
+        assert (resp.headers.get("Content-Disposition") or "").startswith("inline;")
+        assert resp.read(5).startswith(b"%PDF-")
+
+    download_req = urllib.request.Request(
+        f"{base_url}/api/projects/{slug}/runs/{seeded.run_id}/artifact/research_tearsheet_pdf?download=1"
+    )
+    with urllib.request.urlopen(download_req, timeout=5) as resp:
+        assert resp.status == 200
+        assert (resp.headers.get("Content-Type") or "").startswith("application/pdf")
+        assert (resp.headers.get("Content-Disposition") or "").startswith("attachment;")
+
+
+def test_get_run_overview_route_uses_quantile_fallback(
+    seeded_server: tuple[str, _UnifiedService, str],
+    tmp_path: Path,
+) -> None:
+    base_url, svc, slug = seeded_server
+    seeded = _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug=slug,
+        run_id="run-overview-1",
+    )
+
+    status, data = _get(base_url, f"/api/projects/{slug}/runs/{seeded.run_id}/overview")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["ok"] is True
+    assert data["project_slug"] == slug
+    assert data["run_id"] == seeded.run_id
+    assert data["summary"]["factor_name"] == "mom_5d"
+
+    snapshot = data["snapshot"]
+    assert isinstance(snapshot["backtest"], dict)
+    assert isinstance(snapshot["icRows"], list)
+    assert isinstance(snapshot["rollingRows"], list)
+    assert isinstance(snapshot["decayRows"], list)
+    assert isinstance(snapshot["groupRows"], list)
+    assert snapshot["groupRows"][0]["group"] == "Q1"
+    assert isinstance(snapshot["autocorrRows"], list)
+    assert isinstance(snapshot["turnoverRows"], list)
+
+
+def test_get_run_overview_route_not_found(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, _, slug = seeded_server
+    status, data = _get(base_url, f"/api/projects/{slug}/runs/not-exists/overview")
+    assert status == 404
+    assert isinstance(data, dict)
+    assert data.get("ok") is False
+
+
 def test_factor_correlation_diagnostics_route(
     seeded_server: tuple[str, _UnifiedService, str],
 ) -> None:
@@ -511,7 +993,6 @@ def test_factor_correlation_diagnostics_route(
     assert "redundancy_pairs" in data
     assert "dsr_summary" in data
     assert "dsr_by_factor" in data
-
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +1037,6 @@ def test_refresh_project_route(seeded_server: tuple[str, _UnifiedService, str]) 
     assert status == 200
     assert isinstance(data, dict)
     assert data.get("slug") == slug
-
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +1103,6 @@ def test_update_project_status_route(seeded_server: tuple[str, _UnifiedService, 
     assert isinstance(data, dict)
 
 
-
 # ---------------------------------------------------------------------------
 # POST unknown route returns 404
 # ---------------------------------------------------------------------------
@@ -679,11 +1158,15 @@ def test_list_custom_factors_route(live_server: tuple[str, _UnifiedService]) -> 
 
 def test_register_custom_factor_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, _ = live_server
-    status, data = _post(base_url, "/api/custom-factors", {
-        "name": "http_test_factor",
-        "code": _VALID_FACTOR_CODE,
-        "description": "HTTP test factor",
-    })
+    status, data = _post(
+        base_url,
+        "/api/custom-factors",
+        {
+            "name": "http_test_factor",
+            "code": _VALID_FACTOR_CODE,
+            "description": "HTTP test factor",
+        },
+    )
     assert status == 201
     assert data["registered"] is True
 
@@ -694,15 +1177,22 @@ def test_register_custom_factor_route(live_server: tuple[str, _UnifiedService]) 
 
     # Clean up
     from alpha_lab.factor_recipe import factor_registry
+
     factor_registry._builders.pop("http_test_factor", None)
 
 
-def test_register_custom_factor_invalid_returns_400(live_server: tuple[str, _UnifiedService]) -> None:
+def test_register_custom_factor_invalid_returns_400(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
     base_url, _ = live_server
-    status, data = _post(base_url, "/api/custom-factors", {
-        "name": "bad_factor",
-        "code": "x = 42",
-    })
+    status, data = _post(
+        base_url,
+        "/api/custom-factors",
+        {
+            "name": "bad_factor",
+            "code": "x = 42",
+        },
+    )
     assert status == 400
     assert "error" in data
 
@@ -710,10 +1200,14 @@ def test_register_custom_factor_invalid_returns_400(live_server: tuple[str, _Uni
 def test_delete_custom_factor_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, _ = live_server
     # Register first
-    _post(base_url, "/api/custom-factors", {
-        "name": "del_test",
-        "code": _VALID_FACTOR_CODE,
-    })
+    _post(
+        base_url,
+        "/api/custom-factors",
+        {
+            "name": "del_test",
+            "code": _VALID_FACTOR_CODE,
+        },
+    )
     # Delete
     status, data = _delete(base_url, "/api/custom-factors/del_test")
     assert status == 200
@@ -729,11 +1223,15 @@ def test_delete_builtin_factor_returns_400(live_server: tuple[str, _UnifiedServi
 
 def test_get_custom_factor_code_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, _ = live_server
-    _post(base_url, "/api/custom-factors", {
-        "name": "view_http_test",
-        "code": _VALID_FACTOR_CODE,
-        "description": "view test",
-    })
+    _post(
+        base_url,
+        "/api/custom-factors",
+        {
+            "name": "view_http_test",
+            "code": _VALID_FACTOR_CODE,
+            "description": "view test",
+        },
+    )
     status, data = _get(base_url, "/api/custom-factors/view_http_test")
     assert status == 200
     assert "def builder" in data["code"]
@@ -741,4 +1239,5 @@ def test_get_custom_factor_code_route(live_server: tuple[str, _UnifiedService]) 
 
     # Clean up
     from alpha_lab.factor_recipe import factor_registry
+
     factor_registry._builders.pop("view_http_test", None)

@@ -113,3 +113,139 @@ def test_check_cross_section_transform_scope_fails_when_output_emits_new_pairs()
 
     assert result.status == "fail"
     assert result.severity == "error"
+
+
+def test_check_factor_label_temporal_order_passes_when_dates_equal():
+    """Timestamp equality is the canonical PIT case: factor observed at ``t``,
+    label *stored at* ``t`` (its value is computed from strictly future
+    prices via ``forward_return``). The temporal-order check must not
+    flag this — leakage discipline is enforced upstream by the label
+    construction, not by the date comparison.
+    """
+
+    factor_df = pd.DataFrame(
+        {
+            "row_id": [1, 2, 3],
+            "asset": ["AAA", "BBB", "CCC"],
+            "factor_date": pd.to_datetime(["2024-01-05"] * 3),
+        }
+    )
+    label_df = pd.DataFrame(
+        {
+            "row_id": [1, 2, 3],
+            "asset": ["AAA", "BBB", "CCC"],
+            "label_date": pd.to_datetime(["2024-01-05"] * 3),
+        }
+    )
+
+    result = check_factor_label_temporal_order(
+        factor_df,
+        label_df,
+        join_keys=("row_id", "asset"),
+        factor_date_col="factor_date",
+        label_date_col="label_date",
+        object_name="factor_vs_label_equal",
+    )
+
+    assert result.status == "pass"
+    assert result.metrics["label_after_factor_rows"] == 0
+
+
+def test_check_factor_label_temporal_order_warns_when_label_after_factor():
+    """Label dated *after* factor is unusual (often signal-date vs.
+    realization-date semantics) — it's not strict lookahead, so the check
+    should warn rather than fail. Pin this so a future tightening surfaces.
+    """
+
+    factor_df = pd.DataFrame(
+        {
+            "row_id": [1, 2],
+            "asset": ["AAA", "BBB"],
+            "factor_date": pd.to_datetime(["2024-01-04", "2024-01-04"]),
+        }
+    )
+    label_df = pd.DataFrame(
+        {
+            "row_id": [1, 2],
+            "asset": ["AAA", "BBB"],
+            "label_date": pd.to_datetime(["2024-01-05", "2024-01-04"]),
+        }
+    )
+
+    result = check_factor_label_temporal_order(
+        factor_df,
+        label_df,
+        join_keys=("row_id", "asset"),
+        factor_date_col="factor_date",
+        label_date_col="label_date",
+        object_name="factor_vs_label_lagged",
+    )
+
+    assert result.status == "warn"
+    assert result.metrics["label_after_factor_rows"] == 1
+
+
+def test_check_cross_section_transform_scope_passes_when_within_date_reordered():
+    """A cross-section transform may legitimately reorder rows within a
+    date (e.g. a stable rank reshuffles row positions). Scope check is
+    over the (date, asset) **set**, not row order — pin the pass.
+    """
+
+    raw_df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01"] * 3),
+            "asset": ["AAA", "BBB", "CCC"],
+            "value": [1.0, 2.0, 3.0],
+        }
+    )
+    transformed_df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01"] * 3),
+            "asset": ["CCC", "AAA", "BBB"],  # within-date reorder
+            "value": [3.0, 1.0, 2.0],
+        }
+    )
+
+    result = check_cross_section_transform_scope(
+        raw_df,
+        transformed_df,
+        date_col="date",
+        asset_col="asset",
+        object_name="reorder_only",
+    )
+
+    assert result.status == "pass"
+
+
+def test_check_cross_section_transform_scope_warns_or_passes_on_dropped_pairs():
+    """Dropping a (date, asset) pair from the transformed output is not a
+    scope expansion — it's a coverage shrinkage. Pin the current status
+    so future tightening surfaces explicitly.
+    """
+
+    raw_df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01"] * 3),
+            "asset": ["AAA", "BBB", "CCC"],
+            "value": [1.0, 2.0, 3.0],
+        }
+    )
+    transformed_df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01"] * 2),
+            "asset": ["AAA", "BBB"],  # CCC dropped
+            "value": [1.0, 2.0],
+        }
+    )
+
+    result = check_cross_section_transform_scope(
+        raw_df,
+        transformed_df,
+        date_col="date",
+        asset_col="asset",
+        object_name="drop_only",
+    )
+
+    assert result.status in {"pass", "warn"}, (
+        f"dropped-pair behavior changed: status={result.status} message={result.message}"
+    )

@@ -22,7 +22,6 @@ COMMON_CASE_METRIC_FIELDS: set[str] = {
     "level12_transition_label",
     "portfolio_validation_status",
     "portfolio_validation_recommendation",
-    "portfolio_validation_benchmark_relative_status",
 }
 
 
@@ -53,21 +52,21 @@ def test_level12_outputs_keep_consistent_contracts(tmp_path: Path) -> None:
         required_bundle_files = manifest.get("required_bundle_files")
         assert isinstance(required_bundle_files, list)
         assert (
-            "level2_portfolio_validation/portfolio_validation_summary.json"
-            in required_bundle_files
+            "level2_portfolio_validation/portfolio_validation_summary.json" in required_bundle_files
         )
         assert (
-            "level2_portfolio_validation/portfolio_validation_metrics.json"
-            in required_bundle_files
+            "level2_portfolio_validation/portfolio_validation_metrics.json" in required_bundle_files
         )
         assert (
-            "level2_portfolio_validation/portfolio_validation_package.json"
-            in required_bundle_files
+            "level2_portfolio_validation/portfolio_validation_package.json" in required_bundle_files
         )
         assert "factor_definition.json" in required_bundle_files
         assert "signal_validation.json" in required_bundle_files
         assert "portfolio_recipe.json" in required_bundle_files
         assert "backtest_result.json" in required_bundle_files
+        if manifest.get("artifact_type") == "real_case_single_factor_bundle":
+            assert "research_tearsheet.json" in required_bundle_files
+            assert "research_tearsheet.pdf" in required_bundle_files
 
         for raw_path in outputs.values():
             if not isinstance(raw_path, str) or not raw_path.strip():

@@ -14,8 +14,9 @@ _PROFILE_INTENTS: dict[str, str] = {
         "and portfolio-validation checks."
     ),
     "exploratory_screening": (
-        "More permissive settings for broad candidate discovery; accepts noisier "
-        "early signals and runs lighter Level 2 guardrails."
+        "Fast initial-screening settings for broad candidate discovery; keep the "
+        "bar low enough to pass strong early signals into Level 2 while still "
+        "filtering obviously weak, unstable, or low-integrity cases."
     ),
     "stricter_research": (
         "More conservative settings for stronger evidence standards and "
@@ -23,17 +24,33 @@ _PROFILE_INTENTS: dict[str, str] = {
     ),
 }
 
+RESEARCH_EVALUATION_PROFILE_LABELS: dict[str, str] = {
+    "default_research": "全面评价模式",
+    "exploratory_screening": "快速筛选模式",
+    "stricter_research": "严谨筛选模式",
+}
+
+CAMPAIGN_PROFILE_COMPARE_DEFAULTS: tuple[str, ...] = (
+    "exploratory_screening",
+    "default_research",
+    "stricter_research",
+)
+
 
 class FactorVerdictSnapshot(TypedDict):
     min_eval_dates_basic: int
     min_valid_ratio_fail: float
     min_subperiod_share_fail: float
     min_rolling_positive_share_regime_warning: float
+    ic_decay_warn_rebalance_ratio: float
+    ic_decay_block_rebalance_ratio: float
 
 
 class UncertaintySnapshot(TypedDict):
     method: str
     confidence_level: float
+    normal_small_sample_use_t: bool
+    normal_small_sample_threshold: int
     relative_half_width_warn: float
     bootstrap_resamples: int
     bootstrap_confidence_level: float | None
@@ -57,6 +74,8 @@ class CampaignTriageSnapshot(TypedDict):
     min_subperiod_positive_share_fail: float
     min_rolling_positive_share_stable: float
     min_coverage_mean_fail: float
+    ic_decay_warn_rebalance_ratio: float
+    ic_decay_block_rebalance_ratio: float
 
 
 class Level2PromotionSnapshot(TypedDict):
@@ -88,6 +107,21 @@ class Level2PortfolioValidationSnapshot(TypedDict):
     robustness_needs_refinement_implies_sensitive: bool
 
 
+class SingleFactorDiagnosticsSnapshot(TypedDict):
+    run_neutralization_raw_comparison: bool
+    compute_ic_decay: bool
+    compute_factor_autocorrelation: bool
+    compute_capacity_estimation: bool
+    compute_conditional_ic: bool
+    run_marginal_contribution: bool
+    run_tradability_checks: bool
+    run_execution_price_sensitivity: bool
+    run_param_sensitivity: bool
+    run_baseline_comparison: bool
+    run_random_baseline: bool
+    run_lag_sensitivity: bool
+
+
 class ResearchEvaluationAuditSnapshot(TypedDict):
     profile_name: str
     profile_intent: str
@@ -98,6 +132,7 @@ class ResearchEvaluationAuditSnapshot(TypedDict):
     campaign_triage: CampaignTriageSnapshot
     level2_promotion: Level2PromotionSnapshot
     level2_portfolio_validation: Level2PortfolioValidationSnapshot
+    single_factor_diagnostics: SingleFactorDiagnosticsSnapshot
 
 
 def get_research_evaluation_profile_intent(profile_name: str) -> str:
@@ -138,6 +173,12 @@ class FactorVerdictConfig:
     uncertainty_overlap_zero_fail_count: int = 2
     min_rolling_positive_share_persistent: float = 0.60
     min_rolling_positive_share_regime_warning: float = 0.50
+    ic_decay_warn_rebalance_ratio: float = 1.0
+    ic_decay_block_rebalance_ratio: float = 2.0
+    tail_risk_max_drawdown_warn: float = 0.15
+    tail_risk_max_drawdown_fail: float = 0.30
+    tail_risk_max_consecutive_loss_days_warn: int = 8
+    tail_risk_max_consecutive_loss_days_fail: int = 15
 
 
 @dataclass(frozen=True)
@@ -146,6 +187,8 @@ class UncertaintyConfig:
 
     method: str = "normal"
     confidence_level: float = 0.95
+    normal_small_sample_use_t: bool = True
+    normal_small_sample_threshold: int = 30
     relative_half_width_warn: float = 1.0
     min_abs_mean_for_relative_width: float = 1e-6
     bootstrap_resamples: int = 400
@@ -171,6 +214,28 @@ class RollingStabilityConfig:
     instability_high_turnover: float = 0.80
     instability_high_turnover_negative_spread_max_return: float = 0.0
     instability_long_short_ir_min: float = 0.0
+
+
+@dataclass(frozen=True)
+class TailRiskConfig:
+    """Thresholds for tail-risk diagnostics on long-short returns."""
+
+    max_drawdown_warn: float = 0.15
+    max_drawdown_fail: float = 0.30
+    max_consecutive_loss_days_warn: int = 8
+    max_consecutive_loss_days_fail: int = 15
+    var_5_warn: float = -0.03
+    cvar_5_warn: float = -0.05
+    calmar_ratio_min_warn: float = 0.0
+
+
+@dataclass(frozen=True)
+class RegimeAnalysisConfig:
+    """Thresholds for regime-conditional analysis."""
+
+    min_regime_dates: int = 10
+    regime_negative_ic_flag_threshold: float = 0.0
+    regime_negative_ls_flag_threshold: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -214,6 +279,8 @@ class CampaignTriageConfig:
     supportive_ci_min_count: int = 2
     uncertainty_overlap_fragile_min_count: int = 1
     rolling_worst_mean_positive_min: float = 0.0
+    ic_decay_warn_rebalance_ratio: float = 1.0
+    ic_decay_block_rebalance_ratio: float = 2.0
     fragile_signal_count_for_strong_candidate_max: int = 1
     fragile_signal_count_for_fragile_min: int = 2
 
@@ -273,6 +340,24 @@ class Level2PortfolioValidationConfig:
 
 
 @dataclass(frozen=True)
+class SingleFactorDiagnosticsConfig:
+    """Execution-cost toggles for optional single-factor diagnostics."""
+
+    run_neutralization_raw_comparison: bool = True
+    compute_ic_decay: bool = True
+    compute_factor_autocorrelation: bool = True
+    compute_capacity_estimation: bool = True
+    compute_conditional_ic: bool = True
+    run_marginal_contribution: bool = True
+    run_tradability_checks: bool = True
+    run_execution_price_sensitivity: bool = True
+    run_param_sensitivity: bool = True
+    run_baseline_comparison: bool = True
+    run_random_baseline: bool = True
+    run_lag_sensitivity: bool = True
+
+
+@dataclass(frozen=True)
 class ResearchEvaluationConfig:
     """Unified research-evaluation governance profile for Level 1/2 workflows."""
 
@@ -280,6 +365,8 @@ class ResearchEvaluationConfig:
     factor_verdict: FactorVerdictConfig = field(default_factory=FactorVerdictConfig)
     uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
     rolling_stability: RollingStabilityConfig = field(default_factory=RollingStabilityConfig)
+    tail_risk: TailRiskConfig = field(default_factory=TailRiskConfig)
+    regime_analysis: RegimeAnalysisConfig = field(default_factory=RegimeAnalysisConfig)
     neutralization_comparison: NeutralizationComparisonConfig = field(
         default_factory=NeutralizationComparisonConfig
     )
@@ -287,6 +374,9 @@ class ResearchEvaluationConfig:
     level2_promotion: Level2PromotionConfig = field(default_factory=Level2PromotionConfig)
     level2_portfolio_validation: Level2PortfolioValidationConfig = field(
         default_factory=Level2PortfolioValidationConfig
+    )
+    single_factor_diagnostics: SingleFactorDiagnosticsConfig = field(
+        default_factory=SingleFactorDiagnosticsConfig
     )
 
     def to_dict(self) -> dict[str, object]:
@@ -304,17 +394,23 @@ class ResearchEvaluationConfig:
                 "min_rolling_positive_share_regime_warning": (
                     self.factor_verdict.min_rolling_positive_share_regime_warning
                 ),
+                "ic_decay_warn_rebalance_ratio": (
+                    self.factor_verdict.ic_decay_warn_rebalance_ratio
+                ),
+                "ic_decay_block_rebalance_ratio": (
+                    self.factor_verdict.ic_decay_block_rebalance_ratio
+                ),
             },
             "uncertainty": {
                 "method": self.uncertainty.method,
                 "confidence_level": self.uncertainty.confidence_level,
+                "normal_small_sample_use_t": self.uncertainty.normal_small_sample_use_t,
+                "normal_small_sample_threshold": (self.uncertainty.normal_small_sample_threshold),
                 "relative_half_width_warn": self.uncertainty.relative_half_width_warn,
                 "bootstrap_resamples": self.uncertainty.bootstrap_resamples,
                 "bootstrap_confidence_level": self.uncertainty.bootstrap_confidence_level,
                 "bootstrap_random_seed": self.uncertainty.bootstrap_random_seed,
-                "block_bootstrap_block_length": (
-                    self.uncertainty.block_bootstrap_block_length
-                ),
+                "block_bootstrap_block_length": (self.uncertainty.block_bootstrap_block_length),
             },
             "rolling_stability": {
                 "rolling_window_size": self.rolling_stability.rolling_window_size,
@@ -326,12 +422,8 @@ class ResearchEvaluationConfig:
                 ),
             },
             "neutralization_comparison": {
-                "preserve_min_retention": (
-                    self.neutralization_comparison.preserve_min_retention
-                ),
-                "material_max_retention": (
-                    self.neutralization_comparison.material_max_retention
-                ),
+                "preserve_min_retention": (self.neutralization_comparison.preserve_min_retention),
+                "material_max_retention": (self.neutralization_comparison.material_max_retention),
                 "exposure_corr_reduction_threshold": (
                     self.neutralization_comparison.exposure_corr_reduction_threshold
                 ),
@@ -344,6 +436,12 @@ class ResearchEvaluationConfig:
                     self.campaign_triage.min_rolling_positive_share_stable
                 ),
                 "min_coverage_mean_fail": self.campaign_triage.min_coverage_mean_fail,
+                "ic_decay_warn_rebalance_ratio": (
+                    self.campaign_triage.ic_decay_warn_rebalance_ratio
+                ),
+                "ic_decay_block_rebalance_ratio": (
+                    self.campaign_triage.ic_decay_block_rebalance_ratio
+                ),
             },
             "level2_promotion": {
                 "min_subperiod_positive_share_block": (
@@ -364,9 +462,7 @@ class ResearchEvaluationConfig:
                     self.level2_portfolio_validation.transaction_cost_grid
                 ),
                 "review_cost_rate": self.level2_portfolio_validation.review_cost_rate,
-                "max_mean_turnover_warn": (
-                    self.level2_portfolio_validation.max_mean_turnover_warn
-                ),
+                "max_mean_turnover_warn": (self.level2_portfolio_validation.max_mean_turnover_warn),
                 "min_cost_adjusted_return_warn": (
                     self.level2_portfolio_validation.min_cost_adjusted_return_warn
                 ),
@@ -410,6 +506,30 @@ class ResearchEvaluationConfig:
                     self.level2_portfolio_validation.robustness_needs_refinement_implies_sensitive
                 ),
             },
+            "single_factor_diagnostics": {
+                "run_neutralization_raw_comparison": (
+                    self.single_factor_diagnostics.run_neutralization_raw_comparison
+                ),
+                "compute_ic_decay": self.single_factor_diagnostics.compute_ic_decay,
+                "compute_factor_autocorrelation": (
+                    self.single_factor_diagnostics.compute_factor_autocorrelation
+                ),
+                "compute_capacity_estimation": (
+                    self.single_factor_diagnostics.compute_capacity_estimation
+                ),
+                "compute_conditional_ic": (self.single_factor_diagnostics.compute_conditional_ic),
+                "run_marginal_contribution": (
+                    self.single_factor_diagnostics.run_marginal_contribution
+                ),
+                "run_tradability_checks": (self.single_factor_diagnostics.run_tradability_checks),
+                "run_execution_price_sensitivity": (
+                    self.single_factor_diagnostics.run_execution_price_sensitivity
+                ),
+                "run_param_sensitivity": (self.single_factor_diagnostics.run_param_sensitivity),
+                "run_baseline_comparison": (self.single_factor_diagnostics.run_baseline_comparison),
+                "run_random_baseline": (self.single_factor_diagnostics.run_random_baseline),
+                "run_lag_sensitivity": (self.single_factor_diagnostics.run_lag_sensitivity),
+            },
         }
 
 
@@ -421,103 +541,104 @@ def _build_exploratory_screening_profile() -> ResearchEvaluationConfig:
     return ResearchEvaluationConfig(
         profile_name="exploratory_screening",
         factor_verdict=FactorVerdictConfig(
-            min_eval_dates_basic=15,
-            min_eval_dates_preferred=24,
-            min_valid_ratio_strong=0.75,
-            min_valid_ratio_fail=0.50,
-            min_sign_positive_rate=0.52,
-            weak_sign_positive_rate=0.48,
-            min_subperiod_share_strong=0.60,
-            min_subperiod_share_fail=0.45,
-            min_coverage_mean_strong=0.65,
-            min_coverage_mean_warn=0.55,
-            min_coverage_mean_fail=0.45,
-            min_coverage_min_strong=0.45,
-            min_coverage_min_fail=0.25,
-            high_turnover=0.90,
-            min_return_per_turnover=-0.0005,
-            high_turnover_low_efficiency_rpt=0.0015,
-            neutralization_material_corr_reduction=0.30,
+            min_eval_dates_basic=12,
+            min_eval_dates_preferred=20,
+            min_valid_ratio_strong=0.70,
+            min_valid_ratio_fail=0.45,
+            min_sign_positive_rate=0.50,
+            weak_sign_positive_rate=0.45,
+            min_subperiod_share_strong=0.55,
+            min_subperiod_share_fail=0.40,
+            min_coverage_mean_strong=0.60,
+            min_coverage_mean_warn=0.50,
+            min_coverage_mean_fail=0.40,
+            min_coverage_min_strong=0.40,
+            min_coverage_min_fail=0.20,
+            high_turnover=0.95,
+            min_return_per_turnover=-0.0010,
+            high_turnover_low_efficiency_rpt=0.0010,
+            neutralization_material_corr_reduction=0.35,
             uncertainty_overlap_zero_fail_count=3,
-            min_rolling_positive_share_persistent=0.55,
-            min_rolling_positive_share_regime_warning=0.45,
+            min_rolling_positive_share_persistent=0.50,
+            min_rolling_positive_share_regime_warning=0.40,
         ),
         uncertainty=UncertaintyConfig(
             confidence_level=0.90,
-            relative_half_width_warn=1.25,
+            relative_half_width_warn=1.40,
         ),
         rolling_stability=RollingStabilityConfig(
-            rolling_regime_min_positive_share=0.55,
-            rolling_regime_sign_flip_threshold=0.55,
-            rolling_regime_min_windows_for_sign_flip=8,
-            instability_short_eval_window_dates=20,
-            instability_ic_valid_ratio_min=0.70,
-            instability_rank_ic_valid_ratio_min=0.70,
-            instability_ic_positive_rate_min=0.45,
-            instability_subperiod_positive_share_min=0.55,
-            instability_eval_coverage_ratio_mean_min=0.50,
-            instability_high_turnover=0.90,
-            instability_high_turnover_negative_spread_max_return=-0.0005,
+            rolling_regime_min_positive_share=0.50,
+            rolling_regime_sign_flip_threshold=0.60,
+            rolling_regime_min_windows_for_sign_flip=9,
+            instability_short_eval_window_dates=18,
+            instability_ic_valid_ratio_min=0.65,
+            instability_rank_ic_valid_ratio_min=0.65,
+            instability_ic_positive_rate_min=0.42,
+            instability_subperiod_positive_share_min=0.50,
+            instability_eval_coverage_ratio_mean_min=0.45,
+            instability_high_turnover=0.95,
+            instability_high_turnover_negative_spread_max_return=-0.0010,
             instability_long_short_ir_min=-0.05,
         ),
         neutralization_comparison=NeutralizationComparisonConfig(
             preserve_mean_ic_loss_max=0.007,
             preserve_mean_rank_ic_loss_max=0.007,
             preserve_long_short_loss_max=0.0008,
-            preserve_min_retention=0.65,
+            preserve_min_retention=0.60,
             material_mean_ic_loss=0.020,
             material_mean_rank_ic_loss=0.020,
             material_long_short_loss=0.0020,
             material_ic_ir_loss=0.35,
-            material_max_retention=0.25,
+            material_max_retention=0.20,
             material_loss_hit_count=3,
             material_loss_hit_count_with_core_shift=2,
-            exposure_corr_reduction_threshold=0.30,
+            exposure_corr_reduction_threshold=0.35,
             stability_share_gain_min=0.03,
             stability_worst_mean_gain_min=-0.0002,
         ),
         campaign_triage=CampaignTriageConfig(
-            min_subperiod_positive_share_fail=0.45,
-            min_subperiod_positive_share_stable=0.60,
-            min_rolling_positive_share_stable=0.55,
-            min_rolling_positive_share_fragile=0.45,
-            min_coverage_mean_fail=0.45,
-            min_coverage_min_fail=0.25,
-            min_coverage_mean_warn=0.60,
-            min_coverage_min_warn=0.40,
-            min_valid_ratio_fail=0.50,
-            min_return_per_turnover=-0.0005,
-            high_turnover=0.90,
-            high_turnover_low_efficiency_rpt=0.0015,
+            min_subperiod_positive_share_fail=0.40,
+            min_subperiod_positive_share_stable=0.55,
+            min_rolling_positive_share_stable=0.50,
+            min_rolling_positive_share_fragile=0.40,
+            min_coverage_mean_fail=0.40,
+            min_coverage_min_fail=0.20,
+            min_coverage_mean_warn=0.55,
+            min_coverage_min_warn=0.35,
+            min_valid_ratio_fail=0.45,
+            min_return_per_turnover=-0.0010,
+            high_turnover=0.95,
+            high_turnover_low_efficiency_rpt=0.0010,
             supportive_ci_min_count=1,
-            uncertainty_overlap_fragile_min_count=2,
-            rolling_worst_mean_positive_min=-0.0002,
-            fragile_signal_count_for_strong_candidate_max=2,
-            fragile_signal_count_for_fragile_min=3,
+            uncertainty_overlap_fragile_min_count=3,
+            rolling_worst_mean_positive_min=-0.0005,
+            fragile_signal_count_for_strong_candidate_max=3,
+            fragile_signal_count_for_fragile_min=4,
         ),
         level2_promotion=Level2PromotionConfig(
-            min_subperiod_positive_share_block=0.45,
-            min_subperiod_positive_share_promote=0.60,
-            min_rolling_positive_share_block=0.45,
-            min_rolling_positive_share_promote=0.55,
-            rolling_worst_mean_block_max=-0.0005,
-            rolling_worst_mean_promote_min=-0.0002,
-            min_coverage_mean_block=0.45,
-            min_coverage_min_block=0.25,
-            min_coverage_mean_promote=0.60,
-            min_coverage_min_promote=0.40,
-            min_valid_ratio_block=0.50,
-            min_valid_ratio_promote=0.70,
+            min_subperiod_positive_share_block=0.40,
+            min_subperiod_positive_share_promote=0.55,
+            min_rolling_positive_share_block=0.40,
+            min_rolling_positive_share_promote=0.50,
+            rolling_worst_mean_block_max=-0.0010,
+            rolling_worst_mean_promote_min=-0.0005,
+            min_coverage_mean_block=0.40,
+            min_coverage_min_block=0.20,
+            min_coverage_mean_promote=0.55,
+            min_coverage_min_promote=0.35,
+            min_valid_ratio_block=0.45,
+            min_valid_ratio_promote=0.65,
             min_supportive_ci_count_promote=1,
-            uncertainty_overlap_block_min_count=3,
-            high_turnover=0.90,
-            min_return_per_turnover=-0.0005,
-            high_turnover_low_efficiency_rpt=0.0015,
+            uncertainty_overlap_block_min_count=4,
+            high_turnover=0.95,
+            min_return_per_turnover=-0.0010,
+            high_turnover_low_efficiency_rpt=0.0010,
+            require_strong_verdict_for_promote=False,
             require_neutralization_support_for_promote=False,
             rolling_instability_is_blocker=False,
         ),
         level2_portfolio_validation=Level2PortfolioValidationConfig(
-            run_for_non_promoted_cases=True,
+            run_for_non_promoted_cases=False,
             holding_period_grid=(1, 3),
             transaction_cost_grid=(0.0, 0.0005, 0.0010),
             review_cost_rate=0.0005,
@@ -525,6 +646,20 @@ def _build_exploratory_screening_profile() -> ResearchEvaluationConfig:
             min_cost_adjusted_return_warn=-0.0005,
             max_single_name_weight_warn=0.25,
             min_effective_names_warn=6.0,
+        ),
+        single_factor_diagnostics=SingleFactorDiagnosticsConfig(
+            run_neutralization_raw_comparison=False,
+            compute_ic_decay=True,
+            compute_factor_autocorrelation=False,
+            compute_capacity_estimation=False,
+            compute_conditional_ic=False,
+            run_marginal_contribution=False,
+            run_tradability_checks=False,
+            run_execution_price_sensitivity=False,
+            run_param_sensitivity=False,
+            run_baseline_comparison=False,
+            run_random_baseline=False,
+            run_lag_sensitivity=False,
         ),
     )
 
@@ -643,9 +778,7 @@ _PROFILE_BUILDERS: dict[str, Callable[[], ResearchEvaluationConfig]] = {
     "stricter_research": _build_stricter_research_profile,
 }
 
-AVAILABLE_RESEARCH_EVALUATION_PROFILES: tuple[str, ...] = tuple(
-    sorted(_PROFILE_BUILDERS)
-)
+AVAILABLE_RESEARCH_EVALUATION_PROFILES: tuple[str, ...] = tuple(sorted(_PROFILE_BUILDERS))
 
 
 def get_research_evaluation_config(

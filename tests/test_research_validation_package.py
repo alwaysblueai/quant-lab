@@ -261,10 +261,7 @@ def test_build_and_export_research_validation_package(tmp_path: Path) -> None:
     portfolio_summary = package.research_results.get("portfolio_validation_summary")
     assert isinstance(portfolio_summary, dict)
     assert portfolio_summary.get("validation_status") == "completed"
-    assert (
-        portfolio_summary.get("recommendation")
-        == "Credible at portfolio level"
-    )
+    assert portfolio_summary.get("recommendation") == "Credible at portfolio level"
     robustness = portfolio_summary.get("portfolio_robustness_summary")
     assert isinstance(robustness, dict)
     assert robustness.get("taxonomy_label") == "Robust at portfolio level"
@@ -273,10 +270,7 @@ def test_build_and_export_research_validation_package(tmp_path: Path) -> None:
     assert isinstance(portfolio_metrics.get("scenario_metrics"), list)
     portfolio_package = package.research_results.get("portfolio_validation_package")
     assert isinstance(portfolio_package, dict)
-    assert (
-        portfolio_package.get("package_type")
-        == "alpha_lab_level2_portfolio_validation_package"
-    )
+    assert portfolio_package.get("package_type") == "alpha_lab_level2_portfolio_validation_package"
     evaluation_standard = package.research_results.get("evaluation_standard")
     assert isinstance(evaluation_standard, dict)
     assert evaluation_standard.get("profile_name") == "default_research"
@@ -308,8 +302,7 @@ def test_build_and_export_research_validation_package(tmp_path: Path) -> None:
     assert payload["research_results"]["uncertainty"]["uncertainty_method"] == "bootstrap"
     assert payload["research_results"]["rolling_stability"]["rolling_ic_positive_share"] == 0.80
     assert (
-        payload["research_results"]["neutralization_comparison"]["delta"]["mean_ic_delta"]
-        == -0.011
+        payload["research_results"]["neutralization_comparison"]["delta"]["mean_ic_delta"] == -0.011
     )
     assert (
         payload["research_results"]["portfolio_validation_summary"]["validation_status"]
@@ -508,9 +501,7 @@ def test_research_validation_package_supports_legacy_top_level_neutralization_fi
     assert raw.get("mean_ic") == 0.041
     assert neutralized.get("mean_ic") == 0.03
     assert delta.get("mean_ic_delta") == -0.011
-    assert neutralization.get("interpretation_flags") == [
-        "neutralization preserves most evidence"
-    ]
+    assert neutralization.get("interpretation_flags") == ["neutralization preserves most evidence"]
 
 
 def test_research_validation_package_surfaces_block_bootstrap_metadata(

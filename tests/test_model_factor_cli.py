@@ -52,6 +52,8 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     metrics = metrics_payload["metrics"]
     assert metrics["model_family"] == "ridge"
     assert metrics["feature_count"] == 3
+    assert "mean_mutual_information" in metrics
+    assert "mutual_information_ir" in metrics
 
 
 def test_model_factor_cli_run_executes_and_writes_bundle(

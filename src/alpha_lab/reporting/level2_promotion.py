@@ -61,6 +61,9 @@ def build_level2_promotion(
 
     gate_metrics = project_promotion_gate_metrics(metrics)
     core_metrics = gate_metrics["core"]
+    tail_risk_metrics = gate_metrics["tail_risk"]
+    regime_metrics = gate_metrics["regime"]
+    marginal_metrics = gate_metrics["marginal"]
     uncertainty_metrics = gate_metrics["uncertainty"]
     rolling_metrics = gate_metrics["rolling"]
     neutralization_metrics = gate_metrics["neutralization"]
@@ -93,9 +96,7 @@ def build_level2_promotion(
 
     supportive_ci_count = uncertainty_metrics["uncertainty_supportive_ci_count"]
     uncertainty_overlap_count = uncertainty_metrics["uncertainty_overlap_zero_count"]
-    uncertainty_supportive = (
-        supportive_ci_count >= thresholds.min_supportive_ci_count_promote
-    )
+    uncertainty_supportive = supportive_ci_count >= thresholds.min_supportive_ci_count_promote
 
     has_strong_verdict = verdict == "strong candidate"
     has_weak_verdict = verdict in {"weak / noisy", "fails basic robustness"}
@@ -114,8 +115,7 @@ def build_level2_promotion(
         or (valid_ratio_min is not None and valid_ratio_min < thresholds.min_valid_ratio_block)
     )
     subperiod_block = bool(
-        subperiod_min is not None
-        and subperiod_min < thresholds.min_subperiod_positive_share_block
+        subperiod_min is not None and subperiod_min < thresholds.min_subperiod_positive_share_block
     )
     rolling_block = bool(
         (
@@ -132,10 +132,7 @@ def build_level2_promotion(
         uncertainty_overlap_count >= thresholds.uncertainty_overlap_block_min_count
     )
     turnover_block = bool(
-        (
-            ret_per_turnover is not None
-            and ret_per_turnover <= thresholds.min_return_per_turnover
-        )
+        (ret_per_turnover is not None and ret_per_turnover <= thresholds.min_return_per_turnover)
         or (
             ret_per_turnover is not None
             and turnover is not None
@@ -170,12 +167,20 @@ def build_level2_promotion(
     )
 
     neutralization_promote = bool(
-        neutralization_preserves
-        and not neutralization_material
-        and not neutralization_moderate
+        neutralization_preserves and not neutralization_material and not neutralization_moderate
     )
     if not thresholds.require_neutralization_support_for_promote:
         neutralization_promote = not neutralization_material
+
+    ls_max_dd = tail_risk_metrics["ls_max_drawdown"]
+    ls_max_consec = tail_risk_metrics["ls_max_consecutive_loss_days"]
+    tail_risk_block = bool(
+        (ls_max_dd is not None and ls_max_dd >= 0.30)
+        or (ls_max_consec is not None and ls_max_consec >= 15)
+    )
+    tail_risk_promote = bool(
+        ls_max_dd is not None and ls_max_dd < 0.15 and (ls_max_consec is None or ls_max_consec < 8)
+    )
 
     blockers: list[str] = []
     reasons: tuple[str, ...] = ()
@@ -196,6 +201,8 @@ def build_level2_promotion(
         blockers.append("blocked by weak neutralized evidence")
     if turnover_block:
         blockers.append("blocked by poor turnover efficiency")
+    if tail_risk_block:
+        blockers.append("blocked by severe long-short tail risk")
 
     if has_strong_verdict:
         supports.append("factor verdict is strong")
@@ -211,6 +218,8 @@ def build_level2_promotion(
         supports.append("turnover efficiency is acceptable")
     if neutralization_promote:
         supports.append("robust evidence survives neutralization")
+    if tail_risk_promote:
+        supports.append("long-short tail risk is well-controlled")
 
     if not has_strong_verdict and not has_weak_verdict:
         concerns.append("factor verdict is not yet strong")
@@ -222,6 +231,10 @@ def build_level2_promotion(
         concerns.append("rolling stability is not yet persistent")
     if not coverage_block and not coverage_promote:
         concerns.append("coverage/validity are below promotion target")
+    if regime_metrics["regime_has_weakness"]:
+        concerns.append("factor performance is regime-dependent")
+    if marginal_metrics["marginal_contribution_weak"]:
+        concerns.append("marginal contribution is weak in multi-factor context")
     if neutralization_moderate:
         concerns.append("neutralization weakens evidence")
     if thresholds.require_neutralization_support_for_promote and not neutralization_has_signal:
@@ -230,6 +243,14 @@ def build_level2_promotion(
         blockers or concerns
     ):
         concerns.append("campaign triage is favorable but promotion gate remains unmet")
+
+    _append_extended_promotion_signals(
+        metrics,
+        base_mean_ic=core_metrics.get("mean_ic"),
+        blockers=blockers,
+        concerns=concerns,
+        supports=supports,
+    )
 
     promote_gate = bool(
         (has_strong_verdict or not thresholds.require_strong_verdict_for_promote)
@@ -283,3 +304,119 @@ def _finalize_reasons(*groups: Sequence[str], max_items: int) -> tuple[str, ...]
             if len(merged) >= max_items:
                 return tuple(merged)
     return tuple(merged)
+
+
+def _append_extended_promotion_signals(
+    metrics: Mapping[str, object],
+    *,
+    base_mean_ic: float | None,
+    blockers: list[str],
+    concerns: list[str],
+    supports: list[str],
+) -> None:
+    """Fold P0/P1 diagnostics (tradability, next-open, haircut, random
+    baseline, lag, baseline comparison) into the Level-2 promotion gate.
+
+    Promotion is a higher bar than campaign triage: anything that suggests
+    the headline edge is a measurement artifact should hard-block.  Softer
+    signals contribute to concerns/supports so the gate label reflects them.
+    """
+
+    def _f(key: str) -> float | None:
+        v = metrics.get(key)
+        if isinstance(v, bool):
+            x = float(v)
+        elif isinstance(v, (int, float)):
+            x = float(v)
+        elif isinstance(v, str):
+            token = v.strip()
+            if not token:
+                return None
+            try:
+                x = float(token)
+            except ValueError:
+                return None
+        else:
+            return None
+        if x != x:
+            return None
+        return x
+
+    base_ic = (
+        base_mean_ic
+        if isinstance(base_mean_ic, (int, float)) and not isinstance(base_mean_ic, bool)
+        else None
+    )
+
+    tradability_rate = _f("tradability_untradable_rate")
+    if tradability_rate is not None:
+        if tradability_rate > 0.20:
+            blockers.append("blocked by excessive untradable rate")
+        elif tradability_rate > 0.10:
+            concerns.append("untradable rate is elevated")
+
+    if (
+        metrics.get("next_open_execution_available") is True
+        and base_ic is not None
+        and base_ic > 0.0
+    ):
+        next_open_ic = _f("next_open_mean_ic")
+        if next_open_ic is not None:
+            if next_open_ic < 0.3 * base_ic:
+                blockers.append("blocked by collapse under next-open execution")
+            elif next_open_ic < 0.7 * base_ic:
+                concerns.append("signal weakens under next-open execution")
+
+    haircut_ratio = _f("haircut_sharpe_ratio")
+    if haircut_ratio is not None:
+        if haircut_ratio < 0.3:
+            blockers.append("blocked by multiple-testing haircut")
+        elif haircut_ratio < 0.5:
+            concerns.append("multiple-testing haircut reduces defensible edge")
+        elif haircut_ratio > 0.7:
+            supports.append("Sharpe survives multiple-testing haircut")
+
+    random_p = _f("random_baseline_p_value")
+    if random_p is not None:
+        if random_p >= 0.20:
+            blockers.append("blocked by inability to beat random factor baseline")
+        elif random_p >= 0.10:
+            concerns.append("random-baseline p-value is weak")
+        elif random_p < 0.05:
+            supports.append("IC exceeds random factor baseline (p<0.05)")
+
+    baseline_edge = _f("baseline_factor_mean_ic_advantage")
+    if baseline_edge is not None:
+        if baseline_edge < 0.0:
+            blockers.append("blocked by underperformance vs simple momentum/reversal baselines")
+        elif baseline_edge > 0.02:
+            supports.append("factor outperforms simple momentum/reversal baselines")
+
+    lag_decay = _f("lag_sensitivity_ic_decay_lag_1")
+    lag0 = _f("lag_sensitivity_mean_ic_lag_0")
+    if lag_decay is not None and lag0 is not None and lag0 > 0.0:
+        if lag_decay < 0.3:
+            blockers.append("blocked by sharp IC decay under 1-day execution lag")
+        elif lag_decay < 0.5:
+            concerns.append("IC decays materially under 1-day execution lag")
+        elif lag_decay > 0.7:
+            supports.append("IC retained under 1-day execution lag")
+
+    cost_share = _f("daily_pnl_cost_drag_share")
+    if cost_share is not None and cost_share > 0.75:
+        blockers.append("blocked by transaction costs consuming most of gross edge")
+    elif cost_share is not None and cost_share > 0.50:
+        concerns.append("transaction costs consume substantial gross edge")
+
+    long_share = _f("daily_pnl_long_contribution_ratio")
+    if long_share is not None and (long_share < 0.05 or long_share > 0.95):
+        concerns.append("PnL attribution is heavily concentrated in a single leg")
+
+    param_ic_std = _f("param_sensitivity_mean_ic_std")
+    if (
+        param_ic_std is not None
+        and base_ic is not None
+        and abs(base_ic) > 1e-6
+        and param_ic_std / abs(base_ic) > 0.5
+    ):
+        concerns.append("IC varies materially across n_quantiles choices")

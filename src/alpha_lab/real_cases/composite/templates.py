@@ -45,51 +45,28 @@ def render_summary_markdown(
         f"| Mean IC | {_fmt(metrics.get('mean_ic'))} |",
         f"| Mean IC 95% CI | {ic_ci} |",
         f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
+        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
         f"| Mean Rank IC 95% CI | {rank_ic_ci} |",
         f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
-        (
-            "| Research Evaluation Profile | "
-            f"{_fmt(metrics.get('research_evaluation_profile'))} |"
-        ),
+        (f"| Research Evaluation Profile | {_fmt(metrics.get('research_evaluation_profile'))} |"),
         f"| Factor Verdict | {_fmt(metrics.get('factor_verdict'))} |",
-        (
-            "| Verdict Reasons | "
-            f"{_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"
-        ),
+        (f"| Verdict Reasons | {_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"),
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
-        (
-            "| Triage Reasons | "
-            f"{_fmt_reason_list(metrics.get('campaign_triage_reasons'))} |"
-        ),
+        (f"| Triage Reasons | {_fmt_reason_list(metrics.get('campaign_triage_reasons'))} |"),
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
-        (
-            "| Promotion Reasons | "
-            f"{_fmt_reason_list(metrics.get('promotion_reasons'))} |"
-        ),
-        (
-            "| Promotion Blockers | "
-            f"{_fmt_reason_list(metrics.get('promotion_blockers'))} |"
-        ),
-        (
-            "| Level 1->Level 2 Transition | "
-            f"{_fmt(metrics.get('level12_transition_label'))} |"
-        ),
+        (f"| Promotion Reasons | {_fmt_reason_list(metrics.get('promotion_reasons'))} |"),
+        (f"| Promotion Blockers | {_fmt_reason_list(metrics.get('promotion_blockers'))} |"),
+        (f"| Level 1->Level 2 Transition | {_fmt(metrics.get('level12_transition_label'))} |"),
         (
             "| Transition Interpretation | "
             f"{_fmt(metrics.get('level12_transition_interpretation'))} |"
         ),
-        (
-            "| Transition Reasons | "
-            f"{_fmt_reason_list(metrics.get('level12_transition_reasons'))} |"
-        ),
+        (f"| Transition Reasons | {_fmt_reason_list(metrics.get('level12_transition_reasons'))} |"),
         (
             "| Confirmation vs Degradation | "
             f"{_fmt(metrics.get('level12_transition_confirmation_note'))} |"
         ),
-        (
-            "| Level 2 Portfolio Validation | "
-            f"{_portfolio_validation_note(metrics)} |"
-        ),
+        (f"| Level 2 Portfolio Validation | {_portfolio_validation_note(metrics)} |"),
         (
             "| Portfolio Validation Risks | "
             f"{_fmt_reason_list(metrics.get('portfolio_validation_major_risks'))} |"
@@ -124,10 +101,7 @@ def render_summary_markdown(
             f"{_fmt(metrics.get('rolling_rank_ic_min_mean'))} / "
             f"{_fmt(metrics.get('rolling_long_short_min_mean'))} |"
         ),
-        (
-            "| Rolling Stability Flags | "
-            f"{_fmt_flags(metrics.get('rolling_instability_flags'))} |"
-        ),
+        (f"| Rolling Stability Flags | {_fmt_flags(metrics.get('rolling_instability_flags'))} |"),
         f"| Mean Long-Short Turnover | {_fmt(metrics.get('mean_long_short_turnover'))} |",
         (
             "| Coverage Ratio Mean/Min | "
@@ -220,51 +194,28 @@ def render_experiment_card_markdown(
         f"| Mean IC | {_fmt(metrics.get('mean_ic'))} |",
         f"| Mean IC 95% CI | {ic_ci} |",
         f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
+        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
         f"| Mean Rank IC 95% CI | {rank_ic_ci} |",
         f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
-        (
-            "| Research Evaluation Profile | "
-            f"{_fmt(metrics.get('research_evaluation_profile'))} |"
-        ),
+        (f"| Research Evaluation Profile | {_fmt(metrics.get('research_evaluation_profile'))} |"),
         f"| Factor Verdict | {_fmt(metrics.get('factor_verdict'))} |",
-        (
-            "| Verdict Reasons | "
-            f"{_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"
-        ),
+        (f"| Verdict Reasons | {_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"),
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
-        (
-            "| Triage Reasons | "
-            f"{_fmt_reason_list(metrics.get('campaign_triage_reasons'))} |"
-        ),
+        (f"| Triage Reasons | {_fmt_reason_list(metrics.get('campaign_triage_reasons'))} |"),
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
-        (
-            "| Promotion Reasons | "
-            f"{_fmt_reason_list(metrics.get('promotion_reasons'))} |"
-        ),
-        (
-            "| Promotion Blockers | "
-            f"{_fmt_reason_list(metrics.get('promotion_blockers'))} |"
-        ),
-        (
-            "| Level 1->Level 2 Transition | "
-            f"{_fmt(metrics.get('level12_transition_label'))} |"
-        ),
+        (f"| Promotion Reasons | {_fmt_reason_list(metrics.get('promotion_reasons'))} |"),
+        (f"| Promotion Blockers | {_fmt_reason_list(metrics.get('promotion_blockers'))} |"),
+        (f"| Level 1->Level 2 Transition | {_fmt(metrics.get('level12_transition_label'))} |"),
         (
             "| Transition Interpretation | "
             f"{_fmt(metrics.get('level12_transition_interpretation'))} |"
         ),
-        (
-            "| Transition Reasons | "
-            f"{_fmt_reason_list(metrics.get('level12_transition_reasons'))} |"
-        ),
+        (f"| Transition Reasons | {_fmt_reason_list(metrics.get('level12_transition_reasons'))} |"),
         (
             "| Confirmation vs Degradation | "
             f"{_fmt(metrics.get('level12_transition_confirmation_note'))} |"
         ),
-        (
-            "| Level 2 Portfolio Validation | "
-            f"{_portfolio_validation_note(metrics)} |"
-        ),
+        (f"| Level 2 Portfolio Validation | {_portfolio_validation_note(metrics)} |"),
         (
             "| Portfolio Validation Risks | "
             f"{_fmt_reason_list(metrics.get('portfolio_validation_major_risks'))} |"
@@ -300,10 +251,7 @@ def render_experiment_card_markdown(
             f"{_fmt(metrics.get('rolling_rank_ic_min_mean'))} / "
             f"{_fmt(metrics.get('rolling_long_short_min_mean'))} |"
         ),
-        (
-            "| Rolling Stability Flags | "
-            f"{_fmt_flags(metrics.get('rolling_instability_flags'))} |"
-        ),
+        (f"| Rolling Stability Flags | {_fmt_flags(metrics.get('rolling_instability_flags'))} |"),
         f"| Mean Long-Short Turnover | {_fmt(metrics.get('mean_long_short_turnover'))} |",
         (
             "| Coverage Ratio Mean/Min | "
@@ -407,10 +355,7 @@ def _uncertainty_method_note(metrics: dict[str, object]) -> str:
         resample_text = _fmt(resamples)
         block_length_text = _fmt(block_length)
         if level is None:
-            return (
-                "block_bootstrap "
-                f"(resamples={resample_text}, block_length={block_length_text})"
-            )
+            return f"block_bootstrap (resamples={resample_text}, block_length={block_length_text})"
         return (
             "block_bootstrap "
             f"(CI={level:.2f}, resamples={resample_text}, block_length={block_length_text})"
@@ -445,6 +390,7 @@ def _neutralization_comparison_rows(metrics: dict[str, object]) -> list[str]:
     raw = _as_dict(comparison.get("raw"))
     neutralized = _as_dict(comparison.get("neutralized"))
     delta = _as_dict(comparison.get("delta"))
+
     def _cmp(raw_key: str, delta_key: str) -> str:
         return _fmt_transition(
             raw.get(raw_key),
@@ -453,22 +399,13 @@ def _neutralization_comparison_rows(metrics: dict[str, object]) -> list[str]:
         )
 
     return [
-        (
-            "| Raw vs Neutralized Mean IC | "
-            f"{_cmp('mean_ic', 'mean_ic_delta')} |"
-        ),
-        (
-            "| Raw vs Neutralized Mean RankIC | "
-            f"{_cmp('mean_rank_ic', 'mean_rank_ic_delta')} |"
-        ),
+        (f"| Raw vs Neutralized Mean IC | {_cmp('mean_ic', 'mean_ic_delta')} |"),
+        (f"| Raw vs Neutralized Mean RankIC | {_cmp('mean_rank_ic', 'mean_rank_ic_delta')} |"),
         (
             "| Raw vs Neutralized Mean L/S Return | "
             f"{_cmp('mean_long_short_return', 'mean_long_short_return_delta')} |"
         ),
-        (
-            "| Raw vs Neutralized ICIR | "
-            f"{_cmp('ic_ir', 'ic_ir_delta')} |"
-        ),
+        (f"| Raw vs Neutralized ICIR | {_cmp('ic_ir', 'ic_ir_delta')} |"),
         (
             "| Raw vs Neutralized Validity Min | "
             f"{_cmp('valid_ratio_min', 'valid_ratio_min_delta')} |"
@@ -501,10 +438,7 @@ def _neutralization_comparison_rows(metrics: dict[str, object]) -> list[str]:
 
 
 def _fmt_transition(raw_value: object, neutralized_value: object, delta_value: object) -> str:
-    return (
-        f"{_fmt(raw_value)} -> {_fmt(neutralized_value)} "
-        f"(delta={_fmt(delta_value)})"
-    )
+    return f"{_fmt(raw_value)} -> {_fmt(neutralized_value)} (delta={_fmt(delta_value)})"
 
 
 def _as_dict(value: object) -> dict[str, object]:

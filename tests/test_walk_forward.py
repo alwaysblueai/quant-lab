@@ -130,9 +130,7 @@ def test_test_windows_non_overlapping() -> None:
     for i in range(len(all_test_dates)):
         for j in range(i + 1, len(all_test_dates)):
             overlap = all_test_dates[i] & all_test_dates[j]
-            assert len(overlap) == 0, (
-                f"Folds {i} and {j} share test dates: {sorted(overlap)[:3]}"
-            )
+            assert len(overlap) == 0, f"Folds {i} and {j} share test dates: {sorted(overlap)[:3]}"
 
 
 def test_test_windows_in_temporal_order() -> None:
@@ -147,7 +145,7 @@ def test_test_windows_in_temporal_order() -> None:
     starts = list(result.fold_summary_df["start_date"])
     for i in range(1, len(starts)):
         assert starts[i] > starts[i - 1], (
-            f"Fold {i} start ({starts[i]}) not after fold {i-1} start ({starts[i - 1]})"
+            f"Fold {i} start ({starts[i]}) not after fold {i - 1} start ({starts[i - 1]})"
         )
 
 
@@ -163,8 +161,7 @@ def test_no_train_test_overlap_within_fold() -> None:
     df = result.fold_summary_df
     for _, row in df.iterrows():
         assert row["train_end"] < row["start_date"], (
-            f"Fold {row['fold_id']}: train_end {row['train_end']} >= "
-            f"test start {row['start_date']}"
+            f"Fold {row['fold_id']}: train_end {row['train_end']} >= test start {row['start_date']}"
         )
 
 
@@ -318,6 +315,21 @@ def test_aggregate_cost_adjusted_nan_when_no_cost_rate() -> None:
     assert math.isnan(result.aggregate_summary.mean_cost_adjusted_return)
 
 
+def test_aggregate_dsr_pvalue_is_unit_interval_or_nan() -> None:
+    result = run_walk_forward_experiment(
+        _PRICES,
+        _factor_fn,
+        train_size=30,
+        test_size=10,
+        step=10,
+    )
+    dsr = result.aggregate_summary.dsr_pvalue
+    if math.isnan(dsr):
+        assert math.isnan(dsr)
+    else:
+        assert 0.0 <= dsr <= 1.0
+
+
 # ---------------------------------------------------------------------------
 # 5. Edge cases and error handling
 # ---------------------------------------------------------------------------
@@ -409,9 +421,7 @@ def test_pooled_ic_df_row_count_matches_sum_of_fold_ic_rows() -> None:
         test_size=10,
         step=10,
     )
-    total_from_folds = sum(
-        len(r.ic_df) for r in result.per_fold_results if not r.ic_df.empty
-    )
+    total_from_folds = sum(len(r.ic_df) for r in result.per_fold_results if not r.ic_df.empty)
     assert len(result.pooled_ic_df) == total_from_folds
 
 
@@ -588,9 +598,7 @@ def test_portfolio_aggregate_mean_return_matches_manual_mean() -> None:
         rebalance_frequency=1,
     )
     manual = float(result.fold_summary_df["mean_portfolio_return"].dropna().mean())
-    assert math.isclose(
-        result.aggregate_summary.mean_portfolio_return, manual, rel_tol=1e-9
-    )
+    assert math.isclose(result.aggregate_summary.mean_portfolio_return, manual, rel_tol=1e-9)
 
 
 def test_portfolio_hit_rate_in_unit_interval() -> None:
@@ -678,7 +686,9 @@ def test_pooled_portfolio_return_df_empty_without_portfolio_params() -> None:
     )
     assert result.pooled_portfolio_return_df.empty
     assert list(result.pooled_portfolio_return_df.columns) == [
-        "fold_id", "date", "portfolio_return"
+        "fold_id",
+        "date",
+        "portfolio_return",
     ]
 
 
@@ -694,7 +704,9 @@ def test_pooled_portfolio_return_df_populated_with_params() -> None:
     )
     assert not result.pooled_portfolio_return_df.empty
     assert list(result.pooled_portfolio_return_df.columns) == [
-        "fold_id", "date", "portfolio_return"
+        "fold_id",
+        "date",
+        "portfolio_return",
     ]
 
 
@@ -741,12 +753,8 @@ def test_pooled_portfolio_return_mean_matches_manual() -> None:
         holding_period=1,
         rebalance_frequency=1,
     )
-    manual = float(
-        result.pooled_portfolio_return_df["portfolio_return"].dropna().mean()
-    )
-    assert math.isclose(
-        result.aggregate_summary.pooled_portfolio_return_mean, manual, rel_tol=1e-9
-    )
+    manual = float(result.pooled_portfolio_return_df["portfolio_return"].dropna().mean())
+    assert math.isclose(result.aggregate_summary.pooled_portfolio_return_mean, manual, rel_tol=1e-9)
 
 
 def test_pooled_portfolio_hit_rate_in_unit_interval() -> None:
@@ -774,9 +782,7 @@ def test_n_portfolio_obs_matches_pooled_df_non_nan_count() -> None:
         holding_period=1,
         rebalance_frequency=1,
     )
-    expected = int(
-        result.pooled_portfolio_return_df["portfolio_return"].notna().sum()
-    )
+    expected = int(result.pooled_portfolio_return_df["portfolio_return"].notna().sum())
     assert result.aggregate_summary.n_portfolio_obs == expected
 
 
@@ -813,7 +819,10 @@ def test_pooled_cost_adj_df_empty_without_cost_rate() -> None:
     )
     assert result.pooled_cost_adjusted_portfolio_return_df.empty
     assert list(result.pooled_cost_adjusted_portfolio_return_df.columns) == [
-        "fold_id", "date", "portfolio_return", "adjusted_return"
+        "fold_id",
+        "date",
+        "portfolio_return",
+        "adjusted_return",
     ]
 
 
@@ -844,7 +853,10 @@ def test_pooled_cost_adj_df_populated_with_both_params() -> None:
     )
     assert not result.pooled_cost_adjusted_portfolio_return_df.empty
     assert list(result.pooled_cost_adjusted_portfolio_return_df.columns) == [
-        "fold_id", "date", "portfolio_return", "adjusted_return"
+        "fold_id",
+        "date",
+        "portfolio_return",
+        "adjusted_return",
     ]
 
 
@@ -909,12 +921,8 @@ def test_no_oos_contamination_in_pooled_cost_adj() -> None:
 
     for fold_id in df["fold_id"].unique():
         fold_dates = pd.to_datetime(df[df["fold_id"] == fold_id]["date"])
-        start = pd.Timestamp(
-            fold_df.loc[fold_df["fold_id"] == fold_id, "start_date"].iloc[0]
-        )
-        end = pd.Timestamp(
-            fold_df.loc[fold_df["fold_id"] == fold_id, "end_date"].iloc[0]
-        )
+        start = pd.Timestamp(fold_df.loc[fold_df["fold_id"] == fold_id, "start_date"].iloc[0])
+        end = pd.Timestamp(fold_df.loc[fold_df["fold_id"] == fold_id, "end_date"].iloc[0])
         assert fold_dates.min() >= start, (
             f"Fold {fold_id}: cost-adj date {fold_dates.min()} precedes start {start}"
         )
@@ -1001,9 +1009,7 @@ def test_n_cost_adjusted_obs_matches_pooled_df_non_nan_count() -> None:
         rebalance_frequency=1,
         portfolio_cost_rate=0.001,
     )
-    expected = int(
-        result.pooled_cost_adjusted_portfolio_return_df["adjusted_return"].notna().sum()
-    )
+    expected = int(result.pooled_cost_adjusted_portfolio_return_df["adjusted_return"].notna().sum())
     assert result.aggregate_summary.n_cost_adjusted_obs == expected
 
 

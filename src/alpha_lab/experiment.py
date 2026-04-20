@@ -5,33 +5,49 @@ import subprocess
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 
 from alpha_lab.data_validation import validate_price_panel
+from alpha_lab.evaluation import (
+    compute_ic,
+    compute_ic_summary,
+    compute_mutual_information,
+    compute_rank_ic,
+)
 from alpha_lab.exceptions import AlphaLabConfigError
-from alpha_lab.evaluation import compute_ic, compute_rank_ic
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
 from alpha_lab.quantile import long_short_return, quantile_assignments, quantile_returns
+from alpha_lab.regime import (
+    RegimeConditionalSummary,
+    classify_market_regimes,
+    compute_regime_conditional,
+)
 from alpha_lab.research_evaluation_config import (
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
+    RegimeAnalysisConfig,
     RollingStabilityConfig,
 )
+from alpha_lab.research_integrity.asof import pit_check
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult, IntegrityReport
 from alpha_lab.research_integrity.exceptions import raise_on_hard_failures
-from alpha_lab.research_integrity.asof import pit_check
 from alpha_lab.research_integrity.leakage_checks import (
     check_cross_section_transform_scope,
     check_factor_label_temporal_order,
+    check_factor_label_value_clone_risk,
 )
 from alpha_lab.research_integrity.reporting import build_integrity_report
 from alpha_lab.splits import time_split
 from alpha_lab.strategy import StrategySpec
+from alpha_lab.tail_risk import TailRiskSummary, compute_tail_risk
 from alpha_lab.turnover import long_short_turnover, quantile_turnover
+from alpha_lab.validation.deflated_sharpe import deflated_sharpe_ratio
 
 DEFAULT_ROLLING_STABILITY_THRESHOLDS = DEFAULT_RESEARCH_EVALUATION_CONFIG.rolling_stability
+DEFAULT_REGIME_ANALYSIS_CONFIG = DEFAULT_RESEARCH_EVALUATION_CONFIG.regime_analysis
 
 
 @dataclass(frozen=True)
@@ -81,14 +97,41 @@ class ExperimentSummary:
     """
 
     mean_ic: float
-    """Cross-sectional Pearson IC averaged across evaluation dates."""
+    """Cross-sectional Pearson IC averaged across evaluation dates.
+
+    This is the **mean of per-date ICs** — every evaluation date contributes
+    equal weight. A pooled IC (every ``(factor, label)`` observation
+    contributing equal weight) is not reported here; walk-forward reports
+    both under ``mean_ic`` / ``pooled_ic_mean``. The two aggregations
+    disagree whenever the cross-section size varies across dates; see
+    ``tests/test_experiment_ic_aggregation.py``.
+    """
 
     mean_rank_ic: float
     """Cross-sectional Spearman RankIC averaged across evaluation dates."""
 
+    mean_mutual_information: float
+    """Cross-sectional mutual information averaged across evaluation dates."""
+
+    mutual_information_ir: float
+    """Mutual-information IR: mean_mi / std_mi (ddof=1)."""
+
+    mutual_information_positive_rate: float
+    """Fraction of finite MI observations that are strictly positive."""
+
+    mutual_information_valid_ratio: float
+    """Finite MI observations divided by all MI rows in the evaluation period."""
+
     ic_ir: float
     """Information ratio: mean_ic / std_ic (ddof=1).  NaN when fewer than
     two non-NaN IC observations are available or std_ic == 0."""
+
+    ic_t_stat: float
+    """t-statistic for IC mean: mean_ic / (std_ic / sqrt(n)).  NaN when
+    fewer than two observations or std_ic == 0."""
+
+    ic_p_value: float
+    """Two-sided p-value for IC t-statistic (Student-t, df=n-1)."""
 
     mean_long_short_return: float
     """Average top-minus-bottom quantile return across evaluation dates."""
@@ -121,6 +164,9 @@ class ExperimentSummary:
 
     long_short_ir: float
     """Information ratio of long-short return (mean / std, ddof=1)."""
+
+    dsr_pvalue: float
+    """Deflated Sharpe p-value for long-short return (single-trial baseline)."""
 
     long_short_return_per_turnover: float
     """Mean long-short return divided by mean one-way long-short turnover."""
@@ -172,6 +218,27 @@ class ExperimentSummary:
 
     eval_coverage_ratio_min: float
     """Minimum per-date coverage ratio: valid assets / total eval assets."""
+
+    ls_max_drawdown: float = float("nan")
+    """Maximum peak-to-trough drawdown of cumulative L/S return."""
+
+    ls_max_drawdown_duration: int = -1
+    """Number of dates from peak to trough of worst drawdown."""
+
+    ls_max_consecutive_loss_days: int = -1
+    """Longest streak of consecutive dates with L/S return <= 0."""
+
+    ls_var_5: float = float("nan")
+    """5th-percentile historical VaR of daily L/S returns."""
+
+    ls_cvar_5: float = float("nan")
+    """Conditional VaR (Expected Shortfall) at 5% level."""
+
+    ls_calmar_ratio: float = float("nan")
+    """Mean L/S return divided by max drawdown."""
+
+    regime_flags: tuple[str, ...] = ()
+    """Regime-conditional diagnostic flags (e.g. negative IC in bear market)."""
 
     instability_flags: tuple[str, ...] = ()
     """Heuristic warning flags for weak/unstable diagnostic patterns."""
@@ -239,6 +306,9 @@ class ExperimentResult:
     rank_ic_df: pd.DataFrame
     """Spearman RankIC by date over the evaluation period."""
 
+    mutual_information_df: pd.DataFrame
+    """Mutual information by date over the evaluation period."""
+
     quantile_returns_df: pd.DataFrame
     """Mean return per quantile bucket and date over the evaluation period."""
 
@@ -250,7 +320,8 @@ class ExperimentResult:
 
     Columns:
     ``[date, rolling_mean_ic, rolling_ic_positive_rate, rolling_mean_rank_ic,
-    rolling_rank_ic_positive_rate, rolling_mean_long_short_return,
+    rolling_rank_ic_positive_rate, rolling_mean_mutual_information,
+    rolling_mutual_information_positive_rate, rolling_mean_long_short_return,
     rolling_long_short_positive_rate]``.
     """
 
@@ -349,6 +420,17 @@ class ExperimentResult:
     supplied to :func:`run_factor_experiment`.  ``None`` otherwise.
     """
 
+    regime_df: pd.DataFrame | None = None
+    """Per-date market regime classification when regime analysis is enabled.
+
+    Columns: ``[date, market_return, direction_regime, rolling_vol, vol_regime]``.
+    ``None`` when prices are not available for regime classification.
+    """
+
+    regime_summary: RegimeConditionalSummary | None = None
+    """Regime-conditional IC and L/S statistics.  ``None`` when regime
+    analysis is not enabled or insufficient data."""
+
     integrity_checks: tuple[IntegrityCheckResult, ...] = ()
     """Structured integrity checks captured during experiment execution."""
 
@@ -371,6 +453,8 @@ def run_factor_experiment(
     portfolio_cost_rate: float | None = None,
     strategy: StrategySpec | None = None,
     rolling_stability_thresholds: RollingStabilityConfig = DEFAULT_ROLLING_STABILITY_THRESHOLDS,
+    regime_analysis_config: RegimeAnalysisConfig = DEFAULT_REGIME_ANALYSIS_CONFIG,
+    label_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -456,9 +540,7 @@ def run_factor_experiment(
         raise_on_hard_failures((check,))
 
     max_price_date = pd.Timestamp(pd.to_datetime(prices["date"]).max())
-    _record_integrity(
-        pit_check(prices, max_allowed_date=max_price_date, object_name="prices")
-    )
+    _record_integrity(pit_check(prices, max_allowed_date=max_price_date, object_name="prices"))
 
     # --- Step 0: resolve strategy overrides ---------------------------------
     # StrategySpec is the explicit domain boundary between the factor research
@@ -480,8 +562,7 @@ def run_factor_experiment(
     # --- Step 0b: validate portfolio arguments --------------------------------
     if (holding_period is None) != (rebalance_frequency is None):
         raise AlphaLabConfigError(
-            "holding_period and rebalance_frequency must both be provided or "
-            "both be omitted."
+            "holding_period and rebalance_frequency must both be provided or both be omitted."
         )
     if holding_period is not None and holding_period < 1:
         raise AlphaLabConfigError("holding_period must be >= 1")
@@ -532,10 +613,16 @@ def run_factor_experiment(
     # --- Step 2: forward-return labels (full sample) ------------------------
     # Labels at date t: close[t+horizon]/close[t] - 1 (strictly future prices).
     # Stored at t so they merge with factor on (date, asset) without lookahead.
-    label_df = forward_return(prices, horizon=horizon)
-    _record_integrity(
-        pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df")
-    )
+    # A custom ``label_fn`` lets callers substitute an alternate label schema
+    # (e.g. next-open execution prices, tradability-masked labels) for
+    # sensitivity analysis.  The result must be canonical long-form
+    # ``[date, asset, factor, value]``.
+    if label_fn is not None:
+        label_df = label_fn(prices)
+        validate_factor_output(label_df)
+    else:
+        label_df = forward_return(prices, horizon=horizon)
+    _record_integrity(pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df"))
     _record_integrity(
         check_factor_label_temporal_order(
             factor_df,
@@ -544,6 +631,16 @@ def run_factor_experiment(
             factor_date_col="date",
             label_date_col="date",
             object_name="factor_label_alignment",
+        )
+    )
+    _record_integrity(
+        check_factor_label_value_clone_risk(
+            factor_df,
+            label_df,
+            join_keys=("date", "asset"),
+            factor_value_col="value",
+            label_value_col="value",
+            object_name="factor_label_value_leakage",
         )
     )
 
@@ -561,9 +658,7 @@ def run_factor_experiment(
         # Filter labels by the exact test-period dates (not by positional mask,
         # since label_df may have a different row structure than factor_df).
         eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
-        eval_label = label_df[label_df["date"].isin(eval_date_index)].reset_index(
-            drop=True
-        )
+        eval_label = label_df[label_df["date"].isin(eval_date_index)].reset_index(drop=True)
     else:
         eval_factor = factor_df.copy()
         eval_label = label_df.copy()
@@ -580,28 +675,26 @@ def run_factor_experiment(
     eval_factor_dates: set[object] = set(eval_factor["date"].unique())
     n_label_nan_dates = len(eval_factor_dates - dates_with_labels)
 
-    merged_eval = eval_factor[["date", "asset", "value"]].merge(
-        eval_label[["date", "asset", "value"]].rename(
-            columns={"value": "_label_value"}
-        ),
-        on=["date", "asset"],
-        how="inner",
-        validate="one_to_one",
+    merged_eval = (
+        eval_factor[["date", "asset", "value"]]
+        .rename(columns={"value": "value_factor"})
+        .merge(
+            eval_label[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
+            on=["date", "asset"],
+            how="inner",
+            validate="one_to_one",
+        )
     )
-    valid_eval = merged_eval.dropna(subset=["value", "_label_value"])
+    valid_eval = merged_eval.dropna(subset=["value_factor", "value_label"])
     if valid_eval.empty:
         valid_assets_by_date = pd.Series(dtype=float)
     else:
         valid_assets_by_date = valid_eval.groupby("date")["asset"].nunique()
     mean_eval_assets_per_date = (
-        float(valid_assets_by_date.mean())
-        if len(valid_assets_by_date) > 0
-        else float("nan")
+        float(valid_assets_by_date.mean()) if len(valid_assets_by_date) > 0 else float("nan")
     )
     min_eval_assets_per_date = (
-        float(valid_assets_by_date.min())
-        if len(valid_assets_by_date) > 0
-        else float("nan")
+        float(valid_assets_by_date.min()) if len(valid_assets_by_date) > 0 else float("nan")
     )
     if n_eval_assets > 0 and np.isfinite(mean_eval_assets_per_date):
         eval_coverage_ratio_mean = mean_eval_assets_per_date / float(n_eval_assets)
@@ -613,11 +706,17 @@ def run_factor_experiment(
         eval_coverage_ratio_min = float("nan")
 
     # --- Step 4: IC / RankIC -----------------------------------------------
-    ic_df = compute_ic(eval_factor, eval_label)
-    rank_ic_df = compute_rank_ic(eval_factor, eval_label)
+    ic_df = compute_ic(eval_factor, eval_label, merged_pairs=merged_eval)
+    rank_ic_df = compute_rank_ic(eval_factor, eval_label, merged_pairs=merged_eval)
+    mi_df = compute_mutual_information(eval_factor, eval_label, merged_pairs=merged_eval)
 
     # --- Step 5: quantile returns and long-short ----------------------------
-    qr_df = quantile_returns(eval_factor, eval_label, n_quantiles=n_quantiles)
+    qr_df = quantile_returns(
+        eval_factor,
+        eval_label,
+        n_quantiles=n_quantiles,
+        merged_pairs=merged_eval,
+    )
     ls_df = long_short_return(qr_df)
 
     # --- Step 5b: portfolio assignments and turnover ------------------------
@@ -633,21 +732,40 @@ def run_factor_experiment(
     # mean_long_short_turnover is averaged over the same universe as
     # mean_long_short_return and cost-adjusted returns.
     ls_dates = set(ls_df["date"].unique()) if not ls_df.empty else set()
-    lsto_for_summary = (
-        lsto_df[lsto_df["date"].isin(ls_dates)] if not lsto_df.empty else lsto_df
-    )
+    lsto_for_summary = lsto_df[lsto_df["date"].isin(ls_dates)] if not lsto_df.empty else lsto_df
     rolling_stability_df = _build_rolling_stability_frame(
         ic_df,
         rank_ic_df,
+        mi_df,
         ls_df,
         window=rolling_stability_thresholds.rolling_window_size,
     )
-    summary = _summarise(
+    tail_risk = compute_tail_risk(ls_df)
+
+    # --- Step 6b: regime-conditional analysis ---------------------------------
+    regime_df = classify_market_regimes(
+        ic_df,
+        ls_df,
+        prices,
+        vol_window=rolling_stability_thresholds.rolling_window_size,
+    )
+    regime_summary = compute_regime_conditional(
         ic_df,
         rank_ic_df,
         ls_df,
+        regime_df,
+        config=regime_analysis_config,
+    )
+
+    summary = _summarise(
+        ic_df,
+        rank_ic_df,
+        mi_df,
+        ls_df,
         lsto_for_summary,
         rolling_stability_df=rolling_stability_df,
+        tail_risk=tail_risk,
+        regime_flags=regime_summary.regime_flags,
         mean_eval_assets_per_date=mean_eval_assets_per_date,
         min_eval_assets_per_date=min_eval_assets_per_date,
         eval_coverage_ratio_mean=eval_coverage_ratio_mean,
@@ -663,35 +781,43 @@ def run_factor_experiment(
     port_summary: PortfolioSummary | None = None
 
     if holding_period is not None and rebalance_frequency is not None:
-        port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df = (
-            _run_portfolio_block(
-                eval_factor=eval_factor,
-                prices=prices,
-                eval_date_index=eval_date_index,
-                holding_period=holding_period,
-                rebalance_frequency=rebalance_frequency,
-                weighting_method=weighting_method,
-                portfolio_cost_rate=portfolio_cost_rate,
-                strategy=strategy,
-            )
+        port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df = _run_portfolio_block(
+            eval_factor=eval_factor,
+            prices=prices,
+            eval_date_index=eval_date_index,
+            holding_period=holding_period,
+            rebalance_frequency=rebalance_frequency,
+            weighting_method=weighting_method,
+            portfolio_cost_rate=portfolio_cost_rate,
+            strategy=strategy,
         )
-        port_summary = _summarise_portfolio(
-            port_return_df, port_turnover_df, port_cost_adj_df
-        )
+        port_summary = _summarise_portfolio(port_return_df, port_turnover_df, port_cost_adj_df)
         eval_max_date = (
             pd.Timestamp(eval_date_index.max()) if len(eval_date_index) > 0 else max_price_date
         )
         if port_weights_df is not None and not port_weights_df.empty:
             _record_integrity(
-                pit_check(port_weights_df, max_allowed_date=eval_max_date, object_name="portfolio_weights_df")
+                pit_check(
+                    port_weights_df,
+                    max_allowed_date=eval_max_date,
+                    object_name="portfolio_weights_df",
+                )
             )
         if port_return_df is not None and not port_return_df.empty:
             _record_integrity(
-                pit_check(port_return_df, max_allowed_date=eval_max_date, object_name="portfolio_return_df")
+                pit_check(
+                    port_return_df,
+                    max_allowed_date=eval_max_date,
+                    object_name="portfolio_return_df",
+                )
             )
         if port_turnover_df is not None and not port_turnover_df.empty:
             _record_integrity(
-                pit_check(port_turnover_df, max_allowed_date=eval_max_date, object_name="portfolio_turnover_df")
+                pit_check(
+                    port_turnover_df,
+                    max_allowed_date=eval_max_date,
+                    object_name="portfolio_turnover_df",
+                )
             )
 
     # --- Step 8: build provenance -------------------------------------------
@@ -726,6 +852,7 @@ def run_factor_experiment(
         label_df=label_df,
         ic_df=ic_df,
         rank_ic_df=rank_ic_df,
+        mutual_information_df=mi_df,
         quantile_returns_df=qr_df,
         long_short_df=ls_df,
         rolling_stability_df=rolling_stability_df,
@@ -745,6 +872,8 @@ def run_factor_experiment(
         portfolio_turnover_df=port_turnover_df,
         portfolio_cost_adjusted_return_df=port_cost_adj_df,
         portfolio_summary=port_summary,
+        regime_df=regime_df if not regime_df.empty else None,
+        regime_summary=regime_summary,
         integrity_checks=tuple(integrity_checks),
         integrity_report=integrity_report,
     )
@@ -768,6 +897,20 @@ def _get_git_commit() -> str | None:
     the subprocess call fails for any reason.  Failures are intentionally
     silent — a missing commit hash is not a hard error.
     """
+    return _cached_git_commit()
+
+
+def _is_git_dirty() -> bool | None:
+    """Return True if the working tree has uncommitted changes, else False.
+
+    Uses ``git diff --quiet HEAD`` in the package directory.  Returns
+    ``None`` if git is unavailable or the call fails.
+    """
+    return _cached_git_dirty()
+
+
+@lru_cache(maxsize=1)
+def _cached_git_commit() -> str | None:
     try:
         from pathlib import Path
 
@@ -785,12 +928,8 @@ def _get_git_commit() -> str | None:
     return None
 
 
-def _is_git_dirty() -> bool | None:
-    """Return True if the working tree has uncommitted changes, else False.
-
-    Uses ``git diff --quiet HEAD`` in the package directory.  Returns
-    ``None`` if git is unavailable or the call fails.
-    """
+@lru_cache(maxsize=1)
+def _cached_git_dirty() -> bool | None:
     try:
         from pathlib import Path as _Path
 
@@ -808,13 +947,22 @@ def _is_git_dirty() -> bool | None:
     return None
 
 
+def _clear_git_provenance_cache() -> None:
+    """Test hook for resetting cached git provenance subprocess results."""
+    _cached_git_commit.cache_clear()
+    _cached_git_dirty.cache_clear()
+
+
 def _summarise(
     ic_df: pd.DataFrame,
     rank_ic_df: pd.DataFrame,
+    mi_df: pd.DataFrame,
     ls_df: pd.DataFrame,
     ls_turnover_df: pd.DataFrame,
     *,
     rolling_stability_df: pd.DataFrame,
+    tail_risk: TailRiskSummary,
+    regime_flags: tuple[str, ...],
     mean_eval_assets_per_date: float,
     min_eval_assets_per_date: float,
     eval_coverage_ratio_mean: float,
@@ -824,61 +972,65 @@ def _summarise(
     """Compute scalar summary metrics from per-date evaluation DataFrames."""
     ic_vals = ic_df["ic"].dropna() if not ic_df.empty else pd.Series(dtype=float)
     rank_ic_vals = (
-        rank_ic_df["rank_ic"].dropna()
-        if not rank_ic_df.empty
-        else pd.Series(dtype=float)
+        rank_ic_df["rank_ic"].dropna() if not rank_ic_df.empty else pd.Series(dtype=float)
     )
-    ls_vals = (
-        ls_df["long_short_return"].dropna()
-        if not ls_df.empty
-        else pd.Series(dtype=float)
-    )
+    mi_vals = mi_df["mutual_information"].dropna() if not mi_df.empty else pd.Series(dtype=float)
+    ls_vals = ls_df["long_short_return"].dropna() if not ls_df.empty else pd.Series(dtype=float)
     ls_turn_vals = (
         ls_turnover_df["long_short_turnover"].dropna()
         if not ls_turnover_df.empty
         else pd.Series(dtype=float)
     )
 
-    mean_ic = float(ic_vals.mean()) if len(ic_vals) > 0 else float("nan")
-    mean_rank_ic = float(rank_ic_vals.mean()) if len(rank_ic_vals) > 0 else float("nan")
+    ic_summary = compute_ic_summary(ic_vals)
+    mean_ic = ic_summary["mean_ic"]
+    ic_ir = ic_summary["ic_ir"]
+    ic_t_stat = ic_summary["t_stat"]
+    ic_p_value = ic_summary["p_value"]
 
-    # ic_ir = mean_ic / std_ic  (ddof=1; NaN when std unavailable or zero)
-    ic_std = float(ic_vals.std(ddof=1)) if len(ic_vals) > 1 else float("nan")
-    if np.isnan(ic_std) or ic_std == 0.0:
-        ic_ir: float = float("nan")
-    else:
-        ic_ir = mean_ic / ic_std
+    mean_rank_ic = float(rank_ic_vals.mean()) if len(rank_ic_vals) > 0 else float("nan")
+    mi_summary = compute_ic_summary(mi_vals)
+    mean_mi = mi_summary["mean_ic"]
+    mi_ir = mi_summary["ic_ir"]
 
     mean_ls = float(ls_vals.mean()) if len(ls_vals) > 0 else float("nan")
     hit_rate = float((ls_vals > 0).mean()) if len(ls_vals) > 0 else float("nan")
     # n_dates: dates with a finite IC value (matches the denominator of mean_ic and ic_ir).
-    n_dates = (
-        int(ic_df.loc[ic_df["ic"].notna(), "date"].nunique())
-        if not ic_df.empty
-        else 0
-    )
-    mean_ls_turnover = (
-        float(ls_turn_vals.mean()) if len(ls_turn_vals) > 0 else float("nan")
-    )
-    ic_positive_rate = (
-        float((ic_vals > 0).mean()) if len(ic_vals) > 0 else float("nan")
-    )
+    n_dates = int(ic_df.loc[ic_df["ic"].notna(), "date"].nunique()) if not ic_df.empty else 0
+    mean_ls_turnover = float(ls_turn_vals.mean()) if len(ls_turn_vals) > 0 else float("nan")
+    ic_positive_rate = float((ic_vals > 0).mean()) if len(ic_vals) > 0 else float("nan")
     rank_ic_positive_rate = (
         float((rank_ic_vals > 0).mean()) if len(rank_ic_vals) > 0 else float("nan")
     )
-    ic_valid_ratio = (
-        float(ic_df["ic"].notna().mean()) if not ic_df.empty else float("nan")
-    )
+    ic_valid_ratio = float(ic_df["ic"].notna().mean()) if not ic_df.empty else float("nan")
     rank_ic_valid_ratio = (
-        float(rank_ic_df["rank_ic"].notna().mean())
-        if not rank_ic_df.empty
-        else float("nan")
+        float(rank_ic_df["rank_ic"].notna().mean()) if not rank_ic_df.empty else float("nan")
+    )
+    mi_positive_rate = float((mi_vals > 0).mean()) if len(mi_vals) > 0 else float("nan")
+    mi_valid_ratio = (
+        float(mi_df["mutual_information"].notna().mean()) if not mi_df.empty else float("nan")
     )
     ls_std = float(ls_vals.std(ddof=1)) if len(ls_vals) > 1 else float("nan")
     if np.isnan(ls_std) or ls_std == 0.0:
         long_short_ir = float("nan")
     else:
         long_short_ir = mean_ls / ls_std
+    if len(ls_vals) > 1 and np.isfinite(long_short_ir):
+        skewness = float(ls_vals.skew()) if len(ls_vals) > 2 else 0.0
+        excess_kurtosis = float(ls_vals.kurt()) if len(ls_vals) > 3 else 0.0
+        if not np.isfinite(skewness):
+            skewness = 0.0
+        if not np.isfinite(excess_kurtosis):
+            excess_kurtosis = 0.0
+        dsr_pvalue = deflated_sharpe_ratio(
+            observed_sr=float(long_short_ir),
+            n_trials=1,
+            n_obs=len(ls_vals),
+            skewness=skewness,
+            excess_kurtosis=excess_kurtosis,
+        )
+    else:
+        dsr_pvalue = float("nan")
     if np.isnan(mean_ls_turnover) or mean_ls_turnover <= 0.0:
         long_short_return_per_turnover = float("nan")
     else:
@@ -935,7 +1087,13 @@ def _summarise(
     return ExperimentSummary(
         mean_ic=mean_ic,
         mean_rank_ic=mean_rank_ic,
+        mean_mutual_information=mean_mi,
+        mutual_information_ir=mi_ir,
+        mutual_information_positive_rate=mi_positive_rate,
+        mutual_information_valid_ratio=mi_valid_ratio,
         ic_ir=ic_ir,
+        ic_t_stat=ic_t_stat,
+        ic_p_value=ic_p_value,
         mean_long_short_return=mean_ls,
         long_short_hit_rate=hit_rate,
         n_dates=n_dates,
@@ -945,6 +1103,7 @@ def _summarise(
         ic_valid_ratio=ic_valid_ratio,
         rank_ic_valid_ratio=rank_ic_valid_ratio,
         long_short_ir=long_short_ir,
+        dsr_pvalue=dsr_pvalue,
         long_short_return_per_turnover=long_short_return_per_turnover,
         subperiod_ic_positive_share=subperiod_ic_positive_share,
         subperiod_long_short_positive_share=subperiod_long_short_positive_share,
@@ -962,6 +1121,13 @@ def _summarise(
         min_eval_assets_per_date=min_eval_assets_per_date,
         eval_coverage_ratio_mean=eval_coverage_ratio_mean,
         eval_coverage_ratio_min=eval_coverage_ratio_min,
+        ls_max_drawdown=tail_risk.max_drawdown,
+        ls_max_drawdown_duration=tail_risk.max_drawdown_duration,
+        ls_max_consecutive_loss_days=tail_risk.max_consecutive_loss_days,
+        ls_var_5=tail_risk.var_5,
+        ls_cvar_5=tail_risk.cvar_5,
+        ls_calmar_ratio=tail_risk.calmar_ratio,
+        regime_flags=regime_flags,
         instability_flags=instability_flags,
     )
 
@@ -969,6 +1135,7 @@ def _summarise(
 def _build_rolling_stability_frame(
     ic_df: pd.DataFrame,
     rank_ic_df: pd.DataFrame,
+    mi_df: pd.DataFrame,
     ls_df: pd.DataFrame,
     *,
     window: int,
@@ -988,6 +1155,13 @@ def _build_rolling_stability_frame(
         positive_rate_col="rolling_rank_ic_positive_rate",
         window=window,
     )
+    rolling_mi = _rolling_metric_frame(
+        mi_df,
+        source_col="mutual_information",
+        mean_col="rolling_mean_mutual_information",
+        positive_rate_col="rolling_mutual_information_positive_rate",
+        window=window,
+    )
     rolling_ls = _rolling_metric_frame(
         ls_df,
         source_col="long_short_return",
@@ -996,10 +1170,10 @@ def _build_rolling_stability_frame(
         window=window,
     )
 
-    out = rolling_ic.merge(rolling_rank_ic, on="date", how="outer").merge(
-        rolling_ls,
-        on="date",
-        how="outer",
+    out = (
+        rolling_ic.merge(rolling_rank_ic, on="date", how="outer")
+        .merge(rolling_mi, on="date", how="outer")
+        .merge(rolling_ls, on="date", how="outer")
     )
     if out.empty:
         return pd.DataFrame(
@@ -1009,6 +1183,8 @@ def _build_rolling_stability_frame(
                 "rolling_ic_positive_rate",
                 "rolling_mean_rank_ic",
                 "rolling_rank_ic_positive_rate",
+                "rolling_mean_mutual_information",
+                "rolling_mutual_information_positive_rate",
                 "rolling_mean_long_short_return",
                 "rolling_long_short_positive_rate",
             ]
@@ -1299,9 +1475,9 @@ def _run_portfolio_block(
     # incorrectly compound in the staggered-portfolio model when
     # holding_period > 1.
     one_period_labels = forward_return(prices, horizon=1)
-    eval_1p = one_period_labels[
-        one_period_labels["date"].isin(eval_date_index)
-    ].reset_index(drop=True)
+    eval_1p = one_period_labels[one_period_labels["date"].isin(eval_date_index)].reset_index(
+        drop=True
+    )
 
     port_return_df = simulate_portfolio_returns(
         port_weights_df,

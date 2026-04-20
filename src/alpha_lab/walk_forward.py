@@ -9,9 +9,8 @@ from typing import Literal
 
 import pandas as pd
 
-from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
-
 from alpha_lab.costs import cost_adjusted_long_short
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.research_integrity.asof import pit_check
@@ -19,6 +18,7 @@ from alpha_lab.research_integrity.contracts import IntegrityCheckResult, Integri
 from alpha_lab.research_integrity.reporting import build_integrity_report
 from alpha_lab.splits import walk_forward_split
 from alpha_lab.strategy import StrategySpec
+from alpha_lab.validation.deflated_sharpe import deflated_sharpe_ratio
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -84,6 +84,9 @@ class WalkForwardAggregate:
     mean_cost_adjusted_return: float
     """Mean of per-fold mean cost-adjusted L/S return.  NaN when cost_rate was
     not provided or all folds produced NaN."""
+
+    dsr_pvalue: float
+    """Deflated Sharpe p-value computed on pooled OOS return observations."""
 
     std_cost_adjusted_return: float
     """Std across folds of per-fold mean cost-adjusted L/S return."""
@@ -322,9 +325,7 @@ def _execute_single_fold(
     test_end_ts = task.test_end_ts
 
     # --- Integrity checks ---------------------------------------------------
-    fold_prices = prices[
-        pd.to_datetime(prices["date"]) <= test_end_ts
-    ].reset_index(drop=True)
+    fold_prices = prices[pd.to_datetime(prices["date"]) <= test_end_ts].reset_index(drop=True)
 
     integrity_checks: list[IntegrityCheckResult] = []
     integrity_checks.append(
@@ -337,8 +338,12 @@ def _execute_single_fold(
         fold_factor_slice = precomputed_factor_df[
             precomputed_factor_df["date"] <= test_end_ts
         ].reset_index(drop=True)
-        # Wrap in a lambda so run_factor_experiment receives a callable.
-        fold_factor_fn: Callable[[pd.DataFrame], pd.DataFrame] = lambda _p, _f=fold_factor_slice: _f
+
+        # Wrap in a tiny function so run_factor_experiment receives a callable.
+        def _fold_factor_fn(_prices: pd.DataFrame) -> pd.DataFrame:
+            return fold_factor_slice
+
+        fold_factor_fn: Callable[[pd.DataFrame], pd.DataFrame] = _fold_factor_fn
     else:
         fold_factor_fn = factor_fn
 
@@ -360,7 +365,11 @@ def _execute_single_fold(
     # --- Integrity check on factor output -----------------------------------
     if not result.factor_df.empty:
         integrity_checks.append(
-            pit_check(result.factor_df, max_allowed_date=test_end_ts, object_name=f"fold_{fold_id}_factor_output")
+            pit_check(
+                result.factor_df,
+                max_allowed_date=test_end_ts,
+                object_name=f"fold_{fold_id}_factor_output",
+            )
         )
 
     integrity_report = build_integrity_report(
@@ -430,9 +439,7 @@ def _execute_single_fold(
         "mean_portfolio_return": ps.mean_portfolio_return if ps else math.nan,
         "portfolio_hit_rate": ps.portfolio_hit_rate if ps else math.nan,
         "mean_portfolio_turnover": ps.mean_portfolio_turnover if ps else math.nan,
-        "mean_cost_adjusted_portfolio_return": (
-            ps.mean_cost_adjusted_return if ps else math.nan
-        ),
+        "mean_cost_adjusted_portfolio_return": (ps.mean_cost_adjusted_return if ps else math.nan),
     }
 
     return _FoldOutput(
@@ -737,9 +744,7 @@ def run_walk_forward_experiment(
     pooled_cost_adjusted_portfolio_return_df = (
         pd.concat(pooled_cost_adj_parts, ignore_index=True)
         if pooled_cost_adj_parts
-        else pd.DataFrame(
-            columns=["fold_id", "date", "portfolio_return", "adjusted_return"]
-        )
+        else pd.DataFrame(columns=["fold_id", "date", "portfolio_return", "adjusted_return"])
     )
     pooled_portfolio_turnover_df = (
         pd.concat(pooled_port_to_parts, ignore_index=True)
@@ -805,12 +810,8 @@ def _compute_aggregate(
 
     ic_vals = fold_df["mean_ic"].dropna()
     if len(ic_vals) > 0:
-        best_fold = int(
-            fold_df.loc[fold_df["mean_ic"] == ic_vals.max(), "fold_id"].iloc[0]
-        )
-        worst_fold = int(
-            fold_df.loc[fold_df["mean_ic"] == ic_vals.min(), "fold_id"].iloc[0]
-        )
+        best_fold = int(fold_df.loc[fold_df["mean_ic"] == ic_vals.max(), "fold_id"].iloc[0])
+        worst_fold = int(fold_df.loc[fold_df["mean_ic"] == ic_vals.min(), "fold_id"].iloc[0])
     else:
         # All NaN — fall back to first and last fold ids.
         best_fold = int(fold_df["fold_id"].iloc[0])
@@ -852,12 +853,8 @@ def _compute_aggregate(
         else pd.Series(dtype=float)
     )
     n_cost_adjusted_obs = len(cost_adj_vals)
-    pooled_cost_adj_mean = (
-        float(cost_adj_vals.mean()) if n_cost_adjusted_obs > 0 else math.nan
-    )
-    pooled_cost_adj_std = (
-        float(cost_adj_vals.std(ddof=1)) if n_cost_adjusted_obs > 1 else math.nan
-    )
+    pooled_cost_adj_mean = float(cost_adj_vals.mean()) if n_cost_adjusted_obs > 0 else math.nan
+    pooled_cost_adj_std = float(cost_adj_vals.std(ddof=1)) if n_cost_adjusted_obs > 1 else math.nan
 
     # Pooled portfolio-turnover statistics (active rebalance dates only).
     to_vals = (
@@ -867,6 +864,31 @@ def _compute_aggregate(
         else pd.Series(dtype=float)
     )
     pooled_to_mean = float(to_vals.mean()) if len(to_vals) > 0 else math.nan
+
+    # DSR: prefer pooled portfolio returns when available; otherwise fall back
+    # to per-fold long-short mean returns.
+    dsr_source = port_vals if len(port_vals) > 1 else fold_df["mean_long_short"].dropna()
+    if len(dsr_source) > 1:
+        sr_std = float(dsr_source.std(ddof=1))
+        if math.isfinite(sr_std) and sr_std > 0.0:
+            observed_sr = float(dsr_source.mean()) / sr_std
+            skewness = float(dsr_source.skew()) if len(dsr_source) > 2 else 0.0
+            excess_kurtosis = float(dsr_source.kurt()) if len(dsr_source) > 3 else 0.0
+            if not math.isfinite(skewness):
+                skewness = 0.0
+            if not math.isfinite(excess_kurtosis):
+                excess_kurtosis = 0.0
+            dsr_pvalue = deflated_sharpe_ratio(
+                observed_sr=observed_sr,
+                n_trials=max(1, int(len(fold_df))),
+                n_obs=int(len(dsr_source)),
+                skewness=skewness,
+                excess_kurtosis=excess_kurtosis,
+            )
+        else:
+            dsr_pvalue = math.nan
+    else:
+        dsr_pvalue = math.nan
 
     return WalkForwardAggregate(
         n_folds=len(fold_df),
@@ -879,6 +901,7 @@ def _compute_aggregate(
         mean_turnover=_mean("mean_turnover"),
         std_turnover=_std("mean_turnover"),
         mean_cost_adjusted_return=_mean("mean_cost_adjusted_return"),
+        dsr_pvalue=dsr_pvalue,
         std_cost_adjusted_return=_std("mean_cost_adjusted_return"),
         best_fold=best_fold,
         worst_fold=worst_fold,

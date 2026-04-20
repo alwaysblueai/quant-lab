@@ -42,7 +42,9 @@ def test_amplitude_is_negative_mean_intraday_range() -> None:
     assert tuple(result.columns) == FACTOR_OUTPUT_COLUMNS
     assert set(result["factor"]) == {"amplitude_3d"}
 
-    amp = pd.Series([(highs[i] - lows[i]) / closes[i - 1] if i > 0 else math.nan for i in range(len(closes))])
+    amp = pd.Series(
+        [(highs[i] - lows[i]) / closes[i - 1] if i > 0 else math.nan for i in range(len(closes))]
+    )
     expected = -amp.iloc[1:4].mean()
     assert result["value"].iloc[:3].isna().all()
     assert math.isclose(float(result["value"].iloc[3]), float(expected), rel_tol=1e-12)

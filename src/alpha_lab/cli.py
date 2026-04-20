@@ -9,11 +9,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha_lab.exceptions import AlphaLabConfigError
-
 import alpha_lab.registry as _registry
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.data_validation import validate_price_panel
+from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.experiment import run_factor_experiment
 from alpha_lab.factors.low_volatility import low_volatility
 from alpha_lab.factors.momentum import momentum
@@ -26,6 +25,7 @@ from alpha_lab.reporting import (
 )
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
+    CAMPAIGN_PROFILE_COMPARE_DEFAULTS,
     get_research_evaluation_config,
     get_research_evaluation_profile_intent,
 )
@@ -40,7 +40,7 @@ REQUIRED_PRICE_COLUMNS: frozenset[str] = frozenset({"date", "asset", "close"})
 # Supported factor names (used for argparse choices and dispatch).
 SUPPORTED_FACTORS: frozenset[str] = frozenset({"momentum", "reversal", "low_volatility"})
 _UNIFIED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset(
-    {"run", "real-case", "campaign", "bridge", "experimental", "profiles", "web", "data"}
+    {"run", "real-case", "campaign", "bridge", "vault", "profiles", "web", "data", "fast-screen"}
 )
 _SUPPORTED_CAMPAIGNS: frozenset[str] = frozenset({"research_campaign_1"})
 
@@ -429,10 +429,8 @@ def build_unified_parser() -> argparse.ArgumentParser:
             "Unified routing CLI for Level 1/2 research workflows "
             "(Level 1 evaluation -> campaign triage -> Level 2 promotion gate -> "
             "Level 2 portfolio validation). Research-bridge project packaging "
-            "is available under 'bridge'. "
-            "Execution replay/implementability commands are available only under "
-            "'experimental'. Use 'alpha-lab profiles' to list available evaluation "
-            "profiles."
+            "is available under 'bridge'. Use 'alpha-lab profiles' to list "
+            "available evaluation profiles."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -447,6 +445,17 @@ def build_unified_parser() -> argparse.ArgumentParser:
         "args",
         nargs=argparse.REMAINDER,
         help="Arguments forwarded to the legacy run CLI (use 'alpha-lab run --help').",
+    )
+
+    fast_screen = top.add_parser(
+        "fast-screen",
+        help="Tier-1 fast screen and Tier-2 deep dive for single factors.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    fast_screen.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to 'alpha-lab fast-screen' (run|deep-dive|list-modules).",
     )
 
     real_case = top.add_parser(
@@ -540,7 +549,7 @@ def build_unified_parser() -> argparse.ArgumentParser:
     campaign_compare.add_argument(
         "--profiles",
         nargs="+",
-        default=["exploratory_screening", "default_research", "stricter_research"],
+        default=list(CAMPAIGN_PROFILE_COMPARE_DEFAULTS),
         choices=sorted(AVAILABLE_RESEARCH_EVALUATION_PROFILES),
         help="Evaluation profiles to compare for the same campaign/cases.",
     )
@@ -695,7 +704,8 @@ def build_unified_parser() -> argparse.ArgumentParser:
     web_cockpit = web_commands.add_parser(
         "cockpit",
         help=(
-            "Run the local research cockpit UI for project-round-case-run-writeback workflows."
+            "[DEPRECATED] Alias retained for compatibility; routes to "
+            "`alpha-lab web unified`."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -725,6 +735,39 @@ def build_unified_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not auto-open browser; print URL only.",
     )
+    web_unified = web_commands.add_parser(
+        "unified",
+        help=(
+            "Run the unified research frontend (Knowledge Ops + Bridge + Validation + Writeback)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    web_unified.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host for the local web server.",
+    )
+    web_unified.add_argument(
+        "--port",
+        type=int,
+        default=8766,
+        help="Bind port for the local web server.",
+    )
+    web_unified.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root directory.",
+    )
+    web_unified.add_argument(
+        "--vault-root",
+        default=None,
+        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
+    )
+    web_unified.add_argument(
+        "--no-open-browser",
+        action="store_true",
+        help="Do not auto-open browser; print URL only.",
+    )
 
     bridge = top.add_parser(
         "bridge",
@@ -735,6 +778,18 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     build_bridge_parser(bridge)
 
+    vault = top.add_parser(
+        "vault",
+        help=(
+            "Manage quant-knowledge vault computed layer "
+            "(graph, embeddings, exploration, edge suggestions)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    from alpha_lab.vault_cli import build_vault_parser  # noqa: PLC0415
+
+    build_vault_parser(vault)
+
     data = top.add_parser(
         "data",
         help="Manage external Level 1/2 research datasets and export case inputs.",
@@ -743,44 +798,6 @@ def build_unified_parser() -> argparse.ArgumentParser:
     from alpha_lab.data_store.cli import build_data_parser
 
     build_data_parser(data)
-
-    experimental = top.add_parser(
-        "experimental",
-        help="Run future Level 3 replay/implementability workflows.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    experimental_commands = experimental.add_subparsers(
-        dest="experimental_command",
-        required=True,
-    )
-    experimental_single_factor = experimental_commands.add_parser(
-        "single-factor-package",
-        help="Run the experimental Level 3 single-factor replay package flow.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    experimental_single_factor.add_argument("action", choices=["run"])
-    experimental_single_factor.add_argument("args", nargs=argparse.REMAINDER)
-    experimental_execution_realism = experimental_commands.add_parser(
-        "execution-realism-package",
-        help="Run the experimental Level 3 execution-realism regression package flow.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    experimental_execution_realism.add_argument("action", choices=["run"])
-    experimental_execution_realism.add_argument("args", nargs=argparse.REMAINDER)
-    experimental_factor_health = experimental_commands.add_parser(
-        "factor-health-monitor",
-        help="Run the experimental factor lifecycle health monitor flow.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    experimental_factor_health.add_argument("action", choices=["run"])
-    experimental_factor_health.add_argument("args", nargs=argparse.REMAINDER)
-    experimental_vault_export_gate = experimental_commands.add_parser(
-        "vault-export-gate",
-        help="Detect or apply pending vault exports from alpha-lab output manifests.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    experimental_vault_export_gate.add_argument("action", choices=["detect", "apply"])
-    experimental_vault_export_gate.add_argument("args", nargs=argparse.REMAINDER)
 
     return parser
 
@@ -792,6 +809,11 @@ def unified_main(argv: list[str] | None = None) -> int:
 
     if args.top_command == "run":
         return _legacy_main(args.args)
+
+    if args.top_command == "fast-screen":
+        from alpha_lab.fast_screen.cli import main as fast_screen_main
+
+        return fast_screen_main(args.args)
 
     if args.top_command == "real-case":
         forwarded = [args.action, *args.args]
@@ -904,10 +926,29 @@ def unified_main(argv: list[str] | None = None) -> int:
                 parser.error(str(exc))
             return 0
         if args.web_action == "cockpit":
-            from alpha_lab.web_cockpit import start_web_cockpit_server
+            print(
+                "[DEPRECATED] `alpha-lab web cockpit` is deprecated and now aliases "
+                "`alpha-lab web unified`. Use `alpha-lab web unified` directly.",
+                file=sys.stderr,
+            )
+            from alpha_lab.web_unified import start_unified_server
 
             try:
-                start_web_cockpit_server(
+                start_unified_server(
+                    host=args.host,
+                    port=args.port,
+                    workspace_root=args.workspace_root,
+                    vault_root=args.vault_root,
+                    open_browser=not bool(args.no_open_browser),
+                )
+            except OSError as exc:
+                parser.error(str(exc))
+            return 0
+        if args.web_action == "unified":
+            from alpha_lab.web_unified import start_unified_server
+
+            try:
+                start_unified_server(
                     host=args.host,
                     port=args.port,
                     workspace_root=args.workspace_root,
@@ -926,35 +967,15 @@ def unified_main(argv: list[str] | None = None) -> int:
 
         return bridge_main(resolved_argv_for_bridge(args))
 
+    if args.top_command == "vault":
+        from alpha_lab.vault_cli import run_vault_command  # noqa: PLC0415
+
+        return run_vault_command(args)
+
     if args.top_command == "data":
         from alpha_lab.data_store.cli import main as data_main
 
         return data_main(resolved_argv_for_data(args))
-
-    if args.top_command == "experimental":
-        if args.experimental_command == "single-factor-package":
-            from alpha_lab.experimental_level3.single_factor_package import (
-                main as single_factor_package_main,
-            )
-
-            return single_factor_package_main(args.args)
-        if args.experimental_command == "execution-realism-package":
-            from alpha_lab.experimental_level3.execution_realism_package import (
-                main as execution_realism_package_main,
-            )
-
-            return execution_realism_package_main(args.args)
-        if args.experimental_command == "factor-health-monitor":
-            from alpha_lab.experimental_level3.factor_health_monitor import (
-                main as factor_health_monitor_main,
-            )
-
-            return factor_health_monitor_main(args.args)
-        if args.experimental_command == "vault-export-gate":
-            from alpha_lab.vault_export_gate import main as vault_export_gate_main
-
-            return vault_export_gate_main([args.action, *args.args])
-        parser.error(f"unsupported experimental command: {args.experimental_command!r}")
 
     parser.error(f"unsupported top-level command: {args.top_command!r}")
 

@@ -26,9 +26,7 @@ def raise_on_hard_failures(
     """Raise an exception when any check reports fail/error."""
 
     hard_failures = tuple(
-        check
-        for check in checks
-        if check.status == "fail" and check.severity == "error"
+        check for check in checks if check.status == "fail" and check.severity == "error"
     )
     if hard_failures:
         raise IntegrityHardFailure(hard_failures)

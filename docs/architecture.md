@@ -2,40 +2,46 @@
 
 ## Overview
 
-Alpha Lab is a minimal quantitative research workspace.  It is organised into
-three layers with explicit contracts between them.  No layer models execution,
-order routing, position accounting, or broker integration.
+Alpha Lab is a Level 1/2 quantitative research system:
+
+- Level 1: factor discovery
+- Level 2: portfolio construction validation
+
+It is a Level 1/2 research system and does not provide execution replay.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Factor Research Layer                                           │
-│   alpha_lab.factors.*     factor computation (e.g. momentum)   │
-│   alpha_lab.labels        forward-return label generation       │
-│   alpha_lab.evaluation    IC / Rank-IC computation             │
+│ Layer A — Research Integrity                                   │
+│   alpha_lab.research_integrity.asof         PIT/as-of checks    │
+│   alpha_lab.research_integrity.leakage_checks anti-leakage      │
+│   alpha_lab.research_integrity.reporting     integrity artifacts │
+├─────────────────────────────────────────────────────────────────┤
+│ Layer B — Factor Research                                      │
+│   alpha_lab.factors.*     factor computation (e.g. momentum)    │
+│   alpha_lab.model_factor  features -> model score -> factor     │
+│   alpha_lab.labels        forward-return label generation        │
+│   alpha_lab.evaluation    IC / Rank-IC computation              │
 │   alpha_lab.quantile      quantile bucket returns, long-short   │
 │   alpha_lab.turnover      quantile / long-short turnover        │
-│   alpha_lab.preprocess    winsorize, z-score                   │
+│   alpha_lab.preprocess    winsorize, z-score                    │
 ├─────────────────────────────────────────────────────────────────┤
-│ Strategy Construction Intent Layer                              │
+│ Layer C — Portfolio Research                                   │
 │   alpha_lab.strategy.StrategySpec   portfolio construction spec │
-│                                     (explicit boundary object)  │
+│   alpha_lab.portfolio_research      research-level approximation│
+│                                     portfolio weights/returns   │
 ├─────────────────────────────────────────────────────────────────┤
-│ Portfolio Research Layer                                        │
-│   alpha_lab.portfolio_research      portfolio_weights,          │
-│                                     simulate_portfolio_returns, │
-│                                     portfolio_turnover,         │
-│                                     portfolio_cost_adjusted_    │
-│                                     returns                     │
+│ Layer D — Reporting / Registry / Knowledge Export              │
+│   alpha_lab.reporting    summaries + experiment-card export     │
+│   alpha_lab.reporting.research_validation_package               │
+│   alpha_lab.registry     append-only experiment registry        │
+│   alpha_lab.comparison   experiment comparison/ranking          │
 ├─────────────────────────────────────────────────────────────────┤
-│ Orchestration                                                   │
+│ Orchestration (Level 1/2)                                      │
 │   alpha_lab.experiment      run_factor_experiment (one split)  │
 │   alpha_lab.walk_forward    run_walk_forward_experiment (OOS)  │
 ├─────────────────────────────────────────────────────────────────┤
 │ Support                                                         │
 │   alpha_lab.splits       time_split, walk_forward_split        │
-│   alpha_lab.reporting    summarise, export CSV, Obsidian note  │
-│   alpha_lab.registry     append-only CSV experiment log        │
-│   alpha_lab.comparison   compare_experiments, rank_experiments │
 │   alpha_lab.costs        cost_adjusted_long_short              │
 │   alpha_lab.config       project-root-relative path constants  │
 │   alpha_lab.interfaces   validate_factor_output schema guard   │
@@ -44,7 +50,7 @@ order routing, position accounting, or broker integration.
 
 ## Layer Contracts
 
-### Factor Research Layer → Strategy Layer
+### Layer B (Factor Research) → Layer C (Portfolio Research)
 
 **Input**: long-form `[date, asset, factor, value]` DataFrame (one row per
 `(date, asset, factor)`).  Factor values at date `t` may only use information
@@ -57,7 +63,7 @@ available at or before `t`.
 standalone parameter).  It governs IC and quantile bucket evaluation — not
 portfolio weight construction.
 
-### Strategy Layer → Portfolio Research Layer
+### Strategy Boundary Inside Layer C
 
 **`StrategySpec`** is the explicit boundary object.  It answers only
 portfolio-construction questions:
@@ -73,19 +79,31 @@ portfolio-construction questions:
 `n_quantiles` and `portfolio_cost_rate` are **not** part of `StrategySpec`.
 They belong to the orchestration caller.
 
-### Portfolio Research Layer → Orchestration
+### Layer C → Orchestration
 
 Portfolio Research functions return typed DataFrames with stable column
 contracts (`_WEIGHT_COLUMNS`, `_RETURN_COLUMNS`, etc.).  Orchestration
 attaches these to `ExperimentResult` optional fields.
 
+## Core vs Experimental Boundary
+
+| Module group | Classification | Role |
+|---|---|---|
+| `alpha_lab.research_integrity.asof`, `leakage_checks`, `reporting` | Core (Level 1/2) | Research temporal correctness and leakage control |
+| `alpha_lab.factors`, `model_factor`, `labels`, `evaluation`, `quantile`, `turnover`, `neutralization` | Core (Level 1/2) | Factor discovery and robustness diagnostics |
+| `alpha_lab.strategy`, `portfolio_research`, `experiment`, `walk_forward` | Core (Level 2) | Portfolio construction validation with research approximations |
+| `alpha_lab.reporting`, `reporting.research_validation_package`, `registry`, `comparison`, `vault_export` | Core (Level 1/2) | Reproducible reporting and knowledge export |
+
 ## Data Flow (single experiment)
 
 ```
-prices (long-form)
+prices (long-form) / features (wide)
     │
-    ▼
-factor_fn(prices)  →  factor_df  [date, asset, factor, value]
+    ├──── Hand-crafted factor path ───────────────► factor_fn(prices)
+    │
+    └──── Model-factor path ──────────────────────► build_model_factor(features, prices)
+                                                     (rolling / expanding training)
+                                                     → factor_df [date, asset, factor, value]
     │
     ├──► forward_return(prices, horizon)  →  label_df
     │
@@ -180,6 +198,15 @@ output contract after every `factor_fn` call:
 
 ## Entrypoint
 
-The CLI entry point is `scripts/run_experiment.py`, which delegates to
-`alpha_lab.cli`.  There is no `main.py`.  Notebook and script workflows import
-from `alpha_lab` directly.
+The installed CLI entry point is `alpha-lab` (`alpha_lab.cli:main`), with
+explicit Level 1/2 routing:
+
+- `alpha-lab run ...` (legacy single-experiment route)
+- `alpha-lab real-case ...`
+- `alpha-lab real-case model-factor ...`
+- `alpha-lab campaign ...`
+- `alpha-lab profiles` (evaluation-profile discovery)
+
+`scripts/run_experiment.py` remains as a thin wrapper for legacy single-run
+usage. There is no `main.py`. Notebook and script workflows import from
+`alpha_lab` directly.

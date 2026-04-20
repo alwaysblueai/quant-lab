@@ -285,6 +285,40 @@ def test_merges_only_on_date_and_asset():
     assert pd.Timestamp("2024-01-03") in qr["date"].values
 
 
+def test_quantile_returns_merged_pairs_matches_default():
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
+        assets=["A", "B", "A", "B"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
+        assets=["A", "B", "A", "B"],
+        factor_name="fwd",
+        values=[0.1, 0.2, 0.3, 0.4],
+    )
+    merged_pairs = (
+        factors[["date", "asset", "value"]]
+        .rename(columns={"value": "value_factor"})
+        .merge(
+            labels[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
+            on=["date", "asset"],
+            how="inner",
+            validate="one_to_one",
+        )
+    )
+
+    default = quantile_returns(factors, labels, n_quantiles=2)
+    merged = quantile_returns(
+        factors,
+        labels,
+        n_quantiles=2,
+        merged_pairs=merged_pairs,
+    )
+    pd.testing.assert_frame_equal(default, merged)
+
+
 # ---------------------------------------------------------------------------
 # Regression: tie handling in quantile assignment (critical fix)
 # ---------------------------------------------------------------------------
@@ -371,8 +405,7 @@ def test_intermediate_gap_bucket_pattern():
     qr = quantile_returns(factors, labels, n_quantiles=5)
     occupied = set(qr["quantile"].tolist())
     assert occupied == {1, 3, 5}, (
-        f"expected buckets {{1, 3, 5}} for 3 distinct values with n_quantiles=5, "
-        f"got {occupied}"
+        f"expected buckets {{1, 3, 5}} for 3 distinct values with n_quantiles=5, got {occupied}"
     )
 
 
@@ -399,9 +432,7 @@ def test_midpoint_rounding_uses_half_up():
     )
     qr = quantile_returns(factors, labels, n_quantiles=4)
     occupied = set(qr["quantile"].tolist())
-    assert occupied == {1, 3, 4}, (
-        f"expected buckets {{1, 3, 4}} (half-up rounding), got {occupied}"
-    )
+    assert occupied == {1, 3, 4}, f"expected buckets {{1, 3, 4}} (half-up rounding), got {occupied}"
 
 
 def test_constant_factor_long_short_is_nan():
@@ -469,9 +500,9 @@ def test_quantile_stable_under_row_reordering():
     assert list(qr_orig_s["quantile"]) == list(qr_shuf_s["quantile"]), (
         "quantile bucket labels changed after row reordering"
     )
-    assert qr_orig_s["mean_return"].tolist() == pytest.approx(
-        qr_shuf_s["mean_return"].tolist()
-    ), "mean_return changed after row reordering"
+    assert qr_orig_s["mean_return"].tolist() == pytest.approx(qr_shuf_s["mean_return"].tolist()), (
+        "mean_return changed after row reordering"
+    )
 
 
 # ---------------------------------------------------------------------------

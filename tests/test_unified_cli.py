@@ -100,6 +100,8 @@ def test_unified_cli_routes_data_command(monkeypatch: pytest.MonkeyPatch) -> Non
         "/tmp/out",
         "--adjustment",
         "qfq",
+        "--format",
+        "both",
     ]
 
 
@@ -164,9 +166,34 @@ def test_unified_cli_routes_bridge_command(monkeypatch: pytest.MonkeyPatch) -> N
         "momentum-factor",
         "--topic",
         "三个月成交额加权动量",
+        "--mode",
+        "standard",
         "--vault-root",
         "/tmp/vault",
     ]
+
+
+def test_unified_cli_routes_vault_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run_vault_command(args: Any) -> int:
+        captured["action"] = args.vault_action
+        captured["vault_root"] = args.vault_root
+        return 47
+
+    monkeypatch.setattr("alpha_lab.vault_cli.run_vault_command", _fake_run_vault_command)
+
+    rc = main(
+        [
+            "vault",
+            "rebuild-graph",
+            "--vault-root",
+            "/tmp/vault",
+        ]
+    )
+    assert rc == 47
+    assert captured["action"] == "rebuild-graph"
+    assert captured["vault_root"] == "/tmp/vault"
 
 
 def test_unified_cli_passes_through_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -519,8 +546,7 @@ def test_unified_cli_render_dashboard_surfaces_artifact_load_failure(
                     artifact_type="canonical_artifact",
                     object_scope="factor_definition",
                     message=(
-                        "case_alpha (default_research) factor_definition: "
-                        "missing artifact path"
+                        "case_alpha (default_research) factor_definition: missing artifact path"
                     ),
                     mode="strict",
                 ),
@@ -545,148 +571,6 @@ def test_unified_cli_render_dashboard_surfaces_artifact_load_failure(
         )
     captured = capsys.readouterr()
     assert "strict artifact load checks failed" in captured.err
-
-
-@pytest.mark.skip(
-    reason="alpha_lab.experimental_level3 is not yet committed; remains out of Round 4 scope"
-)
-def test_unified_cli_routes_experimental_single_factor_package(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_main(argv: list[str] | None = None) -> int:
-        captured["argv"] = argv
-        return 44
-
-    monkeypatch.setattr("alpha_lab.experimental_level3.single_factor_package.main", _fake_main)
-
-    rc = main(
-        [
-            "experimental",
-            "single-factor-package",
-            "run",
-            "--include-experimental-level3",
-        ]
-    )
-    assert rc == 44
-    assert captured["argv"] == ["--include-experimental-level3"]
-
-
-@pytest.mark.skip(
-    reason="alpha_lab.experimental_level3 is not yet committed; remains out of Round 4 scope"
-)
-def test_unified_cli_routes_experimental_execution_realism_package(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_main(argv: list[str] | None = None) -> int:
-        captured["argv"] = argv
-        return 55
-
-    monkeypatch.setattr(
-        "alpha_lab.experimental_level3.execution_realism_package.main",
-        _fake_main,
-    )
-
-    rc = main(
-        [
-            "experimental",
-            "execution-realism-package",
-            "run",
-            "--case-id",
-            "ashare_execution_realism",
-        ]
-    )
-    assert rc == 55
-    assert captured["argv"] == ["--case-id", "ashare_execution_realism"]
-
-
-@pytest.mark.skip(
-    reason="alpha_lab.experimental_level3 is not yet committed; remains out of Round 4 scope"
-)
-def test_unified_cli_routes_experimental_factor_health_monitor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_main(argv: list[str] | None = None) -> int:
-        captured["argv"] = argv
-        return 66
-
-    monkeypatch.setattr(
-        "alpha_lab.experimental_level3.factor_health_monitor.main",
-        _fake_main,
-    )
-
-    rc = main(
-        [
-            "experimental",
-            "factor-health-monitor",
-            "run",
-            "--case-id",
-            "factor_health_monitor_v1",
-        ]
-    )
-    assert rc == 66
-    assert captured["argv"] == ["--case-id", "factor_health_monitor_v1"]
-
-
-def test_unified_cli_routes_experimental_vault_export_gate_detect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_main(argv: list[str] | None = None) -> int:
-        captured["argv"] = argv
-        return 77
-
-    monkeypatch.setattr("alpha_lab.vault_export_gate.main", _fake_main)
-
-    rc = main(
-        [
-            "experimental",
-            "vault-export-gate",
-            "detect",
-            "--transcript-path",
-            "/tmp/session.jsonl",
-        ]
-    )
-    assert rc == 77
-    assert captured["argv"] == ["detect", "--transcript-path", "/tmp/session.jsonl"]
-
-
-def test_unified_cli_routes_experimental_vault_export_gate_apply(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_main(argv: list[str] | None = None) -> int:
-        captured["argv"] = argv
-        return 88
-
-    monkeypatch.setattr("alpha_lab.vault_export_gate.main", _fake_main)
-
-    rc = main(
-        [
-            "experimental",
-            "vault-export-gate",
-            "apply",
-            "--manifest-path",
-            "/tmp/run_manifest.json",
-            "--vault-root",
-            "/tmp/vault",
-        ]
-    )
-    assert rc == 88
-    assert captured["argv"] == [
-        "apply",
-        "--manifest-path",
-        "/tmp/run_manifest.json",
-        "--vault-root",
-        "/tmp/vault",
-    ]
 
 
 def test_unified_cli_invalid_command_is_helpful(capsys: pytest.CaptureFixture[str]) -> None:
@@ -749,10 +633,13 @@ def test_unified_cli_routes_web_ui(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_unified_cli_routes_web_cockpit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unified_cli_routes_web_cockpit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_start_web_cockpit_server(
+    def _fake_start_unified_server(
         *,
         host: str = "127.0.0.1",
         port: int = 8766,
@@ -767,8 +654,8 @@ def test_unified_cli_routes_web_cockpit(monkeypatch: pytest.MonkeyPatch) -> None
         captured["open_browser"] = open_browser
 
     monkeypatch.setattr(
-        "alpha_lab.web_cockpit.start_web_cockpit_server",
-        _fake_start_web_cockpit_server,
+        "alpha_lab.web_unified.start_unified_server",
+        _fake_start_unified_server,
     )
 
     rc = main(
@@ -787,6 +674,9 @@ def test_unified_cli_routes_web_cockpit(monkeypatch: pytest.MonkeyPatch) -> None
         ]
     )
     assert rc == 0
+    captured_stdio = capsys.readouterr()
+    assert "deprecated" in captured_stdio.err.lower()
+    assert "web unified" in captured_stdio.err.lower()
     assert captured == {
         "host": "0.0.0.0",
         "port": 8999,
@@ -823,7 +713,7 @@ def test_unified_cli_top_level_help_is_router(
     with pytest.raises(SystemExit):
         main(["--help"])
     captured = capsys.readouterr()
-    assert "{run,real-case,campaign,profiles,web,bridge,data,experimental}" in captured.out
+    assert "{run,fast-screen,real-case,campaign,profiles,web,bridge,vault,data}" in captured.out
 
 
 def test_unified_cli_campaign_help_lists_compare_profiles(

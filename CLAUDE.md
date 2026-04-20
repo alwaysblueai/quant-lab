@@ -5,7 +5,7 @@
 This repo is the **implementation layer**.  The **knowledge layer** lives at:
 
 ```
-/path/to/quant-knowledge
+/mnt/c/quant/vault/quant-knowledge
 ```
 
 Before implementing a factor or designing an experiment, consult:

@@ -70,7 +70,9 @@ def test_infer_session_start_utc_reads_first_timestamp(tmp_path: Path) -> None:
     assert parsed == dt.datetime(2026, 4, 1, 10, 0, 0, tzinfo=dt.UTC)
 
 
-def test_collect_pending_vault_export_candidates_filters_recent_active_roots(tmp_path: Path) -> None:
+def test_collect_pending_vault_export_candidates_filters_recent_active_roots(
+    tmp_path: Path,
+) -> None:
     recent = "2026-04-01T10:05:00+00:00"
     old = "2026-03-01T10:05:00+00:00"
     _write_manifest(
@@ -110,7 +112,9 @@ def test_collect_pending_vault_export_candidates_filters_recent_active_roots(tmp
     assert [candidate.case_name for candidate in candidates] == ["case_recent_pending"]
 
 
-def test_apply_pending_vault_export_candidates_updates_manifest_and_writes_vault(tmp_path: Path) -> None:
+def test_apply_pending_vault_export_candidates_updates_manifest_and_writes_vault(
+    tmp_path: Path,
+) -> None:
     manifest_path = _write_manifest(
         tmp_path,
         rel_root="outputs/real_cases",

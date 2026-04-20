@@ -112,10 +112,7 @@ def render_case_report(case_output_dir: str | Path) -> str:
     target_horizon = target.get("horizon", metrics.get("target_horizon"))
     data_setup_lines = [
         f"- Universe: `{format_text(universe.get('name'))}`",
-        (
-            "- Label/target: "
-            f"`{format_text(target_kind)}` (horizon={format_text(target_horizon)})"
-        ),
+        (f"- Label/target: `{format_text(target_kind)}` (horizon={format_text(target_horizon)})"),
         "- Rebalance frequency: "
         f"`{format_text(spec.get('rebalance_frequency', metrics.get('rebalance_frequency')))}`",
     ]
@@ -339,9 +336,7 @@ def render_case_report(case_output_dir: str | Path) -> str:
         )
     )
 
-    lines.extend(
-        section_lines(CASE_SECTION_TITLES[6], [PLACEHOLDER_INTERPRETATION])
-    )
+    lines.extend(section_lines(CASE_SECTION_TITLES[6], [PLACEHOLDER_INTERPRETATION]))
 
     lines.extend(
         section_lines(
@@ -365,9 +360,7 @@ def write_case_report(case_output_dir: str | Path, *, overwrite: bool = False) -
     case_dir.mkdir(parents=True, exist_ok=True)
     report_path = case_dir / "case_report.md"
     if report_path.exists() and not overwrite:
-        raise FileExistsError(
-            f"{report_path} already exists. Pass overwrite=True to replace it."
-        )
+        raise FileExistsError(f"{report_path} already exists. Pass overwrite=True to replace it.")
     report_path.write_text(render_case_report(case_dir), encoding="utf-8")
     return report_path
 
@@ -416,14 +409,10 @@ def _signal_definition_lines(
             f"- Direction: `{format_text(spec.get('direction', metrics.get('direction')))}`"
         )
         if model_spec:
-            lines.append(
-                f"- Model family: `{format_text(model_spec.get('family'))}`"
-            )
+            lines.append(f"- Model family: `{format_text(model_spec.get('family'))}`")
             feature_columns = as_object_list(spec.get("feature_columns"))
             if feature_columns:
-                lines.append(
-                    f"- Feature count: `{len(feature_columns)}`"
-                )
+                lines.append(f"- Feature count: `{len(feature_columns)}`")
     else:
         components = as_object_list(spec.get("components"))
         if components:
@@ -467,9 +456,7 @@ def _methodology_lines(
     ]
 
     if package_type == "composite":
-        lines.append(
-            "- Combination logic: weighted linear blend of transformed component factors."
-        )
+        lines.append("- Combination logic: weighted linear blend of transformed component factors.")
     elif model_spec:
         lines.append(
             "- Score generation: rolling/expanding model training first, then emit "
@@ -535,9 +522,7 @@ def _metric_pair(left: object, right: object) -> str:
 
 
 def _metric_triplet(left: object, middle: object, right: object) -> str:
-    return (
-        f"{format_metric(left)} / {format_metric(middle)} / {format_metric(right)}"
-    )
+    return f"{format_metric(left)} / {format_metric(middle)} / {format_metric(right)}"
 
 
 def _metric_ci_pair(lower: object, upper: object) -> str:
@@ -588,10 +573,7 @@ def _evaluation_standard_note(metrics: dict[str, object]) -> str:
     uncertainty_note = format_metric(ci_level)
     if uncertainty_method:
         uncertainty_note = f"{uncertainty_method}@{uncertainty_note}"
-    return (
-        f"{profile} "
-        f"(uncertainty={uncertainty_note}, rolling_window={format_text(window_size)})"
-    )
+    return f"{profile} (uncertainty={uncertainty_note}, rolling_window={format_text(window_size)})"
 
 
 def _uncertainty_method_note(uncertainty_metrics: UncertaintyEvidenceMetrics) -> str:
@@ -604,11 +586,7 @@ def _uncertainty_method_note(uncertainty_metrics: UncertaintyEvidenceMetrics) ->
     if method.lower() == "bootstrap":
         if ci_level is None and resamples is None:
             return "bootstrap"
-        return (
-            "bootstrap "
-            f"(CI={format_metric(ci_level)}, "
-            f"resamples={format_metric(resamples)})"
-        )
+        return f"bootstrap (CI={format_metric(ci_level)}, resamples={format_metric(resamples)})"
     if method.lower() == "block_bootstrap":
         if ci_level is None and resamples is None and block_length is None:
             return "block_bootstrap"
@@ -761,10 +739,7 @@ def _group_return_summary(path: Path) -> str | None:
     if grouped.empty:
         return None
     spread = float(grouped.max() - grouped.min())
-    return (
-        f"mean top-bottom spread={format_metric(spread)} "
-        f"(groups={int(grouped.index.nunique())})"
-    )
+    return f"mean top-bottom spread={format_metric(spread)} (groups={int(grouped.index.nunique())})"
 
 
 def _mean_csv_metric(path: Path, column: str) -> float | None:
@@ -909,12 +884,10 @@ def _risk_line_for_flag(flag: str) -> str | None:
             "(trading churn without positive spread)."
         ),
         "negative_long_short_ir": (
-            "- Instability flag: negative_long_short_ir "
-            "(spread risk-adjusted return < 0)."
+            "- Instability flag: negative_long_short_ir (spread risk-adjusted return < 0)."
         ),
         "rolling_regime_dependence": (
-            "- Instability flag: rolling_regime_dependence "
-            "(rolling evidence is regime-dependent)."
+            "- Instability flag: rolling_regime_dependence (rolling evidence is regime-dependent)."
         ),
         "rolling_ic_below_zero_share_high": (
             "- Instability flag: rolling_ic_below_zero_share_high "
@@ -970,8 +943,7 @@ def _uncertainty_risk_line(flag: str) -> str | None:
             "- Uncertainty flag: rank_ic_ci_unavailable (insufficient RankIC samples)."
         ),
         "long_short_ci_unavailable": (
-            "- Uncertainty flag: long_short_ci_unavailable "
-            "(insufficient long-short samples)."
+            "- Uncertainty flag: long_short_ci_unavailable (insufficient long-short samples)."
         ),
     }
     return mapping.get(flag)

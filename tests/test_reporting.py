@@ -43,11 +43,7 @@ def _momentum_fn(prices: pd.DataFrame) -> pd.DataFrame:
 def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
     dates = pd.to_datetime(prices["date"]).unique()
     assets = prices["asset"].unique()
-    rows = [
-        {"date": d, "asset": a, "factor": "const", "value": 1.0}
-        for d in dates
-        for a in assets
-    ]
+    rows = [{"date": d, "asset": a, "factor": "const", "value": 1.0} for d in dates for a in assets]
     return pd.DataFrame(rows)
 
 
@@ -128,6 +124,15 @@ def test_summarise_mean_rank_ic_matches_summary():
     result = _standard_result()
     df = summarise_experiment_result(result)
     assert math.isclose(float(df["mean_rank_ic"].iloc[0]), result.summary.mean_rank_ic)
+
+
+def test_summarise_mean_mutual_information_matches_summary() -> None:
+    result = _standard_result()
+    df = summarise_experiment_result(result)
+    assert math.isclose(
+        float(df["mean_mutual_information"].iloc[0]),
+        result.summary.mean_mutual_information,
+    )
 
 
 def test_summarise_ic_ir_matches_summary():
@@ -523,7 +528,7 @@ def test_obsidian_markdown_full_sample_when_no_split():
 def test_obsidian_markdown_contains_summary_metrics_section():
     result = _standard_result()
     md = to_obsidian_markdown(result)
-    assert "## Summary Metrics" in md
+    assert "## 摘要指标" in md
 
 
 def test_obsidian_markdown_contains_factor_verdict_lines():
@@ -565,26 +570,26 @@ def test_obsidian_markdown_contains_ic_ir_value():
 def test_obsidian_markdown_contains_interpretation_section():
     result = _standard_result()
     md = to_obsidian_markdown(result)
-    assert "## Interpretation" in md
+    assert "## 解释" in md
 
 
 def test_obsidian_markdown_contains_next_steps_section():
     result = _standard_result()
     md = to_obsidian_markdown(result)
-    assert "## Next Steps" in md
+    assert "## 下一步" in md
 
 
 def test_obsidian_markdown_contains_notes_when_provided():
     result = _standard_result()
     md = to_obsidian_markdown(result, notes="Needs walk-forward validation.")
-    assert "## Notes" in md
+    assert "## 备注" in md
     assert "Needs walk-forward validation." in md
 
 
 def test_obsidian_markdown_no_notes_section_when_omitted():
     result = _standard_result()
     md = to_obsidian_markdown(result)
-    assert "## Notes" not in md
+    assert "## 备注" not in md
 
 
 def test_obsidian_markdown_nan_metrics_render_as_dash():
@@ -615,13 +620,9 @@ def test_summary_df_is_consistent_with_experiment_result():
     assert _close_or_both_nan(float(df["mean_rank_ic"].iloc[0]), s.mean_rank_ic)
     assert _close_or_both_nan(float(df["ic_ir"].iloc[0]), s.ic_ir)
     assert _close_or_both_nan(float(df["ic_positive_rate"].iloc[0]), s.ic_positive_rate)
-    assert _close_or_both_nan(
-        float(df["rank_ic_positive_rate"].iloc[0]), s.rank_ic_positive_rate
-    )
+    assert _close_or_both_nan(float(df["rank_ic_positive_rate"].iloc[0]), s.rank_ic_positive_rate)
     assert _close_or_both_nan(float(df["ic_valid_ratio"].iloc[0]), s.ic_valid_ratio)
-    assert _close_or_both_nan(
-        float(df["rank_ic_valid_ratio"].iloc[0]), s.rank_ic_valid_ratio
-    )
+    assert _close_or_both_nan(float(df["rank_ic_valid_ratio"].iloc[0]), s.rank_ic_valid_ratio)
     assert _close_or_both_nan(float(df["mean_long_short_return"].iloc[0]), s.mean_long_short_return)
     assert _close_or_both_nan(float(df["long_short_ir"].iloc[0]), s.long_short_ir)
     assert _close_or_both_nan(float(df["long_short_hit_rate"].iloc[0]), s.long_short_hit_rate)
@@ -685,8 +686,6 @@ def test_summary_df_is_consistent_with_experiment_result():
         float(df["eval_coverage_ratio_min"].iloc[0]),
         s.eval_coverage_ratio_min,
     )
-    assert str(df["rolling_instability_flags"].iloc[0]) == ";".join(
-        s.rolling_instability_flags
-    )
+    assert str(df["rolling_instability_flags"].iloc[0]) == ";".join(s.rolling_instability_flags)
     assert str(df["instability_flags"].iloc[0]) == ";".join(s.instability_flags)
     assert int(df["n_dates_used"].iloc[0]) == s.n_dates

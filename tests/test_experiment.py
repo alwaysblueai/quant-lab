@@ -36,11 +36,7 @@ def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
     """Factor that returns the same value for every asset on every date."""
     dates = pd.to_datetime(prices["date"]).unique()
     assets = prices["asset"].unique()
-    rows = [
-        {"date": d, "asset": a, "factor": "const", "value": 1.0}
-        for d in dates
-        for a in assets
-    ]
+    rows = [{"date": d, "asset": a, "factor": "const", "value": 1.0} for d in dates for a in assets]
     return pd.DataFrame(rows)
 
 
@@ -60,6 +56,7 @@ def test_result_fields_are_dataframes():
     assert isinstance(result.label_df, pd.DataFrame)
     assert isinstance(result.ic_df, pd.DataFrame)
     assert isinstance(result.rank_ic_df, pd.DataFrame)
+    assert isinstance(result.mutual_information_df, pd.DataFrame)
     assert isinstance(result.quantile_returns_df, pd.DataFrame)
     assert isinstance(result.long_short_df, pd.DataFrame)
 
@@ -94,6 +91,11 @@ def test_rank_ic_df_has_expected_columns():
     assert {"date", "rank_ic"}.issubset(result.rank_ic_df.columns)
 
 
+def test_mutual_information_df_has_expected_columns():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    assert {"date", "mutual_information"}.issubset(result.mutual_information_df.columns)
+
+
 def test_quantile_returns_df_has_expected_columns():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     assert {"date", "quantile", "mean_return"}.issubset(result.quantile_returns_df.columns)
@@ -126,6 +128,7 @@ def test_summary_numeric_fields_are_finite_or_nan():
     for field in (
         s.mean_ic,
         s.mean_rank_ic,
+        s.mean_mutual_information,
         s.ic_ir,
         s.mean_long_short_return,
         s.long_short_hit_rate,
@@ -180,6 +183,12 @@ def test_summary_mean_rank_ic_matches_rank_ic_df():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     expected = float(result.rank_ic_df["rank_ic"].dropna().mean())
     assert math.isclose(result.summary.mean_rank_ic, expected)
+
+
+def test_summary_mean_mutual_information_matches_mutual_information_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    expected = float(result.mutual_information_df["mutual_information"].dropna().mean())
+    assert math.isclose(result.summary.mean_mutual_information, expected)
 
 
 def test_summary_mean_long_short_return_matches_long_short_df():
@@ -254,6 +263,15 @@ def test_summary_long_short_ir_matches_mean_over_std():
     assert math.isclose(result.summary.long_short_ir, expected)
 
 
+def test_summary_dsr_pvalue_is_unit_interval_or_nan() -> None:
+    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    dsr = result.summary.dsr_pvalue
+    if math.isnan(dsr):
+        assert math.isnan(dsr)
+    else:
+        assert 0.0 <= dsr <= 1.0
+
+
 def test_summary_long_short_return_per_turnover_matches_ratio():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     mean_ls = result.summary.mean_long_short_return
@@ -283,6 +301,8 @@ def test_rolling_stability_df_has_expected_columns():
         "rolling_ic_positive_rate",
         "rolling_mean_rank_ic",
         "rolling_rank_ic_positive_rate",
+        "rolling_mean_mutual_information",
+        "rolling_mutual_information_positive_rate",
         "rolling_mean_long_short_return",
         "rolling_long_short_positive_rate",
     }.issubset(result.rolling_stability_df.columns)

@@ -189,10 +189,7 @@ def campaign_config_from_mapping(data: dict[str, object]) -> CampaignConfig:
         raise ValueError("execution_order must contain exactly the configured case names")
 
     if set(case_names) != set(_REQUIRED_CASE_NAMES):
-        raise ValueError(
-            "research_campaign_1 must include exactly: "
-            f"{list(_REQUIRED_CASE_NAMES)}"
-        )
+        raise ValueError(f"research_campaign_1 must include exactly: {list(_REQUIRED_CASE_NAMES)}")
 
     case_output_root_dir = _optional_str(data.get("case_output_root_dir"))
 
@@ -207,9 +204,7 @@ def campaign_config_from_mapping(data: dict[str, object]) -> CampaignConfig:
         if raw_mode is not None:
             mode = raw_mode.lower()
             if mode not in _ALLOWED_VAULT_MODES:
-                raise ValueError(
-                    f"vault_export.mode must be one of {sorted(_ALLOWED_VAULT_MODES)}"
-                )
+                raise ValueError(f"vault_export.mode must be one of {sorted(_ALLOWED_VAULT_MODES)}")
             vault_export_mode = mode
 
     return CampaignConfig(
@@ -243,9 +238,7 @@ def resolve_campaign_paths(config: CampaignConfig, *, base_dir: Path) -> Campaig
     )
 
     case_output_root = (
-        _resolve(config.case_output_root_dir)
-        if config.case_output_root_dir is not None
-        else None
+        _resolve(config.case_output_root_dir) if config.case_output_root_dir is not None else None
     )
     vault_root = _resolve(config.vault_root) if config.vault_root is not None else None
 
@@ -303,9 +296,8 @@ def run_research_campaign_1(
     if resolved_mode not in _ALLOWED_VAULT_MODES:
         raise ValueError(f"vault_export_mode must be one of {sorted(_ALLOWED_VAULT_MODES)}")
     resolved_profile = (
-        (evaluation_profile or DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name).strip()
-        or DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name
-    )
+        evaluation_profile or DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name
+    ).strip() or DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name
     evaluation_config = get_research_evaluation_config(resolved_profile)
 
     case_map = {case.case_name: case for case in config.cases}
@@ -432,9 +424,7 @@ def render_campaign_summary(
     ]
 
     for row in case_results:
-        lines.append(
-            f"- `{row.case_name}` ({row.package_type}) - status: `{row.status}`"
-        )
+        lines.append(f"- `{row.case_name}` ({row.package_type}) - status: `{row.status}`")
 
     lines += [
         "",
@@ -470,9 +460,7 @@ def render_campaign_summary(
             uncertainty_metrics["mean_ic_ci_lower"],
             uncertainty_metrics["mean_ic_ci_upper"],
         )
-        transition_reasons = _fmt_reasons(
-            profile_summary_metrics["level12_transition_reasons"]
-        )
+        transition_reasons = _fmt_reasons(profile_summary_metrics["level12_transition_reasons"])
         if row.status != "success":
             lines.append(
                 "- "
@@ -637,13 +625,12 @@ def render_campaign_summary(
     lines += [
         "",
         (
-            "- Best ICIR case (successful runs only): "
-            f"`{best_icir}`" if best_icir is not None else
-            "- Best ICIR case: N/A (no successful runs with finite ICIR)."
+            f"- Best ICIR case (successful runs only): `{best_icir}`"
+            if best_icir is not None
+            else "- Best ICIR case: N/A (no successful runs with finite ICIR)."
         ),
         (
-            "- Promotion gate pass (highest-ranked triage): "
-            f"`{best_promoted}`"
+            f"- Promotion gate pass (highest-ranked triage): `{best_promoted}`"
             if best_promoted is not None
             else "- Promotion gate pass: N/A (no case promoted to Level 2)."
         ),
@@ -687,9 +674,7 @@ def render_campaign_index(
     for row in case_results:
         pointer_rel = f"{row.case_name}/case_output_pointer.json"
         lines.append(
-            "- "
-            f"`{row.case_name}` ({row.package_type}) - {row.status} - "
-            f"[pointer]({pointer_rel})"
+            f"- `{row.case_name}` ({row.package_type}) - {row.status} - [pointer]({pointer_rel})"
         )
         if row.experiment_card_path is not None:
             lines.append(f"  card: `{row.experiment_card_path}`")
@@ -798,14 +783,12 @@ def main(argv: list[str] | None = None) -> int:
     promoted = sum(
         1
         for row in result.case_results
-        if str(row.key_metrics.get("promotion_decision") or "").strip()
-        == "Promote to Level 2"
+        if str(row.key_metrics.get("promotion_decision") or "").strip() == "Promote to Level 2"
     )
     portfolio_completed = sum(
         1
         for row in result.case_results
-        if str(row.key_metrics.get("portfolio_validation_status") or "").strip()
-        == "completed"
+        if str(row.key_metrics.get("portfolio_validation_status") or "").strip() == "completed"
     )
     results_payload = _load_json(result.artifact_paths["campaign_results"])
     raw_profile = str(results_payload.get("evaluation_profile") or "").strip()
@@ -1027,9 +1010,7 @@ def _extract_key_metrics(metrics_path: Path) -> dict[str, object]:
     extracted["level12_transition_summary"] = projected["profile_summary"][
         "level12_transition_summary"
     ]
-    extracted["level12_transition_label"] = projected["profile_summary"][
-        "level12_transition_label"
-    ]
+    extracted["level12_transition_label"] = projected["profile_summary"]["level12_transition_label"]
     extracted["level12_transition_interpretation"] = projected["profile_summary"][
         "level12_transition_interpretation"
     ]
@@ -1166,26 +1147,14 @@ def _write_case_pointer(
         "package_type": result.package_type,
         "status": result.status,
         "output_dir": str(result.output_dir) if result.output_dir is not None else None,
-        "summary_path": (
-            str(result.summary_path)
-            if result.summary_path is not None
-            else None
-        ),
+        "summary_path": (str(result.summary_path) if result.summary_path is not None else None),
         "experiment_card_path": (
-            str(result.experiment_card_path)
-            if result.experiment_card_path is not None
-            else None
+            str(result.experiment_card_path) if result.experiment_card_path is not None else None
         ),
         "run_manifest_path": (
-            str(result.run_manifest_path)
-            if result.run_manifest_path is not None
-            else None
+            str(result.run_manifest_path) if result.run_manifest_path is not None else None
         ),
-        "metrics_path": (
-            str(result.metrics_path)
-            if result.metrics_path is not None
-            else None
-        ),
+        "metrics_path": (str(result.metrics_path) if result.metrics_path is not None else None),
         "factor_definition_json_path": (
             str(result.factor_definition_json_path)
             if result.factor_definition_json_path is not None
@@ -1234,26 +1203,14 @@ def _case_result_to_dict(
         "package_type": result.package_type,
         "status": result.status,
         "output_dir": str(result.output_dir) if result.output_dir is not None else None,
-        "summary_path": (
-            str(result.summary_path)
-            if result.summary_path is not None
-            else None
-        ),
+        "summary_path": (str(result.summary_path) if result.summary_path is not None else None),
         "experiment_card_path": (
-            str(result.experiment_card_path)
-            if result.experiment_card_path is not None
-            else None
+            str(result.experiment_card_path) if result.experiment_card_path is not None else None
         ),
         "run_manifest_path": (
-            str(result.run_manifest_path)
-            if result.run_manifest_path is not None
-            else None
+            str(result.run_manifest_path) if result.run_manifest_path is not None else None
         ),
-        "metrics_path": (
-            str(result.metrics_path)
-            if result.metrics_path is not None
-            else None
-        ),
+        "metrics_path": (str(result.metrics_path) if result.metrics_path is not None else None),
         "factor_definition_json_path": (
             str(result.factor_definition_json_path)
             if result.factor_definition_json_path is not None
@@ -1423,9 +1380,7 @@ def _transition_distribution_markdown_lines(
         rollup_obj = reason_rollups.get(label)
         rollup = rollup_obj if isinstance(rollup_obj, dict) else {}
         dominant_reasons_obj = rollup.get("dominant_reasons")
-        dominant_reasons = (
-            dominant_reasons_obj if isinstance(dominant_reasons_obj, list) else []
-        )
+        dominant_reasons = dominant_reasons_obj if isinstance(dominant_reasons_obj, list) else []
         top_reasons_obj = rollup.get("top_reasons")
         top_reasons = top_reasons_obj if isinstance(top_reasons_obj, list) else []
         reason_rows = dominant_reasons if dominant_reasons else top_reasons
@@ -1553,11 +1508,7 @@ def _portfolio_validation_benchmark_note(metrics: PortfolioValidationMetrics) ->
     tracking_error = _fmt(metrics["portfolio_validation_benchmark_tracking_error"])
     if status == "N/A" and assessment == "N/A":
         return "N/A"
-    return (
-        f"{status} ({assessment}), "
-        f"excess={excess}, "
-        f"tracking_error={tracking_error}"
-    )
+    return f"{status} ({assessment}), excess={excess}, tracking_error={tracking_error}"
 
 
 def _rolling_stability_note(metrics: RollingStabilityMetrics) -> str:

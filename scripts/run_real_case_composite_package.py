@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for the real-case composite package."""
+"""CLI entrypoint for the real-case composite research-validation package."""
 
 from __future__ import annotations
 

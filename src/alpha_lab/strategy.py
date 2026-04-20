@@ -80,9 +80,7 @@ class StrategySpec:
                 f"got {self.weighting_method!r}"
             )
         if self.holding_period < 1:
-            raise AlphaLabConfigError(
-                f"holding_period must be >= 1, got {self.holding_period}"
-            )
+            raise AlphaLabConfigError(f"holding_period must be >= 1, got {self.holding_period}")
         if self.rebalance_frequency < 1:
             raise AlphaLabConfigError(
                 f"rebalance_frequency must be >= 1, got {self.rebalance_frequency}"

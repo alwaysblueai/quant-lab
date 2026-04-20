@@ -71,22 +71,22 @@ def test_campaign_report_renderer_builds_comparison_table(tmp_path: Path) -> Non
                         "mean_long_short_turnover": 0.20,
                         "coverage_mean": 0.90,
                         "uncertainty_flags": [],
-                "neutralization_comparison_flags": [
-                    "neutralization preserves most evidence"
-                ],
-                "factor_verdict": "Strong candidate",
-                "portfolio_validation_status": "completed",
-                "portfolio_validation_recommendation": "Credible at portfolio level",
-                "portfolio_validation_major_risks": [],
-                "portfolio_validation_benchmark_relative_status": "available",
-                "portfolio_validation_benchmark_relative_assessment": (
-                    "supports_standalone_strength"
-                ),
-                "portfolio_validation_benchmark_excess_return": 0.0005,
-                "portfolio_validation_benchmark_tracking_error": 0.019,
-                "research_evaluation_profile": "default_research",
-            },
-        },
+                        "neutralization_comparison_flags": [
+                            "neutralization preserves most evidence"
+                        ],
+                        "factor_verdict": "Strong candidate",
+                        "portfolio_validation_status": "completed",
+                        "portfolio_validation_recommendation": "Credible at portfolio level",
+                        "portfolio_validation_major_risks": [],
+                        "portfolio_validation_benchmark_relative_status": "available",
+                        "portfolio_validation_benchmark_relative_assessment": (
+                            "supports_standalone_strength"
+                        ),
+                        "portfolio_validation_benchmark_excess_return": 0.0005,
+                        "portfolio_validation_benchmark_tracking_error": 0.019,
+                        "research_evaluation_profile": "default_research",
+                    },
+                },
                 {
                     "case_name": "value_quality_lowvol_v1",
                     "package_type": "composite",
@@ -209,9 +209,7 @@ def test_campaign_report_renderer_uses_shared_key_metrics_projections(
                         "promotion_reasons": ["gate passed"],
                         "promotion_blockers": [],
                         "portfolio_validation_status": "completed",
-                        "portfolio_validation_recommendation": (
-                            "Credible at portfolio level"
-                        ),
+                        "portfolio_validation_recommendation": ("Credible at portfolio level"),
                         "portfolio_validation_major_risks": [],
                         "neutralization_comparison_flags": [
                             "neutralization preserves most evidence"

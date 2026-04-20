@@ -3,14 +3,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from alpha_lab.exceptions import AlphaLabDataError, LifecyclePromotionError, VaultWriteError
+from alpha_lab.exceptions import LifecyclePromotionError, VaultWriteError
 
 # Lifecycle values that do NOT require a backlink gate.  Any other value
 # (specifically "validated-backtest" and anything more advanced) triggers the
 # lifecycle backlink check.
-_UNGATED_LIFECYCLE_VALUES: frozenset[str] = frozenset(
-    {"", "draft", "active", "theoretical"}
-)
+_UNGATED_LIFECYCLE_VALUES: frozenset[str] = frozenset({"", "draft", "active", "theoretical"})
 
 
 def write_obsidian_note(
@@ -65,20 +63,18 @@ def write_obsidian_note(
     path = Path(output_path).resolve()
 
     if path.is_dir():
-        raise ValueError(
-            f"output_path {path!s} is an existing directory; provide a file path."
-        )
+        raise ValueError(f"output_path {path!s} is an existing directory; provide a file path.")
 
     # --- Vault write boundary guard -----------------------------------------
     if restricted_root is not None:
         resolved_root = restricted_root.resolve()
         try:
             path.relative_to(resolved_root)
-        except ValueError:
+        except ValueError as exc:
             raise VaultWriteError(
                 f"Vault write rejected: {path!s} is outside the authorized root "
                 f"{resolved_root!s}.  Use export_to_vault() for vault writes."
-            )
+            ) from exc
 
         # --- Lifecycle backlink gate -----------------------------------------
         lifecycle_value = _parse_frontmatter_field(markdown, "lifecycle")
@@ -92,8 +88,7 @@ def write_obsidian_note(
 
     if path.exists() and not overwrite:
         raise FileExistsError(
-            f"Note already exists at {path!s}.  "
-            "Pass overwrite=True to replace it."
+            f"Note already exists at {path!s}.  Pass overwrite=True to replace it."
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)

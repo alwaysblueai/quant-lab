@@ -23,6 +23,10 @@ from alpha_lab.reporting.level2_portfolio_validation import (
     export_level2_portfolio_validation_bundle,
 )
 from alpha_lab.reporting.purged_kfold_diagnostics import build_purged_kfold_diagnostics
+from alpha_lab.reporting.research_tearsheet import (
+    build_research_tearsheet_payload,
+    export_research_tearsheet_pdf,
+)
 from alpha_lab.research_evaluation_config import (
     ResearchEvaluationConfig,
     research_evaluation_audit_snapshot,
@@ -53,6 +57,9 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "ic_timeseries.csv",
     "ic_decay.csv",
     "factor_autocorrelation.csv",
+    "capacity_estimation.csv",
+    "conditional_ic_by_magnitude.csv",
+    "conditional_ic_by_cross_section_size.csv",
     "rolling_stability.csv",
     "group_returns.csv",
     "turnover.csv",
@@ -60,12 +67,42 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "factor_definition.yaml",
     "summary.md",
     "experiment_card.md",
+    "research_tearsheet.json",
+    "research_tearsheet.pdf",
     "integrity_report.json",
     "integrity_report.md",
     "level2_portfolio_validation/portfolio_validation_summary.json",
     "level2_portfolio_validation/portfolio_validation_metrics.json",
     "level2_portfolio_validation/portfolio_validation_package.json",
     "level2_portfolio_validation/portfolio_validation_package.md",
+)
+
+_FAST_SCREEN_PROFILE_NAMES = frozenset({"exploratory_screening", "quick_screening"})
+
+_FAST_SCREEN_CORE_METRIC_KEYS: tuple[str, ...] = (
+    "mean_rank_ic",
+    "rank_ic_ir",
+    "ic_positive_rate",
+    "group_monotonicity_summary",
+    "ic_decay_half_life_summary",
+    "ic_decay_retention_5_over_1",
+    "mean_long_short_turnover",
+    "coverage_summary",
+    "cost_aware_long_short_ir",
+    "ic_t_stat",
+    "max_drawdown",
+)
+
+_FAST_SCREEN_REQUIRED_CONTRACT_KEYS: tuple[str, ...] = (
+    "research_evaluation_profile",
+    "factor_verdict",
+    "factor_verdict_reasons",
+    "campaign_triage",
+    "campaign_triage_reasons",
+    "promotion_decision",
+    "promotion_reasons",
+    "promotion_blockers",
+    "split_description",
 )
 
 
@@ -81,13 +118,21 @@ class SingleFactorArtifactPaths(TypedDict):
     ic_timeseries: Path
     ic_decay: Path
     factor_autocorrelation: Path
+    capacity_estimation: Path
+    conditional_ic_by_magnitude: Path
+    conditional_ic_by_cross_section_size: Path
     rolling_stability: Path
     group_returns: Path
     turnover: Path
     coverage: Path
+    lag_sensitivity: Path
+    random_baseline_null: Path
+    daily_pnl_attribution: Path
     factor_definition: Path
     summary: Path
     experiment_card: Path
+    research_tearsheet: Path
+    research_tearsheet_pdf: Path
     integrity_report_json: Path
     integrity_report_markdown: Path
     portfolio_validation_summary: Path
@@ -124,13 +169,23 @@ def export_artifact_bundle(
         "ic_timeseries": out_dir / "ic_timeseries.csv",
         "ic_decay": out_dir / "ic_decay.csv",
         "factor_autocorrelation": out_dir / "factor_autocorrelation.csv",
+        "capacity_estimation": out_dir / "capacity_estimation.csv",
+        "conditional_ic_by_magnitude": out_dir / "conditional_ic_by_magnitude.csv",
+        "conditional_ic_by_cross_section_size": (
+            out_dir / "conditional_ic_by_cross_section_size.csv"
+        ),
         "rolling_stability": out_dir / "rolling_stability.csv",
         "group_returns": out_dir / "group_returns.csv",
         "turnover": out_dir / "turnover.csv",
         "coverage": out_dir / "coverage.csv",
+        "lag_sensitivity": out_dir / "lag_sensitivity.csv",
+        "random_baseline_null": out_dir / "random_baseline_null.csv",
+        "daily_pnl_attribution": out_dir / "daily_pnl_attribution.csv",
         "factor_definition": out_dir / "factor_definition.yaml",
         "summary": out_dir / "summary.md",
         "experiment_card": out_dir / "experiment_card.md",
+        "research_tearsheet": out_dir / "research_tearsheet.json",
+        "research_tearsheet_pdf": out_dir / "research_tearsheet.pdf",
         "integrity_report_json": out_dir / "integrity_report.json",
         "integrity_report_markdown": out_dir / "integrity_report.md",
         "portfolio_validation_summary": (
@@ -153,10 +208,25 @@ def export_artifact_bundle(
         paths["factor_autocorrelation"],
         index=False,
     )
+    evaluation_result.capacity_estimation.to_csv(
+        paths["capacity_estimation"],
+        index=False,
+    )
+    evaluation_result.conditional_ic_by_magnitude.to_csv(
+        paths["conditional_ic_by_magnitude"],
+        index=False,
+    )
+    evaluation_result.conditional_ic_by_cross_section_size.to_csv(
+        paths["conditional_ic_by_cross_section_size"],
+        index=False,
+    )
     evaluation_result.rolling_stability.to_csv(paths["rolling_stability"], index=False)
     evaluation_result.group_returns.to_csv(paths["group_returns"], index=False)
     evaluation_result.turnover.to_csv(paths["turnover"], index=False)
     evaluation_result.coverage.to_csv(paths["coverage"], index=False)
+    evaluation_result.lag_sensitivity.to_csv(paths["lag_sensitivity"], index=False)
+    evaluation_result.random_baseline_null.to_csv(paths["random_baseline_null"], index=False)
+    evaluation_result.daily_pnl_attribution.to_csv(paths["daily_pnl_attribution"], index=False)
 
     factor_definition_yaml = _dump_yaml_payload(_compact_spec_payload(spec))
     paths["factor_definition"].write_text(factor_definition_yaml, encoding="utf-8")
@@ -220,11 +290,11 @@ def export_artifact_bundle(
     metrics_for_payload["portfolio_validation_status"] = portfolio_validation_summary.get(
         "validation_status"
     )
-    metrics_for_payload["portfolio_validation_recommendation"] = (
-        portfolio_validation_summary.get("recommendation")
+    metrics_for_payload["portfolio_validation_recommendation"] = portfolio_validation_summary.get(
+        "recommendation"
     )
-    metrics_for_payload["portfolio_validation_remains_credible"] = (
-        portfolio_validation_summary.get("remains_credible_at_portfolio_level")
+    metrics_for_payload["portfolio_validation_remains_credible"] = portfolio_validation_summary.get(
+        "remains_credible_at_portfolio_level"
     )
     metrics_for_payload["portfolio_validation_major_risks"] = portfolio_validation_summary.get(
         "major_risks"
@@ -240,9 +310,7 @@ def export_artifact_bundle(
     )
     robustness_summary_raw = portfolio_validation_summary.get("portfolio_robustness_summary")
     robustness_summary = (
-        dict(robustness_summary_raw)
-        if isinstance(robustness_summary_raw, Mapping)
-        else {}
+        dict(robustness_summary_raw) if isinstance(robustness_summary_raw, Mapping) else {}
     )
     metrics_for_payload["portfolio_validation_robustness_label"] = robustness_summary.get(
         "taxonomy_label"
@@ -266,16 +334,12 @@ def export_artifact_bundle(
         robustness_summary.get("concentration_turnover_risk_note")
     )
     benchmark_eval_raw = portfolio_validation_bundle.metrics.get("benchmark_relative_evaluation")
-    benchmark_eval = (
-        dict(benchmark_eval_raw)
-        if isinstance(benchmark_eval_raw, Mapping)
-        else {}
-    )
+    benchmark_eval = dict(benchmark_eval_raw) if isinstance(benchmark_eval_raw, Mapping) else {}
     metrics_for_payload["portfolio_validation_benchmark_relative_status"] = benchmark_eval.get(
         "status"
     )
-    metrics_for_payload["portfolio_validation_benchmark_relative_assessment"] = (
-        benchmark_eval.get("assessment")
+    metrics_for_payload["portfolio_validation_benchmark_relative_assessment"] = benchmark_eval.get(
+        "assessment"
     )
     metrics_for_payload["portfolio_validation_benchmark_name"] = benchmark_eval.get(
         "benchmark_name"
@@ -304,15 +368,18 @@ def export_artifact_bundle(
     metrics_for_payload["level12_transition_interpretation"] = level12_transition[
         "transition_interpretation"
     ]
-    metrics_for_payload["level12_transition_reasons"] = level12_transition[
-        "key_transition_reasons"
-    ]
+    metrics_for_payload["level12_transition_reasons"] = level12_transition["key_transition_reasons"]
     metrics_for_payload["level12_transition_confirmation_note"] = level12_transition[
         "confirmation_vs_degradation_note"
     ]
 
     metrics_payload = {
-        "metrics": _to_jsonable(_compact_metrics_payload(metrics_for_payload)),
+        "metrics": _to_jsonable(
+            _compact_metrics_payload(
+                metrics_for_payload,
+                profile_name=evaluation_config.profile_name,
+            )
+        ),
         "coverage_by_date_summary": {
             "n_dates": int(evaluation_result.coverage["date"].nunique())
             if not evaluation_result.coverage.empty
@@ -367,7 +434,31 @@ def export_artifact_bundle(
     _write_json(paths["purged_kfold_summary"], purged_kfold.summary)
     purged_kfold.folds.to_csv(paths["purged_kfold_folds"], index=False)
 
-    manifest = {
+    tearsheet_payload = build_research_tearsheet_payload(
+        metrics_path=paths["metrics"],
+        artifact_paths={
+            "ic_decay": paths["ic_decay"],
+            "group_returns": paths["group_returns"],
+            "turnover": paths["turnover"],
+            "rolling_stability": paths["rolling_stability"],
+            "ic_timeseries": paths["ic_timeseries"],
+            "coverage": paths["coverage"],
+            "backtest_result_json": paths["backtest_result_json"],
+        },
+        meta={
+            "factor_name": spec.factor_name,
+            "universe_name": spec.universe.name,
+            "target_kind": spec.target.kind,
+            "target_horizon": spec.target.horizon,
+        },
+    )
+    _write_json(paths["research_tearsheet"], tearsheet_payload)
+    export_research_tearsheet_pdf(
+        payload=tearsheet_payload,
+        output_path=paths["research_tearsheet_pdf"],
+    )
+
+    manifest: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "real_case_single_factor_bundle",
         "run_timestamp_utc": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -456,7 +547,9 @@ def _build_signal_validation_payload(
         "artifact_type": "alpha_lab_signal_validation",
         "case_name": spec.name,
         "package_type": "single_factor",
-        "metrics": _to_jsonable(_compact_signal_validation_metrics(_as_object(metrics_payload.get("metrics")))),
+        "metrics": _to_jsonable(
+            _compact_signal_validation_metrics(_as_object(metrics_payload.get("metrics")))
+        ),
         "coverage_by_date_summary": _to_jsonable(
             _as_object(metrics_payload.get("coverage_by_date_summary"))
         ),
@@ -465,6 +558,11 @@ def _build_signal_validation_payload(
             "ic_timeseries_path": str(output_paths["ic_timeseries"]),
             "ic_decay_path": str(output_paths["ic_decay"]),
             "factor_autocorrelation_path": str(output_paths["factor_autocorrelation"]),
+            "capacity_estimation_path": str(output_paths["capacity_estimation"]),
+            "conditional_ic_by_magnitude_path": str(output_paths["conditional_ic_by_magnitude"]),
+            "conditional_ic_by_cross_section_size_path": str(
+                output_paths["conditional_ic_by_cross_section_size"]
+            ),
             "rolling_stability_path": str(output_paths["rolling_stability"]),
             "coverage_path": str(output_paths["coverage"]),
         },
@@ -631,63 +729,17 @@ def _as_object(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _compact_metrics_payload(metrics: Mapping[str, object]) -> dict[str, object]:
-    keep = (
-        "research_evaluation_profile",
-        "factor_verdict",
-        "factor_verdict_reasons",
-        "campaign_triage",
-        "campaign_triage_reasons",
-        "promotion_decision",
-        "promotion_reasons",
-        "promotion_blockers",
-        "level12_transition_label",
-        "level12_transition_interpretation",
-        "level12_transition_reasons",
-        "portfolio_validation_status",
-        "portfolio_validation_recommendation",
-        "portfolio_validation_major_risks",
-        "mean_ic",
-        "mean_rank_ic",
-        "ic_ir",
-        "ic_t_stat",
-        "ic_p_value",
-        "dsr_pvalue",
-        "split_description",
-        "mean_long_short_return",
-        "long_short_ir",
-        "mean_long_short_turnover",
-        "long_short_return_per_turnover",
-        "ic_positive_rate",
-        "rank_ic_positive_rate",
-        "subperiod_ic_positive_share",
-        "subperiod_long_short_positive_share",
-        "rolling_ic_positive_share",
-        "rolling_rank_ic_positive_share",
-        "rolling_long_short_positive_share",
-        "rolling_ic_min_mean",
-        "rolling_rank_ic_min_mean",
-        "rolling_long_short_min_mean",
-        "rolling_instability_flags",
-        "eval_coverage_ratio_mean",
-        "eval_coverage_ratio_min",
-        "coverage_mean",
-        "coverage_min",
-        "data_quality_status",
-        "data_quality_suspended_rows",
-        "data_quality_stale_rows",
-        "data_quality_suspected_split_rows",
-        "data_quality_integrity_warn_count",
-        "data_quality_integrity_fail_count",
-        "data_quality_hard_fail_count",
-        "neutralization_mean_corr_reduction",
-        "uncertainty_method",
-        "uncertainty_confidence_level",
-        "uncertainty_flags",
-        "instability_flags",
-        "n_dates_used",
-    )
-    return {key: metrics[key] for key in keep if key in metrics}
+def _compact_metrics_payload(
+    metrics: Mapping[str, object],
+    *,
+    profile_name: str,
+) -> dict[str, object]:
+    normalized_profile = profile_name.strip().lower()
+    if normalized_profile in _FAST_SCREEN_PROFILE_NAMES:
+        keep = _FAST_SCREEN_REQUIRED_CONTRACT_KEYS + _FAST_SCREEN_CORE_METRIC_KEYS
+        compact = {key: metrics[key] for key in keep if key in metrics}
+        return compact
+    return {str(key): value for key, value in metrics.items()}
 
 
 def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object]:
@@ -711,7 +763,7 @@ def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object
         {
             "rolling_sharpe": None,
             "rolling_drawdown": None,
-            "nav_points": [],
+            "nav_points": summary.get("nav_points", []),
             "monthly_return_table": [],
             "drawdown_table": [],
             "subperiod_analysis": None,
@@ -729,9 +781,16 @@ def _compact_signal_validation_metrics(metrics: Mapping[str, object]) -> dict[st
         "promotion_decision",
         "mean_ic",
         "mean_rank_ic",
+        "mean_mutual_information",
+        "mutual_information_ir",
         "ic_ir",
         "mean_long_short_return",
         "mean_long_short_turnover",
+        "ic_half_life_horizon",
+        "ic_decay_rebalance_ratio",
+        "capacity_status",
+        "estimated_capacity_upper_bound",
+        "conditional_ic_extreme_minus_base_ic",
         "eval_coverage_ratio_mean",
         "eval_coverage_ratio_min",
         "rolling_instability_flags",
@@ -759,6 +818,11 @@ def _compact_spec_payload(spec: SingleFactorCaseSpec) -> dict[str, object]:
         "neutralization": {
             "enabled": bool(spec.neutralization.enabled),
             "exposures_path": spec.neutralization.exposures_path,
+        },
+        "capacity": {
+            "enabled": bool(spec.capacity.enabled),
+            "participation_rate": spec.capacity.participation_rate,
+            "adv_lookback": spec.capacity.adv_lookback,
         },
         "paths": {
             "prices_path": spec.prices_path,
@@ -799,7 +863,6 @@ _BACKTEST_OMITTED_DETAIL_FIELDS = frozenset(
     {
         "rolling_sharpe",
         "rolling_drawdown",
-        "nav_points",
         "monthly_return_table",
         "drawdown_table",
         "subperiod_analysis",

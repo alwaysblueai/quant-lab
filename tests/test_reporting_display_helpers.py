@@ -22,8 +22,7 @@ def test_format_text_list_respects_empty_and_separator() -> None:
     assert format_text_list(None, empty="none") == "none"
     assert format_text_list("a;b", empty="none") == "a, b"
     assert (
-        format_text_list(["a", "b"], empty="none", separator="; ", split_semicolon=False)
-        == "a; b"
+        format_text_list(["a", "b"], empty="none", separator="; ", split_semicolon=False) == "a; b"
     )
 
 

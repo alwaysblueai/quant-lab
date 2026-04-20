@@ -15,6 +15,7 @@ import pytest
 
 from alpha_lab.experiment import run_factor_experiment
 from alpha_lab.factors.momentum import momentum
+from alpha_lab.labels import forward_return
 from alpha_lab.research_integrity.exceptions import IntegrityHardFailure
 from alpha_lab.walk_forward import run_walk_forward_experiment
 
@@ -78,4 +79,31 @@ def test_walk_forward_raises_when_fold_factor_has_future_dates() -> None:
             test_size=10,
             step=10,
             horizon=5,
+        )
+
+
+def test_experiment_raises_when_factor_values_clone_forward_labels() -> None:
+    dates = pd.date_range("2024-01-01", periods=70, freq="B")
+    rows: list[dict[str, object]] = []
+    for i in range(4):
+        asset = f"A{i:03d}"
+        price = 100.0 + i
+        for t, date in enumerate(dates):
+            # Deterministic but non-constant path to ensure high unique ratio.
+            step = 0.001 + 0.0002 * i + 0.00005 * (t % 7)
+            price *= 1.0 + step
+            rows.append({"date": date, "asset": asset, "close": price})
+    prices = pd.DataFrame(rows)
+
+    def cloned_label_factor_fn(input_prices: pd.DataFrame) -> pd.DataFrame:
+        leaked = forward_return(input_prices, horizon=5).copy()
+        leaked["factor"] = "leaked_forward_return_clone"
+        return leaked
+
+    with pytest.raises(IntegrityHardFailure):
+        run_factor_experiment(
+            prices,
+            cloned_label_factor_fn,
+            horizon=5,
+            n_quantiles=5,
         )

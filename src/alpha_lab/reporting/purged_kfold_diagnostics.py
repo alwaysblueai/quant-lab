@@ -127,9 +127,7 @@ def build_purged_kfold_diagnostics(
     rank_ic_positive_folds = int(
         (pd.to_numeric(folds_df["mean_rank_ic"], errors="coerce") > 0).sum()
     )
-    fold_metrics_available = int(
-        pd.to_numeric(folds_df["mean_ic"], errors="coerce").notna().sum()
-    )
+    fold_metrics_available = int(pd.to_numeric(folds_df["mean_ic"], errors="coerce").notna().sum())
     verdict, reasons = _build_verdict(
         n_folds=int(len(folds_df)),
         ic_positive_folds=ic_positive_folds,
@@ -218,13 +216,13 @@ def _sharpe_or_none(values: pd.Series) -> float | None:
 def _first_date_or_none(dates: pd.DatetimeIndex) -> str | None:
     if len(dates) == 0:
         return None
-    return pd.Timestamp(dates.min()).date().isoformat()
+    return str(pd.Timestamp(dates.min()).strftime("%Y-%m-%d"))
 
 
 def _last_date_or_none(dates: pd.DatetimeIndex) -> str | None:
     if len(dates) == 0:
         return None
-    return pd.Timestamp(dates.max()).date().isoformat()
+    return str(pd.Timestamp(dates.max()).strftime("%Y-%m-%d"))
 
 
 def _build_verdict(

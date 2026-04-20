@@ -240,11 +240,11 @@ def export_artifact_bundle(
     metrics_for_payload["portfolio_validation_status"] = portfolio_validation_summary.get(
         "validation_status"
     )
-    metrics_for_payload["portfolio_validation_recommendation"] = (
-        portfolio_validation_summary.get("recommendation")
+    metrics_for_payload["portfolio_validation_recommendation"] = portfolio_validation_summary.get(
+        "recommendation"
     )
-    metrics_for_payload["portfolio_validation_remains_credible"] = (
-        portfolio_validation_summary.get("remains_credible_at_portfolio_level")
+    metrics_for_payload["portfolio_validation_remains_credible"] = portfolio_validation_summary.get(
+        "remains_credible_at_portfolio_level"
     )
     metrics_for_payload["portfolio_validation_major_risks"] = portfolio_validation_summary.get(
         "major_risks"
@@ -260,9 +260,7 @@ def export_artifact_bundle(
     )
     robustness_summary_raw = portfolio_validation_summary.get("portfolio_robustness_summary")
     robustness_summary = (
-        dict(robustness_summary_raw)
-        if isinstance(robustness_summary_raw, Mapping)
-        else {}
+        dict(robustness_summary_raw) if isinstance(robustness_summary_raw, Mapping) else {}
     )
     metrics_for_payload["portfolio_validation_robustness_label"] = robustness_summary.get(
         "taxonomy_label"
@@ -286,16 +284,12 @@ def export_artifact_bundle(
         robustness_summary.get("concentration_turnover_risk_note")
     )
     benchmark_eval_raw = portfolio_validation_bundle.metrics.get("benchmark_relative_evaluation")
-    benchmark_eval = (
-        dict(benchmark_eval_raw)
-        if isinstance(benchmark_eval_raw, Mapping)
-        else {}
-    )
+    benchmark_eval = dict(benchmark_eval_raw) if isinstance(benchmark_eval_raw, Mapping) else {}
     metrics_for_payload["portfolio_validation_benchmark_relative_status"] = benchmark_eval.get(
         "status"
     )
-    metrics_for_payload["portfolio_validation_benchmark_relative_assessment"] = (
-        benchmark_eval.get("assessment")
+    metrics_for_payload["portfolio_validation_benchmark_relative_assessment"] = benchmark_eval.get(
+        "assessment"
     )
     metrics_for_payload["portfolio_validation_benchmark_name"] = benchmark_eval.get(
         "benchmark_name"
@@ -324,9 +318,7 @@ def export_artifact_bundle(
     metrics_for_payload["level12_transition_interpretation"] = level12_transition[
         "transition_interpretation"
     ]
-    metrics_for_payload["level12_transition_reasons"] = level12_transition[
-        "key_transition_reasons"
-    ]
+    metrics_for_payload["level12_transition_reasons"] = level12_transition["key_transition_reasons"]
     metrics_for_payload["level12_transition_confirmation_note"] = level12_transition[
         "confirmation_vs_degradation_note"
     ]
@@ -436,9 +428,7 @@ def export_artifact_bundle(
             "model_family": spec.model.family,
             "model_params": _to_jsonable(spec.model.params),
             "training": _to_jsonable(spec_to_dict(spec).get("training", {})),
-            "feature_preprocess": _to_jsonable(
-                spec_to_dict(spec).get("feature_preprocess", {})
-            ),
+            "feature_preprocess": _to_jsonable(spec_to_dict(spec).get("feature_preprocess", {})),
             "diagnostics": _to_jsonable(model_factor_result.model_diagnostics),
             "source_artifacts": {
                 "training_log_path": str(paths["training_log"]),

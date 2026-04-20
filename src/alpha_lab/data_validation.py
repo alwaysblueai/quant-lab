@@ -10,6 +10,7 @@ This is a validation layer, not a data-ingestion framework.  It raises
 :class:`~alpha_lab.exceptions.AlphaLabDataError` with an informative message;
 it does not repair or impute data.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -39,9 +40,7 @@ def validate_price_panel(df: pd.DataFrame) -> None:
         violation and, where possible, the count of affected rows.
     """
     if not isinstance(df, pd.DataFrame):
-        raise AlphaLabDataError(
-            f"Price panel must be a pandas DataFrame, got {type(df).__name__}"
-        )
+        raise AlphaLabDataError(f"Price panel must be a pandas DataFrame, got {type(df).__name__}")
 
     # --- Required columns ---------------------------------------------------
     missing = REQUIRED_PRICE_COLUMNS - set(df.columns)
@@ -67,9 +66,7 @@ def validate_price_panel(df: pd.DataFrame) -> None:
     # --- Asset column: no null or empty strings -----------------------------
     asset_null = int(df["asset"].isna().sum())
     if asset_null > 0:
-        raise AlphaLabDataError(
-            f"Price panel 'asset' column contains {asset_null} null value(s)."
-        )
+        raise AlphaLabDataError(f"Price panel 'asset' column contains {asset_null} null value(s).")
     asset_empty = int((df["asset"].astype(str).str.strip() == "").sum())
     if asset_empty > 0:
         raise AlphaLabDataError(
@@ -87,9 +84,7 @@ def validate_price_panel(df: pd.DataFrame) -> None:
     # --- Close: no NaN ------------------------------------------------------
     n_nan_close = int(df["close"].isna().sum())
     if n_nan_close > 0:
-        raise AlphaLabDataError(
-            f"Price panel 'close' column contains {n_nan_close} NaN value(s)."
-        )
+        raise AlphaLabDataError(f"Price panel 'close' column contains {n_nan_close} NaN value(s).")
 
     # --- Close: must be positive --------------------------------------------
     n_nonpos = int((df["close"] <= 0).sum())

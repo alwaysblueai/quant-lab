@@ -72,11 +72,7 @@ def neutralize_signal(
 
     if enforce_integrity and known_at_col is not None and by == "date":
         signal_dates = df[[by, "asset"]].copy().rename(columns={by: "date"})
-        aux_dates = (
-            df[[by, "asset", known_at_col]]
-            .copy()
-            .rename(columns={by: "effective_date"})
-        )
+        aux_dates = df[[by, "asset", known_at_col]].copy().rename(columns={by: "effective_date"})
         asof_check = check_asof_inputs_not_after_signal_date(
             signal_dates,
             aux_dates,
@@ -89,8 +85,7 @@ def neutralize_signal(
         integrity_checks.append(asof_check)
         if asof_check.status == "fail":
             raise AlphaLabDataError(
-                "neutralization exposure timing failed integrity check: "
-                f"{asof_check.message}"
+                f"neutralization exposure timing failed integrity check: {asof_check.message}"
             )
         if asof_check.status == "warn":
             warnings.warn(
@@ -207,8 +202,7 @@ def neutralize_signal(
         integrity_checks.append(scope_check)
         if scope_check.status == "fail":
             raise AlphaLabDataError(
-                "neutralize_signal output scope failed integrity check: "
-                f"{scope_check.message}"
+                f"neutralize_signal output scope failed integrity check: {scope_check.message}"
             )
         if scope_check.status == "warn":
             warnings.warn(

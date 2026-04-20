@@ -99,7 +99,9 @@ def _validate_common_inputs(df: pd.DataFrame, *, required_cols: set[str]) -> Non
 
     dupes = df.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise AlphaLabDataError(f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}")
+        raise AlphaLabDataError(
+            f"Duplicate (date, asset) pairs found:\n{df[dupes][['date', 'asset']]}"
+        )
 
 
 def _resolve_min_periods(*, window: int, min_periods: int | None) -> int:

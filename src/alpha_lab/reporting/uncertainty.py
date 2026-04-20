@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
+from scipy.stats import t as student_t
 
 from alpha_lab.research_evaluation_config import (
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
@@ -17,6 +19,12 @@ from alpha_lab.research_evaluation_config import (
 
 CoreUncertaintyThresholds = UncertaintyConfig
 DEFAULT_CORE_UNCERTAINTY_THRESHOLDS = DEFAULT_RESEARCH_EVALUATION_CONFIG.uncertainty
+
+# Below this many resamples, percentile-bootstrap quantiles are noisy enough
+# that downstream CIs should be treated as indicative only. The threshold is
+# a rule-of-thumb floor (e.g., Efron & Tibshirani 1993 §13.3) — calls below
+# it still succeed, but emit a UserWarning so reviewers notice.
+_BOOTSTRAP_RESAMPLE_WARN_THRESHOLD = 200
 
 
 @dataclass(frozen=True)
@@ -76,11 +84,15 @@ def compute_mean_ci(
     values: Iterable[float] | Sequence[float] | pd.Series,
     *,
     confidence_level: float = 0.95,
+    use_t_for_small_sample: bool = False,
+    small_sample_threshold: int = 30,
 ) -> MeanCI:
-    """Compute mean ± normal-approximation CI from finite observations.
+    """Compute mean CI from finite observations.
 
-    Uses a sample standard error (`ddof=1`) and normal quantile. For fewer
-    than 2 observations, CI and stderr are NaN.
+    Uses a sample standard error (`ddof=1`) and normal quantile by default.
+    Optionally, when ``use_t_for_small_sample=True`` and ``n_obs`` is below
+    ``small_sample_threshold``, uses Student-t critical values.
+    For fewer than 2 observations, CI and stderr are NaN.
     """
 
     cleaned = _finite_values(values)
@@ -115,8 +127,13 @@ def compute_mean_ci(
             n_obs=n_obs,
         )
 
-    z = _z_value(confidence_level)
-    half_width = z * stderr
+    critical_value = _critical_value(
+        confidence_level=confidence_level,
+        n_obs=n_obs,
+        use_t_for_small_sample=use_t_for_small_sample,
+        small_sample_threshold=small_sample_threshold,
+    )
+    half_width = critical_value * stderr
     return MeanCI(
         mean=mean,
         stderr=stderr,
@@ -159,6 +176,7 @@ def compute_bootstrap_mean_ci(
     _validate_confidence_level(confidence_level)
     if n_resamples < 2:
         raise ValueError("bootstrap n_resamples must be >= 2")
+    _maybe_warn_small_resamples(n_resamples, kind="bootstrap")
 
     arr = cleaned.to_numpy(dtype=float)
     rng = np.random.default_rng(random_seed)
@@ -225,6 +243,7 @@ def compute_block_bootstrap_mean_ci(
         raise ValueError("block bootstrap n_resamples must be >= 2")
     if block_length < 1:
         raise ValueError("block bootstrap block_length must be >= 1")
+    _maybe_warn_small_resamples(n_resamples, kind="block_bootstrap")
 
     arr = cleaned.to_numpy(dtype=float)
     effective_block_length = min(int(block_length), n_obs)
@@ -332,14 +351,27 @@ def compute_core_uncertainty(
     else:
         confidence_level = thresholds.confidence_level
         _validate_confidence_level(confidence_level)
-        ic_ci = compute_mean_ci(ic_values, confidence_level=confidence_level)
+        use_t_for_small_sample = bool(thresholds.normal_small_sample_use_t)
+        small_sample_threshold = int(thresholds.normal_small_sample_threshold)
+        if small_sample_threshold < 2:
+            raise ValueError("normal_small_sample_threshold must be >= 2")
+        ic_ci = compute_mean_ci(
+            ic_values,
+            confidence_level=confidence_level,
+            use_t_for_small_sample=use_t_for_small_sample,
+            small_sample_threshold=small_sample_threshold,
+        )
         rank_ic_ci = compute_mean_ci(
             rank_ic_values,
             confidence_level=confidence_level,
+            use_t_for_small_sample=use_t_for_small_sample,
+            small_sample_threshold=small_sample_threshold,
         )
         long_short_ci = compute_mean_ci(
             long_short_values,
             confidence_level=confidence_level,
+            use_t_for_small_sample=use_t_for_small_sample,
+            small_sample_threshold=small_sample_threshold,
         )
         bootstrap_resamples_out = None
         block_length_out = None
@@ -391,6 +423,29 @@ def _z_value(confidence_level: float) -> float:
     return float(NormalDist().inv_cdf(tail))
 
 
+def _t_value(confidence_level: float, *, dof: int) -> float:
+    _validate_confidence_level(confidence_level)
+    if dof < 1:
+        raise ValueError("degrees of freedom for Student-t must be >= 1")
+    tail = 0.5 + 0.5 * confidence_level
+    return float(student_t.ppf(tail, df=dof))
+
+
+def _critical_value(
+    *,
+    confidence_level: float,
+    n_obs: int,
+    use_t_for_small_sample: bool,
+    small_sample_threshold: int,
+) -> float:
+    if use_t_for_small_sample:
+        if small_sample_threshold < 2:
+            raise ValueError("small_sample_threshold must be >= 2")
+        if n_obs < small_sample_threshold:
+            return _t_value(confidence_level, dof=n_obs - 1)
+    return _z_value(confidence_level)
+
+
 def _resolve_uncertainty_method(method: str) -> str:
     normalized = str(method).strip().lower()
     if not normalized:
@@ -410,6 +465,19 @@ def _seed_for_metric(base_seed: int | None, offset: int) -> int | None:
     if base_seed is None:
         return None
     return int(base_seed) + int(offset)
+
+
+def _maybe_warn_small_resamples(n_resamples: int, *, kind: str) -> None:
+    if n_resamples < _BOOTSTRAP_RESAMPLE_WARN_THRESHOLD:
+        warnings.warn(
+            (
+                f"{kind} CI computed with n_resamples={n_resamples} "
+                f"(<{_BOOTSTRAP_RESAMPLE_WARN_THRESHOLD}); percentile quantiles "
+                "may be unstable — treat the CI as indicative only."
+            ),
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _validate_confidence_level(confidence_level: float) -> None:

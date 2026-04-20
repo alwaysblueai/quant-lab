@@ -6,6 +6,19 @@ context see [architecture.md](architecture.md).  For contributor guidance see
 
 ---
 
+## Scope
+
+`alpha-lab` is a Level 1/2 research system:
+
+- Level 1: factor discovery
+- Level 2: portfolio construction validation
+
+It is not an execution replay engine, implementability-grade platform,
+order-fill simulator, or microstructure execution simulator. Execution realism
+is intentionally out of scope.
+
+---
+
 ## Setup
 
 **Requirements**: Python 3.12, `uv`.
@@ -22,6 +35,14 @@ this works automatically.  For non-editable installs, set:
 export ALPHA_LAB_PROJECT_ROOT=/path/to/alpha-lab
 ```
 
+**External data root**: vendor-backed research datasets should live outside the
+repository.  By default the external store resolves to
+`~/.local/share/alpha-lab/data`. Override it when needed:
+
+```bash
+export ALPHA_LAB_DATA_ROOT=/path/to/alpha-lab-data
+```
+
 A `RuntimeError` is raised at import time if the resolved root does not contain
 `pyproject.toml`, preventing silent artifact misplacement.
 
@@ -36,6 +57,467 @@ In WSL or sandboxed environments with restricted cache directories:
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache make check
 ```
+
+---
+
+## CLI Workflow Map
+
+`alpha-lab --help` shows the unified Level 1/2 router:
+
+- `alpha-lab run ...` (legacy single-experiment route)
+- `alpha-lab real-case ...` (single-factor/model-factor/composite case workflows)
+- `alpha-lab campaign ...` (campaign orchestration and ranking)
+- `alpha-lab bridge ...` (project-pack / round-context / writeback drafting)
+- `alpha-lab data ...` (external dataset ingest / update / export)
+- `alpha-lab profiles` (evaluation-profile discovery)
+
+Profile discovery:
+
+```bash
+alpha-lab profiles
+```
+
+Read-only data inspection example:
+
+```bash
+alpha-lab data query \
+  --sql "select date, asset, close from daily_bars order by date desc, asset limit 5"
+```
+
+Evaluation profile guidance:
+
+| Profile | Primary use | Decision tendency |
+|---|---|---|
+| `default_research` | Routine Level 1/2 research runs | Balanced baseline standards |
+| `exploratory_screening` | Broad candidate discovery and early funneling | More permissive: easier to retain borderline candidates |
+| `stricter_research` | Higher-confidence evidence and Level 2-readiness review | More conservative: stricter robustness/promotion/validation checks |
+
+Profile choice affects all default Level 1/2 decision stages:
+
+1. factor verdict classification
+2. campaign triage label and ranking metadata
+3. Level 2 promotion gate outcomes
+4. Level 2 portfolio-validation guardrails and recommendations
+
+Uncertainty mode defaults to normal-approximation CI (`uncertainty.method=normal`).
+Bootstrap CI is opt-in through evaluation config/profile
+(`uncertainty.method=bootstrap` or `uncertainty.method=block_bootstrap`) and will
+propagate method metadata into outputs.
+
+Campaign flag forwarding example:
+
+```bash
+alpha-lab campaign run research_campaign_1 --evaluation-profile default_research
+```
+
+Bridge quickstart:
+
+```bash
+alpha-lab bridge init-project \
+  --slug momentum-factor \
+  --title-zh 动量因子项目 \
+  --category factor_family \
+  --owner yukun \
+  --market ashare \
+  --frequency daily \
+  --chatgpt-project-name "Momentum Factor"
+
+alpha-lab bridge start-round \
+  --project momentum-factor \
+  --topic "三个月成交额加权动量"
+```
+
+---
+
+## End-to-End Level 1/2 Walkthrough
+
+```bash
+# 1) Inspect available profile(s)
+alpha-lab profiles
+
+# 2) Run single-factor case workflow
+alpha-lab real-case single-factor run configs/real_cases/single_factor/bp.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 3) Run model-factor case workflow
+alpha-lab real-case model-factor run configs/real_cases/model_factor/demo.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 4) Run composite case workflow
+alpha-lab real-case composite run configs/real_cases/composite/value_quality_lowvol.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 5) Run campaign workflow
+alpha-lab campaign run research_campaign_1 \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+Expected Level 1/2 flow for each case:
+
+1. Level 1 evaluation
+2. Campaign triage
+3. Level 2 promotion gate
+4. Level 2 portfolio validation
+
+For `real-case model-factor`, the case-specific front half is:
+
+1. load wide research feature table
+2. train rolling/expanding cross-sectional model on past data only
+3. emit canonical factor output `[date, asset, factor, value]`
+4. continue through the standard Level 1/2 flow above
+
+Primary artifacts to audit:
+
+- `run_manifest.json`
+- `metrics.json`
+- `summary.md`
+- `experiment_card.md`
+- `level2_portfolio_validation/portfolio_validation_summary.json`
+- `level2_portfolio_validation/portfolio_validation_metrics.json`
+- `level2_portfolio_validation/portfolio_validation_package.json`
+
+Core Level 1/2 JSON contract validation is enforced for:
+`run_manifest.json`, `metrics.json`, `campaign_manifest.json`,
+`campaign_results.json`, `research_validation_package.json`,
+`portfolio_validation_summary.json`, `portfolio_validation_metrics.json`,
+`portfolio_validation_package.json`, and `campaign_profile_comparison.json`.
+
+### Tushare Pro Real-Data Quickstart
+
+Use a small pilot first to control point usage, then scale up. The recommended
+flow is: ingest raw snapshots into the external Parquet-backed data store, then
+export a compact case slice as CSV inputs for the existing Level 1/2 pipeline.
+
+```bash
+# 0) Set token (replace with your real token)
+export TUSHARE_TOKEN="your_tushare_token"
+
+# 1) Initialize the external data root once
+alpha-lab data init
+
+# 2) Ingest a pilot Tushare core dataset into the external Parquet store
+alpha-lab data ingest tushare core \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
+  --asset-limit 100
+
+# 3) Export the requested Level 1/2 case slice as canonical CSV inputs
+alpha-lab data export-case-inputs \
+  --output-dir data/processed/real_case_inputs/tushare_v1 \
+  --slice-preset standard
+
+# Optional: use a custom ts_code list instead of full-market fetch
+# --assets-file path/to/ts_codes.txt
+
+# Optional: control long-window chunking
+# --chunk-months 6   # default
+# --chunk-months 0   # disable chunking
+
+# Optional: for daily price-volume research only, skip slow ROE fetches
+# --daily-research-only
+
+# Optional: explicitly export bp / roe_ttm when needed
+# --factors bp roe_ttm
+
+# Optional: fully override the preset window or export mode
+# --start-date 2021-01-01 --end-date 2024-03-31 --universe all_ashare --adjustment raw
+
+# 4) Run single-factor real-case pipelines on generated inputs
+alpha-lab real-case single-factor run configs/real_cases/bp_tushare_v1.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+alpha-lab real-case single-factor run configs/real_cases/roe_tushare_v1.yaml \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+If you see `您的token不对，请确认。`, your current token is invalid or expired.
+Re-check the token value and reset `TUSHARE_TOKEN`.
+
+内置的日频量价切片预设如下：
+
+- `pilot`: 最近 3 年，`top_liquid_300`，`qfq`
+- `standard`: 最近 5 年，`listed_90d`，`qfq`
+- `robust`: 最近 8 年，`listed_90d`，`qfq`
+
+目前支持的流动性 universe 额外包括：
+
+- `top_liquid_300`
+- `top_liquid_500`
+- `top_liquid_800`
+
+它们都按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
+
+Web UI 的自动数据源表单也默认使用 `standard`，并提供 `pilot / standard / robust`
+可选项；你仍然可以在表单里继续手动修改开始/结束日期。
+
+针对 A 股日频量价因子研究，`alpha-lab data export-case-inputs` 现在默认导出更完整的
+研究列：
+
+- `open / high / low / close / pre_close`
+- `volume / amount / vwap / turnover_rate`
+- `up_limit / down_limit / is_limit_up / is_limit_down`
+- `is_suspended / is_st`
+- `is_hs300 / is_zz500 / is_zz1000 / is_sz50`
+
+当 canonical 主库中存在对应表时，还会额外导出：
+
+- `asset_status.csv`
+- `index_membership.csv`
+
+覆盖约束如下：
+
+- 最低要求：最新可用日期向前至少覆盖最近 3 年，否则 `validate` 会报错
+- 稳健目标：最新可用日期向前覆盖最近 8 年；如果不足 8 年，`validate` 会给 warning
+- `export-case-inputs` 会拒绝超出 `daily_bars` 可用范围的窗口，但会用交易日历把非交易日的开始/结束日期映射到最近的开市边界
+
+长窗口的 Tushare ingest / update 默认会自动分块：
+
+- 默认按 `6` 个月分块
+- CLI 会打印每个 chunk 和每个主要抓取阶段的进度
+- 如果你明确想关掉分块，可以传 `--chunk-months 0`
+
+如果你当前只做日频量价研究，推荐在 ingest / update 时加上
+`--daily-research-only`。这样会跳过最慢的 ROE / `financial_indicator`
+抓取，但仍保留以下研究必需数据：
+
+- `daily_bars` 中的 `open/high/low/close/pre_close/volume/amount/vwap/turnover_rate`
+- `up_limit/down_limit/is_limit_up/is_limit_down`
+- `asset_status` 中的 `is_suspended/is_st`
+- `index_membership` 及 `prices.csv` 里的指数成分标记列
+
+### BaoStock Real-Data Quickstart
+
+BaoStock does not require Tushare points and can be used as an alternative
+A-share source.
+
+```bash
+# 1) Generate canonical CSV inputs from BaoStock (pilot mode)
+UV_CACHE_DIR=/tmp/uv-cache uv run --with baostock python \
+  scripts/generate_baostock_real_case_inputs.py \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
+  --asset-limit 100 \
+  --output-dir data/processed/real_case_inputs/baostock_v1
+
+# Optional: use a custom stock list
+# --assets-file path/to/ashare_codes.txt
+
+# 2) Run single-factor real-case pipeline on canonical Tushare inputs
+alpha-lab real-case single-factor run configs/real_cases/single_factor/mom20_ex5_reversal_5d_tushare_qfq_listed90.yaml \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+For a stable first-pass demo, use a price-only recipe config like
+`mom20_ex5_reversal_5d_tushare_qfq_listed90` before moving to wider data bundles.
+
+### Research Bridge + ChatGPT Projects
+
+`alpha-lab bridge` 是 `quant-knowledge + alpha-lab + ChatGPT Projects` 混合工作流的
+项目层。它不会改变默认的 Level 1/2 研究主路径，只负责：
+
+- 在 `quant-knowledge/55_projects/<slug>/` 下维护项目状态
+- 生成适合上传到 ChatGPT Project 的稳定项目包与单轮上下文包
+- 把讨论结果脚手架成 `alpha-lab` case 草案
+- 把实验结果先沉淀为人工审核草稿，再正式写回 `50_experiments/`
+
+标准命令如下：
+
+```bash
+alpha-lab bridge refresh-project-pack --project momentum-factor
+alpha-lab bridge start-round --project momentum-factor --topic "三个月成交额加权动量"
+alpha-lab bridge scaffold-case --project momentum-factor --round <round_id> --case-name mom_amt_60
+alpha-lab bridge summarize-run --project momentum-factor --round <round_id> --run-root <run_dir>
+alpha-lab bridge apply-writeback --project momentum-factor --draft <draft_path>
+```
+
+生成物分层：
+
+- 稳定项目包：
+  - `01_project_brief.md`
+  - `02_project_rules.md`
+  - `03_card_map.md`
+  - `10_active_state.md`
+- 单轮包：
+  - `30_rounds/<round_id>/round_context_digest.md`
+  - `30_rounds/<round_id>/round_prompt.md`
+  - `30_rounds/<round_id>/web_search_tasks.md`
+  - `30_rounds/<round_id>/discussion_capture.md`
+- 回写草稿：
+  - `50_writeback_drafts/*__writeback_draft.md`
+  - `50_writeback_drafts/*__state_update_patch.md`
+
+`apply-writeback` 默认要求 draft frontmatter 里已经人工改成
+`review_status: approved`。这一步完成后，bridge 会：
+
+- 把 `experiment_card.md / summary.md / run_manifest.json` 写入 `50_experiments/`
+- 更新 `55_projects/<slug>/10_active_state.md`
+- 向 `55_projects/<slug>/20_decision_log.md` 追加一条项目级结论
+
+### Web UI + BaoStock 自定义因子输入（推荐）
+
+在 Web UI 里选择 `data_source=baostock` 时，内置只会自动映射 `bp/roe_ttm`。
+如果你要跑自定义因子，推荐两种方式：
+
+1. 离线先产出标准 `factor.csv`（手动模式上传 spec）。
+2. 在 spec 里写 `factor_input.recipe`，让 Web UI 在拉到 `prices.csv` 后自动生成因子。
+
+建议分层：
+- `factor_input.recipe`：因子构建层（base/preprocess/orthogonalize）。
+- 顶层 `direction`：组合方向层。
+- 顶层 `preprocess`：回测层；如果 `factor_input.mode=recipe` 且
+  `disable_pipeline_preprocess=true`，Web UI 会自动禁用这一层，避免重复处理。
+
+标准因子文件格式（必须）：
+
+| date | asset | factor | value |
+|---|---|---|---|
+| 2024-01-03 | 000001.SZ | mom3_resid_lv5 | 0.127 |
+| 2024-01-03 | 600000.SH | mom3_resid_lv5 | -0.084 |
+
+示例 spec（可直接上传 Web UI，选择 `Baostock`）：
+
+```yaml
+name: mom3_resid_lv5_demo
+factor_name: mom3_resid_lv5
+factor_path: ./placeholder.csv
+prices_path: ./placeholder_prices.csv
+factor_input:
+  mode: recipe
+  disable_pipeline_preprocess: true
+  recipe:
+    base:
+      method: momentum
+      window: 3
+    preprocess:
+      winsorize:
+        enabled: true
+        lower: 0.01
+        upper: 0.99
+        min_group_size: 5
+      standardization:
+        method: zscore
+        min_group_size: 5
+    orthogonalize:
+      enabled: true
+      exposures:
+        - method: low_volatility
+          window: 5
+      min_obs: 20
+      ridge: 1.0e-8
+rebalance_frequency: M
+n_quantiles: 5
+direction: long
+universe:
+  name: baostock_all_a
+  path: ./placeholder_universe.csv
+  in_universe_column: in_universe
+target:
+  kind: forward_return
+  horizon: 5
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: dist/web_ui_runs
+```
+
+如果希望先离线生成因子再上传：
+
+```bash
+uv run python scripts/build_factor_from_recipe.py \
+  --recipe path/to/recipe.yaml \
+  --prices data/processed/real_case_inputs/baostock_v1/prices.csv \
+  --factor-name mom3_resid_lv5 \
+  --output data/processed/real_case_inputs/baostock_v1/mom3_resid_lv5.csv
+```
+
+### Profile-Aware Compact Workflow
+
+Run one deterministic case under two profiles and export side-by-side
+comparisons:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_level12_example.py \
+  --output-root-dir dist/examples/profile_aware_level12 \
+  --profiles exploratory_screening default_research
+```
+
+Inspect:
+
+- `dist/examples/profile_aware_level12/profile_comparison.md`
+- `dist/examples/profile_aware_level12/profile_comparison.json`
+- `dist/examples/profile_aware_level12/runs/<profile>/profile_aware_bp_single_factor/metrics.json`
+
+See `docs/profile_aware_level12_example.md` for the full walkthrough.
+
+### Profile-Aware Campaign Comparison Workflow
+
+Run a compact deterministic multi-case campaign under multiple profiles and
+export campaign-level profile sensitivity:
+
+```bash
+alpha-lab campaign compare-profiles \
+  --source example \
+  --output-root-dir dist/examples/profile_aware_campaign_level12 \
+  --pair-mode adjacent \
+  --artifact-hint-path-mode relative \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+Inspect:
+
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.md`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_case_matrix.csv`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_dashboard_zh.html` (factor-first dashboard)
+
+For an existing campaign definition:
+
+```bash
+alpha-lab campaign compare-profiles \
+  --source campaign \
+  --campaign-config configs/campaigns/research_campaign_1/campaign.yaml \
+  --output-root-dir dist/campaign_profile_comparisons/research_campaign_1 \
+  --pair-mode adjacent \
+  --artifact-hint-path-mode relative \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+By default, comparison artifact hints are rendered relative to `--output-root-dir`
+for portability. Use `--artifact-hint-path-mode absolute` to keep absolute paths.
+Use `--pair-mode all_pairs` to include non-adjacent profile pairs such as
+`exploratory_screening -> stricter_research`.
+
+Render a Chinese-first local HTML dashboard from comparison outputs:
+
+```bash
+alpha-lab campaign render-dashboard \
+  --comparison-json dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json \
+  --output-html dist/examples/profile_aware_campaign_level12/campaign_profile_dashboard_zh.html \
+  --overwrite
+```
+
+Legacy script route remains available for backward compatibility:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_campaign_level12_example.py \
+  --output-root-dir dist/examples/profile_aware_campaign_level12 \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+See `docs/profile_aware_campaign_level12_example.md` for the full walkthrough.
 
 ---
 
@@ -286,6 +768,11 @@ Setup, Results, and YAML frontmatter are auto-generated from the
 visible notice to that effect.  Interpretation, Next Steps, Open Questions,
 and Notes are placeholders for researcher completion.
 
+Generated research cards should be Chinese-first in their human-readable
+sections. Keep the body and headings in Chinese by default, and preserve
+English only for necessary technical terms, proper nouns, formulas, code
+symbols, file paths, and quoted source titles.
+
 **Vault path resolution order:**
 `vault_path` argument → `OBSIDIAN_VAULT_PATH` env var.  An empty or whitespace
 env var is treated as "not configured".
@@ -394,5 +881,5 @@ Two `UserWarning`s are raised for clearly no-op parameter combinations:
 - No full backtesting engine or realistic execution simulation.
 - No position accounting or broker integration.
 - No market impact or intraday slippage model.
-- No database, dashboard, or streaming experiment tracking.
+- No database, deployed multi-user dashboard, or streaming experiment tracking.
 - Cost model is a minimal research friction estimate only.

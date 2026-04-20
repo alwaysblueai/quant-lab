@@ -1,75 +1,66 @@
-# Alpha Lab Agent Rules
+# quant-lab AGENT Rules
 
-## Knowledge reference layer
+## 1) Scope Boundary (Permanent)
+- Core scope is only:
+  - Level 1: factor discovery
+  - Level 2: portfolio construction validation
+- Experimental only:
+  - Future Level 3 replay / implementability
+  - execution replay, fill simulation, adapter parity, execution semantics auditing
 
-This repo is the **implementation layer**.  The **knowledge layer** lives at:
+## 2) Hard Separation Rules
+- Never introduce Level 3 semantics into:
+  - core/public APIs (`src/alpha_lab` Level 1/2 modules)
+  - default CLI workflows/help text
+  - default docs narrative
+  - default test surface
+- Level 3 code must stay isolated under experimental namespaces and opt-in commands.
 
-```
-/path/to/quant-knowledge
-```
+## 3) Core Engineering Priorities
+- Preserve research-integrity guarantees first:
+  - no future data usage
+  - no label-feature leakage
+  - explicit temporal alignment and split discipline
+  - PIT/as-of and cross-timeframe correctness
+- Prefer minimal, high-confidence edits over broad redesign.
+- Keep code and documentation aligned in the same change.
+- When adding new features, prioritize:
+  - factor diagnostics and robustness analysis
+  - portfolio validation and sensitivity analysis
+  - reproducible reporting and experiment export
+  - not execution realism
 
-Before implementing a factor or designing an experiment, consult:
+## 4) Default vs Experimental Testing
+- Default test workflow excludes `experimental_level3` tests.
+- Mark Level 3 tests with `@pytest.mark.experimental_level3` under `tests/experimental_level3/`.
+- Run experimental tests only when explicitly requested.
 
-| Need | Where to look |
-|------|---------------|
-| Factor definition / hypothesis | `30_factors/Factor - *.md` |
-| Algorithm / estimation method | `20_methods/Method - *.md` |
-| Pre-flight checklist | `60_playbooks/Playbook - *.md` |
-| End-to-end pipeline pattern | `80_pipelines/Pipeline - *.md` |
-| Concept definition | `10_concepts/Concept - *.md` |
+## 5) Main Commands
+- If `uv` cache permissions are restricted, prefix commands with:
+  - `UV_CACHE_DIR=/tmp/uv-cache`
+- Full local gate:
+  - `make check`
+- Individual checks:
+  - `make lint`
+  - `make typecheck`
+  - `make test`
+- Direct equivalents:
+  - `uv run --no-sync --frozen ruff check .`
+  - `uv run --no-sync --frozen mypy src`
+  - `uv run --no-sync --frozen pytest`
+- Experimental-only tests:
+  - `uv run --no-sync --frozen pytest -m experimental_level3 tests/experimental_level3`
 
-After an experiment, export the result card back to quant-knowledge:
+## 6) Pre-Finish Review Checklist
+- Scope: change remains Level 1/2 by default.
+- API/CLI/docs: no Level 3 semantics leaked into core/default paths.
+- Integrity: temporal/leakage guarantees preserved or strengthened.
+- Tests: core tests updated; experimental tests marked and isolated.
+- Docs: README/docs match actual behavior.
+- Diff quality: minimal, coherent, and reversible.
 
-```python
-from alpha_lab.reporting import export_experiment_card
-path = export_experiment_card(result, name="momentum-5d-Ashare")
-# writes to <OBSIDIAN_VAULT_PATH>/50_experiments/Exp - YYYYMM - momentum-5d-Ashare.md
-```
-
-The vault root must already exist.  The `50_experiments/` subdir is created on demand.
-
-By default the call raises `FileExistsError` if the card already exists.
-Pass `overwrite=True` to replace an existing card intentionally.
-
-The generated card marks Setup and Results as **auto-generated** (do not edit
-manually) and leaves Interpretation, Next Steps, Open Questions, and Notes as
-**manual sections** for researcher completion.
-
-**Rule**: quant-knowledge is read-only from this repo's perspective except for
-`50_experiments/` which alpha-lab writes to via `export_experiment_card`.
-
----
-
-## Core research constraints
-- Never use future data.
-- Never leak labels into features.
-- Always state the timestamp alignment explicitly.
-- Always specify train/validation/test split.
-- Always state transaction cost and slippage assumptions.
-- Prefer auditable, modular code over clever code.
-
-## Canonical data contracts
-- Reusable factor outputs must be long-form with columns: `date`, `asset`, `factor`, `value`.
-- There must be at most one row per (`date`, `asset`, `factor`).
-- Factor values at timestamp `t` may only use information available at or before `t`.
-- Labels and forward returns must be stored separately from factor outputs.
-
-## Project structure
-- Reusable code goes under `src/alpha_lab`.
-- Tests go under `tests`.
-- One-off scripts go under `scripts`.
-- Exploratory work goes under `notebooks`.
-
-## Coding expectations
-- Write small functions with explicit inputs and outputs.
-- Add at least one test for every reusable function.
-- Add regression tests for known leakage or alignment risks.
-- When editing code, explain what changed and why.
-- When proposing factors, state hypothesis, horizon, and risk of leakage.
-
-## Remediation rules
-- Prefer the smallest coherent fix over broad redesign.
-- Before editing, identify the canonical schema and enforce it consistently.
-- Any factor implementation must be tested against sparse per-asset date histories.
-- README must describe only implemented capabilities, not aspirational ones.
-- Do not leave critical framework files untracked once they are part of the claimed repository surface.
+## 7) Card Language Policy
+- Generated cards, summaries, and human-facing research docs should be Chinese-first.
+- The main body, section titles, and explanatory text should use Chinese by default.
+- Preserve English only where it is necessary for professional terminology, proper nouns, established technical abbreviations, formulas, code symbols, file paths, or quoted source titles.
+- Avoid mixed-language prose unless the English phrase is the canonical term or is required for exact technical meaning.

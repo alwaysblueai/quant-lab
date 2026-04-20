@@ -498,8 +498,8 @@ class ResearchDashboardData:
     backtests: tuple[PortfolioBacktestSummary, ...] = field(default_factory=tuple)
     lineage_registry: ResearchLineageRegistry = field(default_factory=ResearchLineageRegistry)
     robustness_summaries: tuple[RobustnessSummary, ...] = field(default_factory=tuple)
-    factor_correlation_matrix: tuple[tuple[str, tuple[tuple[str, float | None], ...]], ...] = (
-        field(default_factory=tuple)
+    factor_correlation_matrix: tuple[tuple[str, tuple[tuple[str, float | None], ...]], ...] = field(
+        default_factory=tuple
     )
     factor_family_summary: tuple[tuple[str, int], ...] = field(default_factory=tuple)
     shortlist_recommendations: tuple[str, ...] = field(default_factory=tuple)

@@ -210,7 +210,9 @@ def test_export_markdown_notice_appears_before_setup(vault: Path, result) -> Non
     path = export_experiment_card(result, name="notice-order-test", vault_path=vault)
     content = path.read_text(encoding="utf-8")
     notice_pos = content.lower().find("auto-generated")
-    setup_pos = content.find("## Setup")
+    setup_pos = content.find("## 基本信息")
+    assert notice_pos != -1
+    assert setup_pos != -1
     assert notice_pos < setup_pos
 
 
@@ -254,7 +256,7 @@ def test_export_markdown_has_yaml_frontmatter(vault: Path, result) -> None:
 def test_export_markdown_has_required_sections(vault: Path, result) -> None:
     path = export_experiment_card(result, name="sections-test", vault_path=vault)
     content = path.read_text(encoding="utf-8")
-    for section in ("## Setup", "## Results", "## Interpretation", "## Next Steps"):
+    for section in ("## 基本信息", "## 结果", "## 解释", "## 下一步"):
         assert section in content, f"Missing section: {section}"
 
 

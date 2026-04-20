@@ -36,24 +36,20 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     present_files = {p.name for p in output_dir.iterdir() if p.is_file()}
     assert required_files.issubset(present_files)
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_summary.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_summary.json"
     ).exists()
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_metrics.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_metrics.json"
     ).exists()
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_package.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_package.json"
     ).exists()
 
     metrics_payload = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
     assert "metrics" in metrics_payload
     assert "mean_rank_ic" in metrics_payload["metrics"]
+    assert "mean_mutual_information" in metrics_payload["metrics"]
+    assert "mutual_information_ir" in metrics_payload["metrics"]
     assert "mean_long_short_return" in metrics_payload["metrics"]
     assert "mean_ic_ci_lower" in metrics_payload["metrics"]
     assert "mean_ic_ci_upper" in metrics_payload["metrics"]
@@ -182,6 +178,7 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     card_md = (output_dir / "experiment_card.md").read_text(encoding="utf-8")
     assert "## Metrics" in summary_md
     assert "Mean IC 95% CI" in summary_md
+    assert "Mean MI" in summary_md
     assert "Uncertainty Method" in summary_md
     assert "Uncertainty Flags" in summary_md
     assert "Rolling Stability Window" in summary_md
@@ -194,6 +191,7 @@ def test_composite_artifacts_have_required_files_and_fields(tmp_path: Path) -> N
     assert "## 基本信息" in card_md
     assert "## 结果" in card_md
     assert "Mean IC 95% CI" in card_md
+    assert "Mean MI" in card_md
     assert "Uncertainty Method" in card_md
     assert "Uncertainty Flags" in card_md
     assert "Rolling Stability Window" in card_md

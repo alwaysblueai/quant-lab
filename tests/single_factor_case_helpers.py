@@ -61,6 +61,11 @@ def write_demo_single_factor_case(
             "min_obs": 5,
             "ridge": 1e-8,
         },
+        "capacity": {
+            "enabled": True,
+            "participation_rate": 0.05,
+            "adv_lookback": 20,
+        },
         "transaction_cost": {"one_way_rate": 0.001},
         "output": {"root_dir": str(tmp_path / "outputs")},
     }
@@ -95,10 +100,20 @@ def _synthetic_case_tables(
             pred = latent[t - 1] if t > 0 else 0.0
             ret = 0.0018 * pred + rng.normal(0.0, 0.01)
             price = max(price * (1.0 + ret), 1.0)
+            amount = max((800_000.0 + i * 60_000.0 + t * 8_000.0) * price, 1.0)
+            total_mv = max(price * (15_000_000.0 + i * 250_000.0), 1.0)
 
             factor_val = latent[t] + rng.normal(0.0, 0.25)
 
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {
+                    "date": date,
+                    "asset": asset,
+                    "close": float(price),
+                    "amount": float(amount),
+                    "total_mv": float(total_mv),
+                }
+            )
             rows_factor.append(
                 {
                     "date": date,

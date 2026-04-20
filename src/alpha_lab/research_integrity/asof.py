@@ -215,9 +215,8 @@ def validate_asof_monotonicity(
             result=result,
         )
 
-    ordered = (
-        table.sort_values([*by_cols, effective_date_col], kind="mergesort")
-        .reset_index(drop=True)
+    ordered = table.sort_values([*by_cols, effective_date_col], kind="mergesort").reset_index(
+        drop=True
     )
     known_diff = ordered.groupby(by_cols, dropna=False)[known_col].diff()
     non_monotonic_rows = int((known_diff < pd.Timedelta(0)).fillna(False).sum())
@@ -325,9 +324,8 @@ def asof_join_frame(
             object_name="right",
         )
 
-    left_table = (
-        left_table.sort_values([*by_cols, left_on], kind="mergesort")
-        .reset_index(drop=True)
+    left_table = left_table.sort_values([*by_cols, left_on], kind="mergesort").reset_index(
+        drop=True
     )
     right_table = right_table.sort_values(
         [*by_cols, right_effective_col], kind="mergesort"
@@ -343,9 +341,7 @@ def asof_join_frame(
         suffixes=suffixes,
     )
 
-    right_payload_cols = [
-        column for column in right_table.columns if column not in by_cols
-    ]
+    right_payload_cols = [column for column in right_table.columns if column not in by_cols]
     right_output_cols = [
         _merged_column_name(column, left_table.columns, suffixes[1])
         for column in right_payload_cols

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.config import PROCESSED_DATA_DIR
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting import SUMMARY_COLUMNS
 
 DEFAULT_REGISTRY_PATH: Path = PROCESSED_DATA_DIR / "experiment_registry.csv"
@@ -68,25 +68,17 @@ def register_experiment(
         If the existing registry file has an incompatible schema.
     """
     if not isinstance(summary, pd.DataFrame):
-        raise AlphaLabDataError(
-            f"summary must be a pandas DataFrame, got {type(summary).__name__}"
-        )
+        raise AlphaLabDataError(f"summary must be a pandas DataFrame, got {type(summary).__name__}")
     if summary.empty:
         raise AlphaLabDataError("summary DataFrame is empty")
     if len(summary) != 1:
-        raise AlphaLabDataError(
-            f"summary must contain exactly one row, got {len(summary)}"
-        )
+        raise AlphaLabDataError(f"summary must contain exactly one row, got {len(summary)}")
     missing = set(SUMMARY_COLUMNS) - set(summary.columns)
     if missing:
-        raise AlphaLabDataError(
-            f"summary is missing required columns: {sorted(missing)}"
-        )
+        raise AlphaLabDataError(f"summary is missing required columns: {sorted(missing)}")
     extra = set(summary.columns) - set(SUMMARY_COLUMNS)
     if extra:
-        raise AlphaLabDataError(
-            f"summary contains unexpected columns: {sorted(extra)}"
-        )
+        raise AlphaLabDataError(f"summary contains unexpected columns: {sorted(extra)}")
 
     row = _summary_to_registry_row(name, summary, obsidian_path=obsidian_path)
     append_to_registry(row, registry_path)
@@ -158,14 +150,10 @@ def append_to_registry(
 
     missing = set(REGISTRY_COLUMNS) - set(row.columns)
     if missing:
-        raise AlphaLabDataError(
-            f"row is missing required registry columns: {sorted(missing)}"
-        )
+        raise AlphaLabDataError(f"row is missing required registry columns: {sorted(missing)}")
     extra = set(row.columns) - set(REGISTRY_COLUMNS)
     if extra:
-        raise AlphaLabDataError(
-            f"row contains unexpected columns: {sorted(extra)}"
-        )
+        raise AlphaLabDataError(f"row contains unexpected columns: {sorted(extra)}")
 
     path = Path(registry_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,9 +225,7 @@ def _summary_to_registry_row(
         "mean_ic": s["mean_ic"],
         "ic_ir": s["ic_ir"],
         "mean_long_short_return": s["mean_long_short_return"],
-        "mean_cost_adjusted_long_short_return": s[
-            "mean_cost_adjusted_long_short_return"
-        ],
+        "mean_cost_adjusted_long_short_return": s["mean_cost_adjusted_long_short_return"],
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
         "obsidian_path": obsidian_path if obsidian_path is not None else "",
     }

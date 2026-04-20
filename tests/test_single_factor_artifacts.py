@@ -27,6 +27,9 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "ic_timeseries.csv",
         "ic_decay.csv",
         "factor_autocorrelation.csv",
+        "capacity_estimation.csv",
+        "conditional_ic_by_magnitude.csv",
+        "conditional_ic_by_cross_section_size.csv",
         "rolling_stability.csv",
         "group_returns.csv",
         "turnover.csv",
@@ -34,30 +37,28 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "factor_definition.yaml",
         "summary.md",
         "experiment_card.md",
+        "research_tearsheet.json",
+        "research_tearsheet.pdf",
         "integrity_report.json",
         "integrity_report.md",
     }
     present_files = {p.name for p in output_dir.iterdir() if p.is_file()}
     assert required_files.issubset(present_files)
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_summary.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_summary.json"
     ).exists()
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_metrics.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_metrics.json"
     ).exists()
     assert (
-        output_dir
-        / "level2_portfolio_validation"
-        / "portfolio_validation_package.json"
+        output_dir / "level2_portfolio_validation" / "portfolio_validation_package.json"
     ).exists()
 
     metrics_payload = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
     assert "metrics" in metrics_payload
     assert "mean_rank_ic" in metrics_payload["metrics"]
+    assert "mean_mutual_information" in metrics_payload["metrics"]
+    assert "mutual_information_ir" in metrics_payload["metrics"]
     assert "mean_long_short_return" in metrics_payload["metrics"]
     assert "ic_t_stat" in metrics_payload["metrics"]
     assert "ic_p_value" in metrics_payload["metrics"]
@@ -87,6 +88,12 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert "portfolio_validation_status" in metrics_payload["metrics"]
     assert "portfolio_validation_recommendation" in metrics_payload["metrics"]
     assert "portfolio_validation_major_risks" in metrics_payload["metrics"]
+    assert "ic_half_life_horizon" in metrics_payload["metrics"]
+    assert "ic_decay_retention_5_over_1" in metrics_payload["metrics"]
+    assert "ic_decay_rebalance_ratio" in metrics_payload["metrics"]
+    assert "capacity_status" in metrics_payload["metrics"]
+    assert "estimated_capacity_upper_bound" in metrics_payload["metrics"]
+    assert "conditional_ic_extreme_minus_base_ic" in metrics_payload["metrics"]
     assert metrics_payload["metrics"]["research_evaluation_profile"] == "default_research"
     assert "rolling_ic_positive_share" in metrics_payload["metrics"]
     assert "rolling_ic_min_mean" in metrics_payload["metrics"]
@@ -94,6 +101,18 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert "portfolio_validation_summary" not in metrics_payload
     assert "portfolio_validation_metrics" not in metrics_payload
     assert "portfolio_validation_package" not in metrics_payload
+
+    tearsheet_payload = json.loads(
+        (output_dir / "research_tearsheet.json").read_text(encoding="utf-8")
+    )
+    assert tearsheet_payload["artifact_type"] == "alpha_lab_research_tearsheet"
+    assert "verdict_layer" in tearsheet_payload
+    assert "sections" in tearsheet_payload
+    assert "appendix" in tearsheet_payload
+    assert {"setup", "signal", "stability", "conversion_risk"}.issubset(
+        set(tearsheet_payload["sections"])
+    )
+    assert (output_dir / "research_tearsheet.pdf").stat().st_size > 0
 
     purged_summary = json.loads(
         (output_dir / "purged_kfold_summary.json").read_text(encoding="utf-8")
@@ -150,6 +169,9 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert isinstance(factor_definition_yaml, dict)
     assert factor_definition_yaml["factor_name"] == "roe_ttm"
     assert factor_definition_yaml["n_quantiles"] == 5
+    assert factor_definition_yaml["capacity"]["enabled"] is True
+    assert factor_definition_yaml["capacity"]["participation_rate"] == 0.05
+    assert factor_definition_yaml["capacity"]["adv_lookback"] == 20
     assert "preprocess" not in factor_definition_yaml
     assert "output" not in factor_definition_yaml
     assert factor_definition_yaml["transaction_cost"]["one_way_rate"] == 0.001
@@ -179,7 +201,10 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         assert key in summary
     assert summary["rolling_sharpe"] is None
     assert summary["rolling_drawdown"] is None
-    assert summary["nav_points"] == []
+    assert isinstance(summary["nav_points"], list)
+    assert len(summary["nav_points"]) >= 2
+    assert summary["nav_points"][0][0]
+    assert isinstance(summary["nav_points"][0][1], float)
     assert summary["monthly_return_table"] == []
     assert summary["drawdown_table"] == []
     assert summary["subperiod_analysis"] is None
@@ -198,6 +223,7 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
         "post_cost_return",
     ):
         assert key not in backtest_fallback_fields
+    assert "nav_points" not in backtest_fallback_fields
 
     summary_md = (output_dir / "summary.md").read_text(encoding="utf-8")
     card_md = (output_dir / "experiment_card.md").read_text(encoding="utf-8")
@@ -205,8 +231,16 @@ def test_single_factor_artifacts_have_required_files_and_fields(tmp_path: Path) 
     assert "## 初筛结论" in summary_md
     assert "主要阻断项" in summary_md
     assert "## 产物路径" in summary_md
+    assert "IC Half-Life" in summary_md
+    assert "Mean MI" in summary_md
+    assert "Capacity" in summary_md
+    assert "Conditional IC" in summary_md
     assert "## 基本信息" in card_md
     assert "## 关键结果" in card_md
     assert "## 解释" in card_md
     assert "## 下一步" in card_md
     assert "## 备注" in card_md
+    assert "IC Half-Life" in card_md
+    assert "Mean MI" in card_md
+    assert "Capacity" in card_md
+    assert "Conditional IC" in card_md

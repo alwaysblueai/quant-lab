@@ -766,9 +766,7 @@ def validate_campaign_profile_comparison_payload(
                 "must be an object",
             )
         for key, value in cast(Mapping[str, object], transition_delta_label_counts).items():
-            key_label = (
-                f"{label}.campaign_level_summary.transition_delta_label_counts[{key!r}]"
-            )
+            key_label = f"{label}.campaign_level_summary.transition_delta_label_counts[{key!r}]"
             if not _is_non_empty_string(key):
                 _raise(key_label, "key must be a non-empty string")
             if isinstance(value, bool) or not isinstance(value, int):
@@ -807,9 +805,7 @@ def validate_campaign_profile_comparison_payload(
             counts = _require_object(pair_obj, "counts_by_from_to_label", pair_label)
             proportions = _require_object(pair_obj, "proportions_by_from_to_label", pair_label)
             for from_label, to_counts in counts.items():
-                from_label_key = (
-                    f"{pair_label}.counts_by_from_to_label[{from_label!r}]"
-                )
+                from_label_key = f"{pair_label}.counts_by_from_to_label[{from_label!r}]"
                 if not _is_non_empty_string(from_label):
                     _raise(from_label_key, "key must be a non-empty string")
                 if not isinstance(to_counts, Mapping):
@@ -821,9 +817,7 @@ def validate_campaign_profile_comparison_payload(
                     if isinstance(count, bool) or not isinstance(count, int):
                         _raise(to_label_key, "must be an integer")
             for from_label, to_props in proportions.items():
-                from_label_key = (
-                    f"{pair_label}.proportions_by_from_to_label[{from_label!r}]"
-                )
+                from_label_key = f"{pair_label}.proportions_by_from_to_label[{from_label!r}]"
                 if not _is_non_empty_string(from_label):
                     _raise(from_label_key, "key must be a non-empty string")
                 if not isinstance(to_props, Mapping):
@@ -845,10 +839,7 @@ def validate_campaign_profile_comparison_payload(
         pair_rows = _require_list(
             matrix_obj,
             "profile_pairs",
-            (
-                f"{label}.campaign_level_summary."
-                "level12_transition_reason_profile_delta_matrix"
-            ),
+            (f"{label}.campaign_level_summary.level12_transition_reason_profile_delta_matrix"),
         )
         for pair_idx, pair_row in enumerate(pair_rows):
             pair_label = (
@@ -876,9 +867,7 @@ def validate_campaign_profile_comparison_payload(
                 )
             by_label = _require_object(pair_obj, "reason_delta_by_transition_label", pair_label)
             for transition_label, label_payload in by_label.items():
-                item_label = (
-                    f"{pair_label}.reason_delta_by_transition_label[{transition_label!r}]"
-                )
+                item_label = f"{pair_label}.reason_delta_by_transition_label[{transition_label!r}]"
                 if not _is_non_empty_string(transition_label):
                     _raise(item_label, "key must be a non-empty string")
                 if not isinstance(label_payload, Mapping):
@@ -990,11 +979,7 @@ def validate_candidate_recipe_generation_payload(
     *,
     source: str | Path | None = None,
 ) -> None:
-    label = (
-        str(source)
-        if source is not None
-        else "candidate_recipe_generation.json"
-    )
+    label = str(source) if source is not None else "candidate_recipe_generation.json"
     _require_non_empty_string(payload, "schema_version", label)
     artifact_type = _require_non_empty_string(payload, "artifact_type", label)
     if artifact_type != _CANDIDATE_RECIPE_GENERATION_TYPE:
@@ -1115,11 +1100,7 @@ def validate_next_step_recommendations_payload(
     *,
     source: str | Path | None = None,
 ) -> None:
-    label = (
-        str(source)
-        if source is not None
-        else "next_step_recommendations.json"
-    )
+    label = str(source) if source is not None else "next_step_recommendations.json"
     _require_non_empty_string(payload, "schema_version", label)
     artifact_type = _require_non_empty_string(payload, "artifact_type", label)
     if artifact_type != _NEXT_STEP_RECOMMENDATIONS_TYPE:
@@ -1177,11 +1158,7 @@ def validate_artifact_load_diagnostics_payload(
     *,
     source: str | Path | None = None,
 ) -> None:
-    label = (
-        str(source)
-        if source is not None
-        else "artifact_load_diagnostics.json"
-    )
+    label = str(source) if source is not None else "artifact_load_diagnostics.json"
     _require_non_empty_string(payload, "schema_version", label)
     artifact_type = _require_non_empty_string(payload, "artifact_type", label)
     if artifact_type != _ARTIFACT_LOAD_DIAGNOSTICS_TYPE:
@@ -1242,11 +1219,7 @@ def validate_research_artifact_manifest_payload(
     *,
     source: str | Path | None = None,
 ) -> None:
-    label = (
-        str(source)
-        if source is not None
-        else "research_artifact_manifest.json"
-    )
+    label = str(source) if source is not None else "research_artifact_manifest.json"
     _require_non_empty_string(payload, "schema_version", label)
     artifact_type = _require_non_empty_string(payload, "artifact_type", label)
     if artifact_type != _RESEARCH_ARTIFACT_MANIFEST_TYPE:
@@ -1296,10 +1269,7 @@ def validate_research_artifact_manifest_payload(
         }:
             _raise(
                 f"{item_label}.validation_status",
-                (
-                    "must be one of `valid`, `invalid`, `missing`, "
-                    "`unresolved`, `unchecked`"
-                ),
+                ("must be one of `valid`, `invalid`, `missing`, `unresolved`, `unchecked`"),
             )
 
         for key in ("path", "case_name", "profile_name", "lineage_role"):

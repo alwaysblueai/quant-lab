@@ -420,14 +420,10 @@ def _valid_campaign_profile_comparison_payload() -> dict[str, object]:
                         "stable_count": 1,
                         "changed_count": 0,
                         "counts_by_from_to_label": {
-                            "Weakened at portfolio level": {
-                                "Weakened at portfolio level": 1
-                            }
+                            "Weakened at portfolio level": {"Weakened at portfolio level": 1}
                         },
                         "proportions_by_from_to_label": {
-                            "Weakened at portfolio level": {
-                                "Weakened at portfolio level": 1.0
-                            }
+                            "Weakened at portfolio level": {"Weakened at portfolio level": 1.0}
                         },
                     }
                 ]
@@ -712,8 +708,7 @@ def _valid_research_artifact_manifest_payload() -> dict[str, object]:
                 "case_name": "case_a",
                 "profile_name": "default_research",
                 "producer_hint": (
-                    "alpha_lab.real_cases.single_factor.artifacts."
-                    "export_artifact_bundle"
+                    "alpha_lab.real_cases.single_factor.artifacts.export_artifact_bundle"
                 ),
                 "validation_status": "valid",
                 "required_in_strict_mode": True,

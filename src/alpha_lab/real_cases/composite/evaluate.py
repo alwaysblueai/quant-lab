@@ -82,20 +82,27 @@ def evaluate_composite_case(
         )
         raw_row = raw_summary_df.iloc[0]
 
-    ic_timeseries = result.ic_df[["date", "ic"]].merge(
-        result.rank_ic_df[["date", "rank_ic"]],
-        on="date",
-        how="outer",
-        sort=True,
+    ic_timeseries = (
+        result.ic_df[["date", "ic"]]
+        .merge(
+            result.rank_ic_df[["date", "rank_ic"]],
+            on="date",
+            how="outer",
+            sort=True,
+        )
+        .merge(
+            result.mutual_information_df[["date", "mutual_information"]],
+            on="date",
+            how="outer",
+            sort=True,
+        )
     )
     rolling_stability = result.rolling_stability_df.copy()
 
     group_returns = result.quantile_returns_df.rename(
         columns={"quantile": "group", "mean_return": "group_return"}
     )
-    turnover = result.long_short_turnover_df.rename(
-        columns={"long_short_turnover": "turnover"}
-    )
+    turnover = result.long_short_turnover_df.rename(columns={"long_short_turnover": "turnover"})
 
     exposure_df = (
         exposure_summary.copy()
@@ -128,14 +135,10 @@ def evaluate_composite_case(
             errors="coerce",
         ).dropna()
         neutralization_mean_corr_reduction = (
-            float(corr_reduction.mean())
-            if len(corr_reduction) > 0
-            else float("nan")
+            float(corr_reduction.mean()) if len(corr_reduction) > 0 else float("nan")
         )
         neutralization_min_corr_reduction = (
-            float(corr_reduction.min())
-            if len(corr_reduction) > 0
-            else float("nan")
+            float(corr_reduction.min()) if len(corr_reduction) > 0 else float("nan")
         )
         neutralization_exposure_count = int(exposure_df["exposure"].nunique())
 
@@ -159,8 +162,12 @@ def evaluate_composite_case(
         "mean_ic_ci_lower": float(row["mean_ic_ci_lower"]),
         "mean_ic_ci_upper": float(row["mean_ic_ci_upper"]),
         "mean_rank_ic": float(row["mean_rank_ic"]),
+        "mean_mutual_information": float(row["mean_mutual_information"]),
         "mean_rank_ic_ci_lower": float(row["mean_rank_ic_ci_lower"]),
         "mean_rank_ic_ci_upper": float(row["mean_rank_ic_ci_upper"]),
+        "mutual_information_ir": float(row["mutual_information_ir"]),
+        "mutual_information_positive_rate": float(row["mutual_information_positive_rate"]),
+        "mutual_information_valid_ratio": float(row["mutual_information_valid_ratio"]),
         "ic_ir": float(row["ic_ir"]),
         "ic_positive_rate": float(row["ic_positive_rate"]),
         "rank_ic_positive_rate": float(row["rank_ic_positive_rate"]),
@@ -173,9 +180,7 @@ def evaluate_composite_case(
         "long_short_hit_rate": float(row["long_short_hit_rate"]),
         "long_short_return_per_turnover": float(row["long_short_return_per_turnover"]),
         "subperiod_ic_positive_share": float(row["subperiod_ic_positive_share"]),
-        "subperiod_long_short_positive_share": float(
-            row["subperiod_long_short_positive_share"]
-        ),
+        "subperiod_long_short_positive_share": float(row["subperiod_long_short_positive_share"]),
         "subperiod_ic_min_mean": float(row["subperiod_ic_min_mean"]),
         "subperiod_long_short_min_mean": float(row["subperiod_long_short_min_mean"]),
         "rolling_window_size": int(row["rolling_window_size"]),
@@ -213,10 +218,30 @@ def evaluate_composite_case(
         "neutralization_exposure_count": neutralization_exposure_count,
         "neutralization_mean_corr_reduction": neutralization_mean_corr_reduction,
         "neutralization_min_corr_reduction": neutralization_min_corr_reduction,
+        "neutralization_comparison": {
+            "raw": {},
+            "neutralized": {},
+            "delta": {},
+            "interpretation_flags": [],
+            "interpretation_reasons": [],
+        },
+        "neutralization_comparison_flags": [],
+        "neutralization_comparison_reasons": [],
+        "neutralization_raw_mean_ic": float("nan"),
+        "neutralization_raw_mean_rank_ic": float("nan"),
+        "neutralization_raw_mean_long_short_return": float("nan"),
+        "neutralization_raw_ic_ir": float("nan"),
+        "neutralization_mean_ic_delta": float("nan"),
+        "neutralization_mean_rank_ic_delta": float("nan"),
+        "neutralization_mean_long_short_return_delta": float("nan"),
+        "neutralization_ic_ir_delta": float("nan"),
+        "neutralization_valid_ratio_min_delta": float("nan"),
+        "neutralization_eval_coverage_ratio_mean_delta": float("nan"),
+        "neutralization_uncertainty_overlap_zero_count_delta": float("nan"),
+        "neutralization_rolling_positive_share_min_delta": float("nan"),
+        "neutralization_rolling_worst_mean_min_delta": float("nan"),
         "research_evaluation_profile": evaluation_config.profile_name,
-        "research_evaluation_snapshot": research_evaluation_audit_snapshot(
-            evaluation_config
-        ),
+        "research_evaluation_snapshot": research_evaluation_audit_snapshot(evaluation_config),
     }
     if raw_row is not None:
         comparison = _build_neutralization_comparison(
@@ -249,9 +274,7 @@ def evaluate_composite_case(
     return CompositeEvaluationResult(
         experiment_result=result,
         metrics=metrics,
-        ic_timeseries=ic_timeseries.sort_values("date", kind="mergesort").reset_index(
-            drop=True
-        ),
+        ic_timeseries=ic_timeseries.sort_values("date", kind="mergesort").reset_index(drop=True),
         rolling_stability=rolling_stability.sort_values(
             "date",
             kind="mergesort",

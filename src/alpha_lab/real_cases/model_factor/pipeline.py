@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 
@@ -22,7 +24,6 @@ from alpha_lab.real_cases.single_factor.evaluate import (
     SingleFactorEvaluationResult,
     evaluate_single_factor_case,
 )
-from alpha_lab.research_contracts import validate_prices_table
 from alpha_lab.research_evaluation_config import get_research_evaluation_config
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult, IntegrityReport
 from alpha_lab.research_integrity.exceptions import raise_on_hard_failures
@@ -58,15 +59,21 @@ def run_model_factor_case(
     evaluation_profile: str = "default_research",
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
+    progress_callback: Callable[[str, int], None] | None = None,
 ) -> ModelFactorCaseRunResult:
     """Run one real-case model-factor study end-to-end and export artifacts."""
 
     integrity_checks: list[IntegrityCheckResult] = []
 
+    def _emit_progress(message: str, percent: int) -> None:
+        if progress_callback is not None:
+            progress_callback(message, percent)
+
     def _record_integrity(check: IntegrityCheckResult) -> None:
         integrity_checks.append(check)
         raise_on_hard_failures((check,))
 
+    _emit_progress("读取模型因子实验合同文件", 3)
     spec_path: Path | None = None
     if isinstance(spec_or_path, ModelFactorCaseSpec):
         spec = spec_or_path
@@ -75,7 +82,9 @@ def run_model_factor_case(
         spec = load_model_factor_case_spec(spec_path)
 
     evaluation_config = get_research_evaluation_config(evaluation_profile)
+    _emit_progress("实验合同与评估配置已加载", 10)
 
+    _emit_progress("加载行情、特征与可选股票池", 15)
     universe_mask = load_universe_mask(spec.universe)
     prices = load_prices(spec.prices_path)
     features = _load_features(spec.features_path)
@@ -121,6 +130,7 @@ def run_model_factor_case(
         prices = apply_universe_to_prices(prices, universe_mask)
         features = apply_universe_to_factor(features, universe_mask)
 
+    _emit_progress("训练模型生成因子", 30)
     known_at_col = _detect_known_at_col(features)
     build_result = build_model_factor(
         features,
@@ -162,11 +172,12 @@ def run_model_factor_case(
         )
     )
 
+    _emit_progress("运行模型因子评估", 68)
     evaluation_result = evaluate_single_factor_case(
         prices=prices,
         factor_df=factor_df,
         raw_factor_df=raw_factor_df,
-        spec=spec,
+        spec=cast(Any, spec),
         coverage_by_date=coverage_by_date,
         neutralization_summary=neutral_diag,
         evaluation_config=evaluation_config,
@@ -205,6 +216,7 @@ def run_model_factor_case(
     )
     output_dir = (root_dir.resolve() / spec.name).resolve()
 
+    _emit_progress("导出模型因子研究产物", 90)
     artifact_paths = export_artifact_bundle(
         spec=spec,
         model_factor_result=build_result,
@@ -280,8 +292,7 @@ def _maybe_neutralize_factor(
     missing = required - set(exposures.columns)
     if missing:
         raise ValueError(
-            "neutralization exposure file is missing required columns: "
-            f"{sorted(missing)}"
+            f"neutralization exposure file is missing required columns: {sorted(missing)}"
         )
     known_at_col = None
     if "known_at" in exposures.columns:

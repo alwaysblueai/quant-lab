@@ -13,7 +13,6 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
 from alpha_lab.research_contracts import validate_prices_table
@@ -48,8 +47,7 @@ class FeaturePreprocessConfig:
     def __post_init__(self) -> None:
         if self.missing_policy != "median_impute":
             raise ValueError(
-                "feature_preprocess.missing_policy currently supports only "
-                "'median_impute'"
+                "feature_preprocess.missing_policy currently supports only 'median_impute'"
             )
         if self.scale_features not in {"auto", "standard", "none"}:
             raise ValueError(
@@ -131,9 +129,7 @@ class ModelFactorBuildConfig:
             if not isinstance(column, str) or not column.strip():
                 raise ValueError("feature_columns must contain non-empty strings")
             if column in _RESERVED_FEATURE_COLUMNS:
-                raise ValueError(
-                    f"feature_columns may not include reserved column {column!r}"
-                )
+                raise ValueError(f"feature_columns may not include reserved column {column!r}")
             if column in seen:
                 raise ValueError(f"feature_columns must be unique; duplicate: {column!r}")
             seen.add(column)
@@ -316,22 +312,26 @@ def build_model_factor(
     factor_df = factor_df.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True)
     validate_factor_output(factor_df)
 
-    training_log_df = pd.DataFrame(
-        training_log_rows,
-        columns=[
-            "score_date",
-            "status",
-            "skip_reason",
-            "model_version",
-            "trained_date_start",
-            "trained_date_end",
-            "n_train_dates",
-            "n_train_rows",
-            "n_score_assets",
-            "model_family",
-            "scale_mode",
-        ],
-    ).sort_values("score_date", kind="mergesort").reset_index(drop=True)
+    training_log_df = (
+        pd.DataFrame(
+            training_log_rows,
+            columns=[
+                "score_date",
+                "status",
+                "skip_reason",
+                "model_version",
+                "trained_date_start",
+                "trained_date_end",
+                "n_train_dates",
+                "n_train_rows",
+                "n_score_assets",
+                "model_family",
+                "scale_mode",
+            ],
+        )
+        .sort_values("score_date", kind="mergesort")
+        .reset_index(drop=True)
+    )
 
     feature_importance_df = _combine_feature_importance_frames(
         per_fit_importance_frames,
@@ -568,9 +568,7 @@ def _build_model_diagnostics(
         "feature_columns": list(config.feature_columns),
         "feature_count": len(config.feature_columns),
         "target_horizon": config.target_horizon,
-        "trained_model_versions": int(
-            training_log_df["model_version"].dropna().nunique()
-        ),
+        "trained_model_versions": int(training_log_df["model_version"].dropna().nunique()),
         "n_score_dates_total": int(len(training_log_df)),
         "n_score_dates_scored": int(len(trained_rows)),
         "mean_train_rows": _finite_or_none(

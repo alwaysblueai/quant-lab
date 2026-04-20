@@ -10,6 +10,7 @@ from typing import TypedDict, cast
 class CoreSignalEvidenceMetrics(TypedDict):
     n_dates_used: float | None
     n_dates: float | None
+    rebalance_step_dates: float | None
     mean_ic: float | None
     mean_rank_ic: float | None
     ic_ir: float | None
@@ -29,6 +30,36 @@ class CoreSignalEvidenceMetrics(TypedDict):
     coverage_min: float | None
     eval_coverage_ratio_mean: float | None
     eval_coverage_ratio_min: float | None
+    ic_half_life_horizon: float | None
+    ic_half_life_status: str | None
+    ic_half_life_not_reached: bool
+    ic_decay_rebalance_ratio: float | None
+    ic_decay_mismatch_flag: bool
+
+
+class TailRiskMetrics(TypedDict):
+    ls_max_drawdown: float | None
+    ls_max_drawdown_duration: int | None
+    ls_max_consecutive_loss_days: int | None
+    ls_var_5: float | None
+    ls_cvar_5: float | None
+    ls_calmar_ratio: float | None
+
+
+class RegimeMetrics(TypedDict):
+    regime_flags: tuple[str, ...]
+    regime_has_weakness: bool
+
+
+class MarginalContributionMetrics(TypedDict):
+    fama_macbeth_mean_coefficient: float | None
+    fama_macbeth_t_statistic: float | None
+    fama_macbeth_p_value: float | None
+    fama_macbeth_n_dates: int | None
+    spanning_is_spanned: bool | None
+    spanning_r_squared_increment: float | None
+    marginal_flags: tuple[str, ...]
+    marginal_contribution_weak: bool
 
 
 class UncertaintyEvidenceMetrics(TypedDict):
@@ -92,6 +123,9 @@ class PromotionGateMetrics(TypedDict):
     factor_verdict: str
     campaign_triage: str
     core: CoreSignalEvidenceMetrics
+    tail_risk: TailRiskMetrics
+    regime: RegimeMetrics
+    marginal: MarginalContributionMetrics
     uncertainty: UncertaintyEvidenceMetrics
     rolling: RollingStabilityMetrics
     neutralization: NeutralizationComparisonMetrics
@@ -296,7 +330,9 @@ def project_level12_transition_distribution(
     )
     minimum_cases_with_reasons_per_transition_label = max(
         1,
-        int(LEVEL12_TRANSITION_SUPPORT_THRESHOLDS["minimum_cases_with_reasons_per_transition_label"]),
+        int(
+            LEVEL12_TRANSITION_SUPPORT_THRESHOLDS["minimum_cases_with_reasons_per_transition_label"]
+        ),
     )
     minimum_reason_bucket_count_for_dominance = max(
         1,
@@ -306,9 +342,7 @@ def project_level12_transition_distribution(
     labels = LEVEL12_TRANSITION_TAXONOMY
     counts: dict[str, int] = {label: 0 for label in labels}
     representatives: dict[str, list[str]] = {label: [] for label in labels}
-    artifact_pointers_by_transition_label: dict[str, list[str]] = {
-        label: [] for label in labels
-    }
+    artifact_pointers_by_transition_label: dict[str, list[str]] = {label: [] for label in labels}
     supporting_case_names_by_transition_label: dict[str, list[str]] = {
         label: [] for label in labels
     }
@@ -317,12 +351,8 @@ def project_level12_transition_distribution(
     }
     raw_reason_case_counts: dict[str, dict[str, int]] = {label: {} for label in labels}
     reason_case_counts: dict[str, dict[str, int]] = {label: {} for label in labels}
-    reason_supporting_case_names: dict[str, dict[str, list[str]]] = {
-        label: {} for label in labels
-    }
-    reason_artifact_pointers: dict[str, dict[str, list[str]]] = {
-        label: {} for label in labels
-    }
+    reason_supporting_case_names: dict[str, dict[str, list[str]]] = {label: {} for label in labels}
+    reason_artifact_pointers: dict[str, dict[str, list[str]]] = {label: {} for label in labels}
     n_cases_with_any_reason = {label: 0 for label in labels}
 
     max_representatives = max(0, representative_case_limit)
@@ -396,10 +426,7 @@ def project_level12_transition_distribution(
 
     n_cases = len(case_rows)
     n_observed = n_cases - missing_labels
-    proportions = {
-        label: (counts[label] / n_cases if n_cases > 0 else 0.0)
-        for label in labels
-    }
+    proportions = {label: (counts[label] / n_cases if n_cases > 0 else 0.0) for label in labels}
     reason_rollup_by_transition_label: dict[str, dict[str, object]] = {}
     for label in labels:
         label_case_count = counts[label]
@@ -433,12 +460,9 @@ def project_level12_transition_distribution(
                     **reason_support,
                 }
             )
-        dominant_reasons = [
-            row for row in top_reasons if bool(row.get("minimum_support_met"))
-        ]
+        dominant_reasons = [row for row in top_reasons if bool(row.get("minimum_support_met"))]
         representative_reasons = [
-            reason
-            for reason, _ in sorted_reason_counts[:max_representative_reasons]
+            reason for reason, _ in sorted_reason_counts[:max_representative_reasons]
         ]
         label_reason_support = _support_annotation(
             support_count=min(label_case_count, n_cases_with_any_reason[label]),
@@ -486,9 +510,7 @@ def project_level12_transition_distribution(
             "representative_reasons": representative_reasons,
             "representative_case_names": list(representatives[label]),
             "supporting_case_names": list(supporting_case_names_by_transition_label[label]),
-            "artifact_pointer_hints": list(
-                supporting_artifact_pointers_by_transition_label[label]
-            ),
+            "artifact_pointer_hints": list(supporting_artifact_pointers_by_transition_label[label]),
         }
     distribution_support = _support_annotation(
         support_count=n_observed,
@@ -511,8 +533,7 @@ def project_level12_transition_distribution(
         "proportions_by_transition_label": proportions,
         "representative_cases_by_transition_label": representatives,
         "representative_case_names_by_transition_label": {
-            label: list(case_names)
-            for label, case_names in representatives.items()
+            label: list(case_names) for label, case_names in representatives.items()
         },
         "artifact_pointers_by_transition_label": {
             label: list(artifact_paths)
@@ -543,6 +564,7 @@ def project_core_signal_evidence_metrics(
     return {
         "n_dates_used": _to_float(metrics.get("n_dates_used")),
         "n_dates": _to_float(metrics.get("n_dates")),
+        "rebalance_step_dates": _to_float(metrics.get("rebalance_step_dates")),
         "mean_ic": _to_float(metrics.get("mean_ic")),
         "mean_rank_ic": _to_float(metrics.get("mean_rank_ic")),
         "ic_ir": _to_float(metrics.get("ic_ir")),
@@ -554,9 +576,7 @@ def project_core_signal_evidence_metrics(
         "mean_long_short_return": _to_float(metrics.get("mean_long_short_return")),
         "long_short_ir": _to_float(metrics.get("long_short_ir")),
         "mean_long_short_turnover": _to_float(metrics.get("mean_long_short_turnover")),
-        "long_short_return_per_turnover": _to_float(
-            metrics.get("long_short_return_per_turnover")
-        ),
+        "long_short_return_per_turnover": _to_float(metrics.get("long_short_return_per_turnover")),
         "subperiod_ic_positive_share": subperiod_ic_positive_share,
         "subperiod_long_short_positive_share": subperiod_long_short_positive_share,
         "subperiod_positive_share_min": _min_or_none(
@@ -566,6 +586,11 @@ def project_core_signal_evidence_metrics(
         "coverage_min": _to_float(metrics.get("coverage_min")),
         "eval_coverage_ratio_mean": _to_float(metrics.get("eval_coverage_ratio_mean")),
         "eval_coverage_ratio_min": _to_float(metrics.get("eval_coverage_ratio_min")),
+        "ic_half_life_horizon": _to_float(metrics.get("ic_half_life_horizon")),
+        "ic_half_life_status": _to_text(metrics.get("ic_half_life_status")),
+        "ic_half_life_not_reached": bool(metrics.get("ic_half_life_not_reached")),
+        "ic_decay_rebalance_ratio": _to_float(metrics.get("ic_decay_rebalance_ratio")),
+        "ic_decay_mismatch_flag": bool(metrics.get("ic_decay_mismatch_flag")),
     }
 
 
@@ -592,9 +617,7 @@ def project_uncertainty_evidence_metrics(
         "mean_long_short_return_ci_upper": mean_long_short_return_ci_upper,
         "uncertainty_method": _to_text(metrics.get("uncertainty_method")),
         "uncertainty_confidence_level": _to_float(metrics.get("uncertainty_confidence_level")),
-        "uncertainty_bootstrap_resamples": _to_int(
-            metrics.get("uncertainty_bootstrap_resamples")
-        ),
+        "uncertainty_bootstrap_resamples": _to_int(metrics.get("uncertainty_bootstrap_resamples")),
         "uncertainty_bootstrap_block_length": _to_int(
             metrics.get("uncertainty_bootstrap_block_length")
         ),
@@ -704,6 +727,45 @@ def project_neutralization_comparison_metrics(
     }
 
 
+def project_tail_risk_metrics(
+    metrics: Mapping[str, object],
+) -> TailRiskMetrics:
+    return {
+        "ls_max_drawdown": _to_float(metrics.get("ls_max_drawdown")),
+        "ls_max_drawdown_duration": _to_int(metrics.get("ls_max_drawdown_duration")),
+        "ls_max_consecutive_loss_days": _to_int(metrics.get("ls_max_consecutive_loss_days")),
+        "ls_var_5": _to_float(metrics.get("ls_var_5")),
+        "ls_cvar_5": _to_float(metrics.get("ls_cvar_5")),
+        "ls_calmar_ratio": _to_float(metrics.get("ls_calmar_ratio")),
+    }
+
+
+def project_regime_metrics(
+    metrics: Mapping[str, object],
+) -> RegimeMetrics:
+    flags = _to_text_tuple(metrics.get("regime_flags"))
+    return {
+        "regime_flags": flags,
+        "regime_has_weakness": "regime_conditional_weakness" in flags,
+    }
+
+
+def project_marginal_contribution_metrics(
+    metrics: Mapping[str, object],
+) -> MarginalContributionMetrics:
+    flags = _to_text_tuple(metrics.get("marginal_flags"))
+    return {
+        "fama_macbeth_mean_coefficient": _to_float(metrics.get("fama_macbeth_mean_coefficient")),
+        "fama_macbeth_t_statistic": _to_float(metrics.get("fama_macbeth_t_statistic")),
+        "fama_macbeth_p_value": _to_float(metrics.get("fama_macbeth_p_value")),
+        "fama_macbeth_n_dates": _to_int(metrics.get("fama_macbeth_n_dates")),
+        "spanning_is_spanned": _to_bool(metrics.get("spanning_is_spanned")),
+        "spanning_r_squared_increment": _to_float(metrics.get("spanning_r_squared_increment")),
+        "marginal_flags": flags,
+        "marginal_contribution_weak": "marginal_contribution_weak" in flags,
+    }
+
+
 def project_promotion_gate_metrics(
     metrics: Mapping[str, object],
 ) -> PromotionGateMetrics:
@@ -711,6 +773,9 @@ def project_promotion_gate_metrics(
         "factor_verdict": _to_text(metrics.get("factor_verdict")) or "",
         "campaign_triage": _to_text(metrics.get("campaign_triage")) or "",
         "core": project_core_signal_evidence_metrics(metrics),
+        "tail_risk": project_tail_risk_metrics(metrics),
+        "regime": project_regime_metrics(metrics),
+        "marginal": project_marginal_contribution_metrics(metrics),
         "uncertainty": project_uncertainty_evidence_metrics(metrics),
         "rolling": project_rolling_stability_metrics(metrics),
         "neutralization": project_neutralization_comparison_metrics(metrics),
@@ -799,18 +864,10 @@ def project_campaign_profile_summary_metrics(
         "promotion_reasons": portfolio["promotion_reasons"],
         "promotion_blockers": portfolio["promotion_blockers"],
         "portfolio_validation_status": portfolio["portfolio_validation_status"],
-        "portfolio_validation_recommendation": portfolio[
-            "portfolio_validation_recommendation"
-        ],
-        "portfolio_validation_major_risks": portfolio[
-            "portfolio_validation_major_risks"
-        ],
-        "portfolio_validation_robustness_label": portfolio[
-            "portfolio_validation_robustness_label"
-        ],
-        "portfolio_validation_support_reasons": portfolio[
-            "portfolio_validation_support_reasons"
-        ],
+        "portfolio_validation_recommendation": portfolio["portfolio_validation_recommendation"],
+        "portfolio_validation_major_risks": portfolio["portfolio_validation_major_risks"],
+        "portfolio_validation_robustness_label": portfolio["portfolio_validation_robustness_label"],
+        "portfolio_validation_support_reasons": portfolio["portfolio_validation_support_reasons"],
         "portfolio_validation_fragility_reasons": portfolio[
             "portfolio_validation_fragility_reasons"
         ],
@@ -818,9 +875,7 @@ def project_campaign_profile_summary_metrics(
         "level12_transition_label": transition["transition_label"],
         "level12_transition_interpretation": transition["transition_interpretation"],
         "level12_transition_reasons": transition["key_transition_reasons"],
-        "level12_transition_confirmation_note": transition[
-            "confirmation_vs_degradation_note"
-        ],
+        "level12_transition_confirmation_note": transition["confirmation_vs_degradation_note"],
     }
 
 
@@ -902,9 +957,7 @@ def project_level12_transition_summary(
         transition_interpretation = (
             "Transition cannot be concluded because portfolio-level evaluation is absent."
         )
-        confirmation_note = (
-            "No clear confirmation or degradation can be established yet."
-        )
+        confirmation_note = "No clear confirmation or degradation can be established yet."
     else:
         transition_label = "Inconclusive transition"
         transition_interpretation = (
@@ -915,11 +968,7 @@ def project_level12_transition_summary(
         )
 
     level1_status = verdict
-    level2_status = (
-        recommendation
-        if recommendation != "N/A"
-        else promotion_decision
-    )
+    level2_status = recommendation if recommendation != "N/A" else promotion_decision
     transition_reasons = _build_level12_transition_reasons(
         metrics,
         transition_label=transition_label,
@@ -967,9 +1016,7 @@ def _build_level12_transition_reasons(
     cost_note = _to_text(metrics.get("portfolio_validation_cost_sensitivity_note"))
     if cost_note is not None and "unavailable" not in cost_note.lower():
         reasons.append(f"cost sensitivity: {cost_note}")
-    concentration_note = _to_text(
-        metrics.get("portfolio_validation_concentration_turnover_note")
-    )
+    concentration_note = _to_text(metrics.get("portfolio_validation_concentration_turnover_note"))
     if concentration_note is not None and "unavailable" not in concentration_note.lower():
         reasons.append(f"concentration/turnover: {concentration_note}")
 
@@ -1073,6 +1120,21 @@ def _to_float(value: object) -> float | None:
     return out if math.isfinite(out) else None
 
 
+def _to_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    token = str(value).strip().lower()
+    if token in ("true", "1", "yes"):
+        return True
+    if token in ("false", "0", "no", ""):
+        return False
+    return None
+
+
 def _min_or_none(values: Sequence[float | None]) -> float | None:
     finite = [value for value in values if value is not None]
     return min(finite) if finite else None
@@ -1125,17 +1187,13 @@ def _level12_transition_distribution_interpretation(
 
     max_count = max(counts.values(), default=0)
     if max_count <= 0:
-        return (
-            "No recognized Level 1->Level 2 transition labels are present in "
-            "campaign outputs."
-        )
+        return "No recognized Level 1->Level 2 transition labels are present in campaign outputs."
 
     dominant_labels = [label for label, count in counts.items() if count == max_count]
     if len(dominant_labels) == 1:
         dominant_text = dominant_labels[0]
         message = (
-            f"Most common transition outcome is `{dominant_text}` "
-            f"({max_count}/{n_cases} cases)."
+            f"Most common transition outcome is `{dominant_text}` ({max_count}/{n_cases} cases)."
         )
     else:
         dominant_text = "`, `".join(dominant_labels)

@@ -96,6 +96,8 @@ def parse_mapping_payload(text: str, *, suffix: str) -> Mapping[str, Any]:
         parsed = json.loads(text)
     elif suffix in {".yml", ".yaml"}:
         parsed = yaml_load(text)
+    elif suffix == ".md":
+        parsed = yaml_load(_extract_yaml_from_markdown(text))
     else:
         try:
             parsed = json.loads(text)
@@ -105,6 +107,19 @@ def parse_mapping_payload(text: str, *, suffix: str) -> Mapping[str, Any]:
     if not isinstance(parsed, Mapping):
         raise AlphaLabConfigError("spec root must be a mapping/object")
     return cast(Mapping[str, Any], parsed)
+
+
+def _extract_yaml_from_markdown(text: str) -> str:
+    """Extract the YAML content from a Markdown code fence (```yaml ... ```)."""
+    marker = "```yaml"
+    start = text.find(marker)
+    if start < 0:
+        return text  # no fence found, try raw
+    start += len(marker)
+    end = text.find("```", start)
+    if end < 0:
+        return text[start:]
+    return text[start:end]
 
 
 def yaml_load(text: str) -> object:

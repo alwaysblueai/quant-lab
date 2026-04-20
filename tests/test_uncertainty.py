@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
+from scipy.stats import t as student_t
 
 from alpha_lab.reporting.uncertainty import (
     compute_block_bootstrap_mean_ci,
@@ -202,3 +204,71 @@ def test_compute_core_uncertainty_normal_mode_backward_compatible_default() -> N
     assert baseline.mean_ic_ci_upper == explicit.mean_ic_ci_upper
     assert baseline.uncertainty_bootstrap_block_length is None
     assert explicit.uncertainty_bootstrap_block_length is None
+
+
+def test_compute_mean_ci_small_sample_student_t_option_matches_manual_formula() -> None:
+    values = [0.01, 0.02, 0.03, 0.04, 0.05]
+    ci = compute_mean_ci(
+        values,
+        confidence_level=0.95,
+        use_t_for_small_sample=True,
+        small_sample_threshold=30,
+    )
+    mean = float(np.mean(values))
+    std = float(np.std(values, ddof=1))
+    stderr = std / math.sqrt(len(values))
+    t_crit = float(student_t.ppf(0.975, df=len(values) - 1))
+    expected_half_width = t_crit * stderr
+    assert ci.ci_lower == pytest.approx(mean - expected_half_width)
+    assert ci.ci_upper == pytest.approx(mean + expected_half_width)
+
+
+def test_compute_core_uncertainty_normal_mode_uses_student_t_for_small_samples() -> None:
+    values = [0.01, 0.02, 0.03, 0.04, 0.05]
+    summary = compute_core_uncertainty(
+        ic_values=values,
+        rank_ic_values=values,
+        long_short_values=values,
+        thresholds=UncertaintyConfig(
+            method="normal",
+            confidence_level=0.95,
+            normal_small_sample_use_t=True,
+            normal_small_sample_threshold=30,
+        ),
+    )
+    expected = compute_mean_ci(
+        values,
+        confidence_level=0.95,
+        use_t_for_small_sample=True,
+        small_sample_threshold=30,
+    )
+    assert summary.mean_ic_ci_lower == expected.ci_lower
+    assert summary.mean_ic_ci_upper == expected.ci_upper
+
+
+# ---------------------------------------------------------------------------
+# Small-n_resamples warning
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_warns_when_n_resamples_below_threshold() -> None:
+    values = [0.01, 0.02, 0.015, 0.005, 0.025]
+    with pytest.warns(UserWarning, match="indicative only"):
+        ci = compute_bootstrap_mean_ci(values, n_resamples=50)
+    assert math.isfinite(ci.ci_lower) and math.isfinite(ci.ci_upper)
+
+
+def test_block_bootstrap_warns_when_n_resamples_below_threshold() -> None:
+    values = list(np.linspace(-0.01, 0.02, 20))
+    with pytest.warns(UserWarning, match="indicative only"):
+        compute_block_bootstrap_mean_ci(values, n_resamples=50, block_length=3)
+
+
+def test_bootstrap_does_not_warn_at_or_above_threshold() -> None:
+    values = [0.01, 0.02, 0.015, 0.005, 0.025]
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        compute_bootstrap_mean_ci(values, n_resamples=200)  # at threshold → no warn
+        compute_bootstrap_mean_ci(values, n_resamples=400)

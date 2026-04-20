@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,7 +13,6 @@ from alpha_lab.real_cases.common_io import (
     load_prices,
     load_universe_mask,
 )
-from alpha_lab.research_contracts import validate_prices_table
 from alpha_lab.research_evaluation_config import get_research_evaluation_config
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult, IntegrityReport
 from alpha_lab.research_integrity.exceptions import raise_on_hard_failures
@@ -50,14 +50,20 @@ def run_composite_case(
     evaluation_profile: str = "default_research",
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
+    progress_callback: Callable[[str, int], None] | None = None,
 ) -> CompositeCaseRunResult:
     """Run one real-case composite study end-to-end and export artifacts."""
     integrity_checks: list[IntegrityCheckResult] = []
+
+    def _emit_progress(message: str, percent: int) -> None:
+        if progress_callback is not None:
+            progress_callback(message, percent)
 
     def _record_integrity(check: IntegrityCheckResult) -> None:
         integrity_checks.append(check)
         raise_on_hard_failures((check,))
 
+    _emit_progress("读取组合实验合同文件", 3)
     spec_path: Path | None = None
     if isinstance(spec_or_path, CompositeCaseSpec):
         spec = spec_or_path
@@ -66,7 +72,9 @@ def run_composite_case(
         spec = load_composite_case_spec(spec_path)
 
     evaluation_config = get_research_evaluation_config(evaluation_profile)
+    _emit_progress("实验合同与评估配置已加载", 10)
 
+    _emit_progress("加载行情与可选股票池", 15)
     universe_mask = load_universe_mask(spec.universe)
     prices = load_prices(spec.prices_path)
     max_price_date = pd.Timestamp(prices["date"].max())
@@ -100,12 +108,14 @@ def run_composite_case(
         )
         prices = apply_universe_to_prices(prices, universe_mask)
 
+    _emit_progress("构建线性组合因子", 30)
     combine_result = build_linear_composite(
         spec,
         component_loader=component_loader,
         universe_mask=universe_mask,
     )
     raw_composite_factor = combine_result.composite_factor.copy()
+    _emit_progress("组合因子输出已就绪", 52)
 
     composite_factor, exposure_summary = _maybe_neutralize_composite(
         combine_result.composite_factor,
@@ -125,6 +135,7 @@ def run_composite_case(
         )
     )
 
+    _emit_progress("运行组合因子评估", 68)
     evaluation_result = evaluate_composite_case(
         prices=prices,
         composite_factor=composite_factor,
@@ -165,6 +176,7 @@ def run_composite_case(
     root_dir = root_dir.resolve()
     output_dir = (root_dir / spec.name).resolve()
 
+    _emit_progress("导出组合因子研究产物", 90)
     artifact_paths = export_artifact_bundle(
         spec=spec,
         combine_result=combine_result,

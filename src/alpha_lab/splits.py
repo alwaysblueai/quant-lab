@@ -72,9 +72,9 @@ def time_split(
                 f"val_start ({val_start_ts.date()}) must be at or before "
                 f"test_start ({test_start_ts.date()})"
             )
-        val_mask: np.ndarray = (
-            (dates_ts >= val_start_ts) & (dates_ts < test_start_ts)
-        ).to_numpy(dtype=bool)
+        val_mask: np.ndarray = ((dates_ts >= val_start_ts) & (dates_ts < test_start_ts)).to_numpy(
+            dtype=bool
+        )
         return {"train": train_mask, "val": val_mask, "test": test_mask}
 
     return {"train": train_mask, "test": test_mask}

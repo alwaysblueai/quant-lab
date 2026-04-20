@@ -567,10 +567,7 @@ def build_level2_portfolio_validation_bundle(
         and review_cost_adjusted <= config.min_cost_adjusted_return_warn
     ):
         risks.append("baseline return does not survive simple transaction-cost stress")
-    if (
-        base_max_abs_weight is not None
-        and base_max_abs_weight > config.max_single_name_weight_warn
-    ):
+    if base_max_abs_weight is not None and base_max_abs_weight > config.max_single_name_weight_warn:
         risks.append("portfolio concentration is high in single names")
     if base_effective_names is not None and base_effective_names < config.min_effective_names_warn:
         risks.append("effective diversification is low")
@@ -578,21 +575,15 @@ def build_level2_portfolio_validation_bundle(
         risks.append("baseline portfolio return is non-positive")
     hold_returns = [_to_float(row.get("mean_portfolio_return")) for row in holding_sensitivity]
     finite_hold_returns = [x for x in hold_returns if x is not None]
-    if (
+    if finite_hold_returns and min(
         finite_hold_returns
-        and min(finite_hold_returns) < config.sensitivity_sign_flip_pivot_return
-        < max(finite_hold_returns)
-    ):
+    ) < config.sensitivity_sign_flip_pivot_return < max(finite_hold_returns):
         risks.append("holding-period sensitivity shows sign instability")
     for benchmark_risk in benchmark_risks:
         _append_unique(risks, benchmark_risk)
     benchmark_excess_weak = "excess return is weak relative to benchmark" in benchmark_risks
     standalone_does_not_survive_relative = False
-    if (
-        base_mean_return is not None
-        and base_mean_return > 0.0
-        and benchmark_excess_weak
-    ):
+    if base_mean_return is not None and base_mean_return > 0.0 and benchmark_excess_weak:
         standalone_does_not_survive_relative = True
         _append_unique(
             risks,
@@ -605,9 +596,7 @@ def build_level2_portfolio_validation_bundle(
         "Research-grade portfolio approximation only; no execution replay or fill simulation.",
     ]
     if benchmark_eval.get("status") == "not_available":
-        caveats.append(
-            "Benchmark-relative diagnostics are unavailable in current case artifacts."
-        )
+        caveats.append("Benchmark-relative diagnostics are unavailable in current case artifacts.")
     if rebalance_source == "fallback_default":
         caveats.append(
             "Rebalance step used a conservative default because frequency token was unrecognized."
@@ -792,148 +781,87 @@ def _portfolio_validation_markdown(bundle: Level2PortfolioValidationBundle) -> s
     robustness = _coerce_mapping(summary.get("portfolio_robustness_summary"))
 
     lines = [
-        "# Level 2 Portfolio Validation Package",
+        "# Level 2 Portfolio Validation",
         "",
         f"- Validation status: `{_safe_str(summary.get('validation_status')) or 'N/A'}`",
         f"- Promotion decision: `{_safe_str(summary.get('promotion_decision')) or 'N/A'}`",
         f"- Recommendation: `{_safe_str(summary.get('recommendation')) or 'N/A'}`",
     ]
+
     if robustness:
         lines.extend(
             [
                 "",
-                "## Portfolio Robustness Summary",
+                "## Robustness Summary",
                 "",
-                (
-                    "- Taxonomy label: "
-                    f"`{_safe_str(robustness.get('taxonomy_label')) or 'N/A'}`"
-                ),
-                (
-                    "- Benchmark-relative support: "
-                    f"{_safe_str(robustness.get('benchmark_relative_support_note')) or 'N/A'}"
-                ),
-                (
-                    "- Cost sensitivity: "
-                    f"{_safe_str(robustness.get('cost_sensitivity_note')) or 'N/A'}"
-                ),
-                (
-                    "- Concentration/turnover: "
-                    f"{_safe_str(robustness.get('concentration_turnover_risk_note')) or 'N/A'}"
-                ),
+                f"- Taxonomy: `{_safe_str(robustness.get('taxonomy_label')) or 'N/A'}`",
             ]
         )
-        support_reasons = _to_text_list(robustness.get("support_reasons"))
-        fragility_reasons = _to_text_list(robustness.get("fragility_reasons"))
-        sensitivity_notes = _to_text_list(robustness.get("scenario_sensitivity_notes"))
-        if support_reasons:
-            for reason in support_reasons:
-                lines.append(f"- Support reason: {reason}")
-        else:
-            lines.append("- Support reason: none")
-        if fragility_reasons:
-            for reason in fragility_reasons:
-                lines.append(f"- Fragility reason: {reason}")
-        else:
-            lines.append("- Fragility reason: none")
-        if sensitivity_notes:
-            for sensitivity_note in sensitivity_notes:
-                lines.append(f"- Scenario sensitivity: {sensitivity_note}")
+        for reason in _to_text_list(robustness.get("support_reasons"))[:2]:
+            lines.append(f"- Support reason: {reason}")
+        for reason in _to_text_list(robustness.get("fragility_reasons"))[:2]:
+            lines.append(f"- Fragility reason: {reason}")
 
     lines.extend(
         [
             "",
             "## Baseline Scenario",
             "",
-        (
-            "- Weighting / holding / rebalance-step: "
-            f"`{_safe_str(baseline.get('weighting_method')) or 'N/A'}` / "
-            f"`{_format_value(baseline.get('holding_period'))}` / "
-            f"`{_format_value(baseline.get('rebalance_step'))}`"
-        ),
-        (
-            "- Mean return / IR / turnover: "
-            f"{_format_value(baseline.get('mean_portfolio_return'))} / "
-            f"{_format_value(baseline.get('portfolio_ir'))} / "
-            f"{_format_value(baseline.get('mean_turnover'))}"
-        ),
-        "",
-        "## Concentration & Exposure",
-        "",
-        (
-            "- Max abs weight / top-5 abs share / effective names: "
-            f"{_format_value(concentration.get('max_abs_weight_mean'))} / "
-            f"{_format_value(concentration.get('top5_abs_weight_share_mean'))} / "
-            f"{_format_value(concentration.get('effective_names_mean'))}"
-        ),
-        (
-            "- Gross / net exposure: "
-            f"{_format_value(concentration.get('gross_exposure_mean'))} / "
-            f"{_format_value(concentration.get('net_exposure_mean'))}"
-        ),
-        "",
-        "## Turnover & Cost Sensitivity",
-        "",
-        (
-            "- Turnover range (scenario mean min -> max): "
-            f"{_format_value(turnover.get('scenario_mean_turnover_min'))} -> "
-            f"{_format_value(turnover.get('scenario_mean_turnover_max'))}"
-        ),
-        (
-            "- Review cost rate: "
-            f"{_format_value(transaction_cost.get('review_cost_rate'))}"
-        ),
-    ]
+            (
+                "- Weighting / holding / rebalance-step: "
+                f"`{_safe_str(baseline.get('weighting_method')) or 'N/A'}` / "
+                f"`{_format_value(baseline.get('holding_period'))}` / "
+                f"`{_format_value(baseline.get('rebalance_step'))}`"
+            ),
+            (
+                "- Mean return / IR / turnover: "
+                f"{_format_value(baseline.get('mean_portfolio_return'))} / "
+                f"{_format_value(baseline.get('portfolio_ir'))} / "
+                f"{_format_value(baseline.get('mean_turnover'))}"
+            ),
+            (
+                "- Effective names / max weight: "
+                f"{_format_value(concentration.get('effective_names_mean'))} / "
+                f"{_format_value(concentration.get('max_abs_weight_mean'))}"
+            ),
+            (
+                "- Scenario turnover range: "
+                f"{_format_value(turnover.get('scenario_mean_turnover_min'))} -> "
+                f"{_format_value(turnover.get('scenario_mean_turnover_max'))}"
+            ),
+            (f"- Review cost rate: {_format_value(transaction_cost.get('review_cost_rate'))}"),
+        ]
     )
 
     cost_rows = _coerce_mapping(transaction_cost.get("baseline_by_cost_rate"))
-    if cost_rows:
-        for rate, value in sorted(cost_rows.items(), key=lambda row: row[0]):
-            lines.append(f"- Cost {rate}: adjusted mean return={_format_value(value)}")
-    else:
-        lines.append("- Cost sensitivity: N/A")
+    for rate, value in list(sorted(cost_rows.items(), key=lambda row: row[0]))[:3]:
+        lines.append(f"- Cost {rate}: adjusted mean return={_format_value(value)}")
 
     lines.extend(["", "## Benchmark-Relative Evaluation", ""])
     lines.append(f"- Status: `{_safe_str(benchmark.get('status')) or 'N/A'}`")
     assessment = _safe_str(benchmark.get("assessment"))
     if assessment is not None:
         lines.append(f"- Assessment: `{assessment}`")
-    benchmark_fields = [
+    for key, label in [
         ("benchmark_name", "Benchmark"),
         ("benchmark_excess_return", "Excess return"),
-        ("benchmark_active_return", "Active return"),
-        ("benchmark_relative_return", "Relative return"),
-        ("benchmark_long_short_excess_return", "Long-short excess return"),
         ("benchmark_information_ratio", "Information ratio"),
-        ("benchmark_tracking_error", "Tracking error"),
-        ("benchmark_return_estimate_from_excess", "Estimated benchmark return"),
-        ("benchmark_relative_max_drawdown", "Relative drawdown gap"),
-    ]
-    for key, label in benchmark_fields:
+    ]:
         if key in benchmark:
             lines.append(f"- {label}: {_format_value(benchmark.get(key))}")
-    benchmark_risks = _to_text_list(benchmark.get("risk_flags"))
-    if benchmark_risks:
-        for risk in benchmark_risks:
-            lines.append(f"- Relative risk: {risk}")
-    elif benchmark.get("status") == "available":
-        lines.append("- Relative risk: none")
-    benchmark_note = _safe_str(benchmark.get("note"))
-    if benchmark_note:
-        lines.append(f"- Note: {benchmark_note}")
 
     risks = _to_text_list(summary.get("major_risks"))
-    caveats = _to_text_list(summary.get("major_caveats"))
-    lines.extend(["", "## Risks & Caveats", ""])
     if risks:
-        for risk in risks:
-            lines.append(f"- Risk: {risk}")
-    else:
-        lines.append("- Risk: none")
+        lines.extend(["", "## Major Risks", ""])
+        for risk in risks[:3]:
+            lines.append(f"- {risk}")
+
+    caveats = _to_text_list(summary.get("major_caveats"))
     if caveats:
-        for caveat in caveats:
-            lines.append(f"- Caveat: {caveat}")
-    else:
-        lines.append("- Caveat: none")
+        lines.extend(["", "## Major Caveats", ""])
+        for caveat in caveats[:3]:
+            lines.append(f"- {caveat}")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -1002,15 +930,26 @@ def _run_scenarios(
 ) -> list[ScenarioMetricsRow]:
     scenarios: list[ScenarioMetricsRow] = []
     for method in methods:
+        weights = portfolio_weights(
+            eval_factor,
+            method=method,
+            top_k=leg_k,
+            bottom_k=leg_k,
+        )
+        if weights.empty:
+            continue
+
+        turnover = portfolio_turnover(weights)
+        active_turnover = _active_turnover(turnover, rebalance_step=rebalance_step)
+        turnover_values = (
+            pd.to_numeric(active_turnover["portfolio_turnover"], errors="coerce").dropna()
+            if not active_turnover.empty
+            else pd.Series(dtype=float)
+        )
+        mean_turnover = float(turnover_values.mean()) if len(turnover_values) > 0 else float("nan")
+        concentration = _concentration_metrics(weights)
+
         for holding_period in holding_grid:
-            weights = portfolio_weights(
-                eval_factor,
-                method=method,
-                top_k=leg_k,
-                bottom_k=leg_k,
-            )
-            if weights.empty:
-                continue
             portfolio_return = simulate_portfolio_returns(
                 weights,
                 eval_returns,
@@ -1020,9 +959,6 @@ def _run_scenarios(
             if portfolio_return.empty:
                 continue
 
-            turnover = portfolio_turnover(weights)
-            active_turnover = _active_turnover(turnover, rebalance_step=rebalance_step)
-
             ret_values = pd.to_numeric(
                 portfolio_return["portfolio_return"],
                 errors="coerce",
@@ -1030,18 +966,6 @@ def _run_scenarios(
             mean_return = float(ret_values.mean()) if len(ret_values) > 0 else float("nan")
             ir = _mean_div_std(ret_values)
             hit_rate = float((ret_values > 0).mean()) if len(ret_values) > 0 else float("nan")
-
-            turnover_values = (
-                pd.to_numeric(active_turnover["portfolio_turnover"], errors="coerce").dropna()
-                if not active_turnover.empty
-                else pd.Series(dtype=float)
-            )
-            mean_turnover = (
-                float(turnover_values.mean()) if len(turnover_values) > 0 else float("nan")
-            )
-
-            concentration = _concentration_metrics(weights)
-
             cost_adjusted_by_rate: dict[str, float | None] = {}
             for rate in cost_grid:
                 cost_adjusted = portfolio_cost_adjusted_returns(
@@ -1111,9 +1035,7 @@ def _holding_sensitivity_rows(
                 "mean_portfolio_return": _to_float(row.get("mean_portfolio_return")),
                 "mean_turnover": _to_float(row.get("mean_turnover")),
                 "mean_cost_adjusted_return_review_rate": _to_float(
-                    cost_map.get(
-                    _rate_key(review_cost_rate)
-                    )
+                    cost_map.get(_rate_key(review_cost_rate))
                 ),
             }
         )
@@ -1141,9 +1063,7 @@ def _weighting_sensitivity_rows(
                 "mean_portfolio_return": _to_float(row.get("mean_portfolio_return")),
                 "mean_turnover": _to_float(row.get("mean_turnover")),
                 "mean_cost_adjusted_return_review_rate": _to_float(
-                    cost_map.get(
-                    _rate_key(review_cost_rate)
-                    )
+                    cost_map.get(_rate_key(review_cost_rate))
                 ),
             }
         )
@@ -1242,9 +1162,7 @@ def _benchmark_relative_summary(
         and portfolio_max_drawdown is not None
         and benchmark_max_drawdown is not None
     ):
-        benchmark_relative_drawdown = (
-            abs(portfolio_max_drawdown) - abs(benchmark_max_drawdown)
-        )
+        benchmark_relative_drawdown = abs(portfolio_max_drawdown) - abs(benchmark_max_drawdown)
 
     has_relative_signal = any(
         value is not None
@@ -1357,8 +1275,7 @@ def _inconclusive_portfolio_robustness_summary(
         ],
         "benchmark_relative_support_note": benchmark_note,
         "cost_sensitivity_note": (
-            "Cost sensitivity is inconclusive because portfolio validation did "
-            "not complete."
+            "Cost sensitivity is inconclusive because portfolio validation did not complete."
         ),
         "concentration_turnover_risk_note": (
             "Concentration/turnover diagnostics are inconclusive because "
@@ -1623,9 +1540,7 @@ def _cost_sensitivity_assessment(
     config: Level2PortfolioValidationConfig,
 ) -> tuple[str, bool, bool]:
     finite_values = [
-        value
-        for value in (_to_float(raw) for raw in cost_by_rate.values())
-        if value is not None
+        value for value in (_to_float(raw) for raw in cost_by_rate.values()) if value is not None
     ]
     if not finite_values:
         return (
@@ -1671,20 +1586,11 @@ def _concentration_turnover_assessment(
     risks: list[str] = []
     max_abs_weight = _to_float(concentration_summary.get("max_abs_weight_mean"))
     effective_names = _to_float(concentration_summary.get("effective_names_mean"))
-    if (
-        base_mean_turnover is not None
-        and base_mean_turnover > config.max_mean_turnover_warn
-    ):
+    if base_mean_turnover is not None and base_mean_turnover > config.max_mean_turnover_warn:
         risks.append("turnover is high under baseline assumptions")
-    if (
-        max_abs_weight is not None
-        and max_abs_weight > config.max_single_name_weight_warn
-    ):
+    if max_abs_weight is not None and max_abs_weight > config.max_single_name_weight_warn:
         risks.append("single-name concentration is high")
-    if (
-        effective_names is not None
-        and effective_names < config.min_effective_names_warn
-    ):
+    if effective_names is not None and effective_names < config.min_effective_names_warn:
         risks.append("effective diversification is low")
     if not risks:
         return (

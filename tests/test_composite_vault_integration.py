@@ -43,8 +43,9 @@ def test_composite_pipeline_without_vault_is_skipped(
     manifest = json.loads(result.artifact_paths["run_manifest"].read_text(encoding="utf-8"))
     vault_meta = manifest["vault_export"]
     assert vault_meta["enabled"] is False
-    assert vault_meta["status"] == "skipped"
-    assert vault_meta["error"] is None
+    assert vault_meta["status"] == "failed"
+    assert isinstance(vault_meta["error"], str)
+    assert "OBSIDIAN_VAULT_PATH" in vault_meta["error"]
 
 
 def test_composite_pipeline_invalid_vault_does_not_fail_run(tmp_path: Path) -> None:

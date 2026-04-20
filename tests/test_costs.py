@@ -19,9 +19,7 @@ def _make_ls_df(returns: list[float]) -> pd.DataFrame:
 
 def _make_ls_turnover_df(turnovers: list[float]) -> pd.DataFrame:
     dates = pd.date_range("2024-01-01", periods=len(turnovers), freq="B")
-    return pd.DataFrame(
-        {"date": dates, "factor": "f", "long_short_turnover": turnovers}
-    )
+    return pd.DataFrame({"date": dates, "factor": "f", "long_short_turnover": turnovers})
 
 
 # ---------------------------------------------------------------------------

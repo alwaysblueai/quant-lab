@@ -77,10 +77,7 @@ def render_campaign_report(campaign_output_dir: str | Path) -> str:
             CAMPAIGN_SECTION_TITLES[0],
             [
                 f"- Campaign name: `{campaign_name}`",
-                (
-                    "- Evaluation standard profile: "
-                    f"`{_campaign_profile_note(rows)}`"
-                ),
+                (f"- Evaluation standard profile: `{_campaign_profile_note(rows)}`"),
             ],
         )
     )
@@ -172,10 +169,7 @@ def render_campaign_report(campaign_output_dir: str | Path) -> str:
     ]
     best_case = _best_case(rows, metric="ic_ir")
     if best_case is not None:
-        conclusions.append(
-            "- Best ICIR among successful cases: "
-            f"`{best_case}`"
-        )
+        conclusions.append(f"- Best ICIR among successful cases: `{best_case}`")
     top_ranked = next(
         (row for row in ranked_rows if format_text(row.get("status")) == "success"),
         None,
@@ -211,9 +205,9 @@ def render_campaign_report(campaign_output_dir: str | Path) -> str:
             for row in ranked_rows
             if format_text(row.get("status")) == "success"
             and format_text(
-                _as_campaign_profile_summary_metrics(
-                    row.get("profile_summary_metrics")
-                )["portfolio_validation_recommendation"]
+                _as_campaign_profile_summary_metrics(row.get("profile_summary_metrics"))[
+                    "portfolio_validation_recommendation"
+                ]
             )
             == "Credible at portfolio level"
         ),
@@ -251,9 +245,7 @@ def write_campaign_report(
     campaign_dir.mkdir(parents=True, exist_ok=True)
     report_path = campaign_dir / "campaign_report.md"
     if report_path.exists() and not overwrite:
-        raise FileExistsError(
-            f"{report_path} already exists. Pass overwrite=True to replace it."
-        )
+        raise FileExistsError(f"{report_path} already exists. Pass overwrite=True to replace it.")
     report_path.write_text(render_campaign_report(campaign_dir), encoding="utf-8")
     return report_path
 
@@ -347,10 +339,7 @@ def _cross_case_insights(rows: list[dict[str, object]]) -> list[str]:
         "- Quality proxy (name contains quality/roe): "
         f"{_insight_entry(quality_case, rows, metric='ic_ir')}"
     )
-    lines.append(
-        "- Composite cases: "
-        f"{_insight_entry(composite_case, rows, metric='ic_ir')}"
-    )
+    lines.append(f"- Composite cases: {_insight_entry(composite_case, rows, metric='ic_ir')}")
 
     overall_best = _best_case(rows, metric="mean_long_short_return")
     if overall_best is not None:
@@ -372,9 +361,7 @@ def _highlight_line(row: dict[str, object]) -> str:
     profile_summary_metrics = _as_campaign_profile_summary_metrics(
         row.get("profile_summary_metrics")
     )
-    portfolio_metrics = _as_portfolio_validation_metrics(
-        row.get("portfolio_validation_metrics")
-    )
+    portfolio_metrics = _as_portfolio_validation_metrics(row.get("portfolio_validation_metrics"))
     core_metrics = promotion_gate_metrics["core"]
     uncertainty_metrics = promotion_gate_metrics["uncertainty"]
     rolling_metrics = promotion_gate_metrics["rolling"]
@@ -613,9 +600,7 @@ def _transition_distribution_lines(
         "Improved at portfolio level",
         "Inconclusive transition",
     ):
-        lines.append(
-            f"- {label}: {counts.get(label, 0)} ({proportions.get(label, 0.0):.1%})"
-        )
+        lines.append(f"- {label}: {counts.get(label, 0)} ({proportions.get(label, 0.0):.1%})")
     lines.append("- Dominant transition reasons by label:")
     for label in (
         "Confirmed at portfolio level",
@@ -765,10 +750,7 @@ def _neutralization_comparison_note(
     delta_ls = metrics["neutralization_mean_long_short_return_delta"]
     if delta_ic is None and delta_ls is None:
         return "N/A"
-    return (
-        f"delta IC={format_metric(delta_ic)}, "
-        f"delta L/S={format_metric(delta_ls)}"
-    )
+    return f"delta IC={format_metric(delta_ic)}, delta L/S={format_metric(delta_ls)}"
 
 
 if __name__ == "__main__":

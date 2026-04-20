@@ -1,26 +1,43 @@
 # Alpha Lab
 
-Minimal quantitative research workspace for factor prototyping.
+Research-grade quant lab for Level 1/2 workflows:
+
+- Level 1: factor discovery
+- Level 2: portfolio construction validation
 
 ## Scope
 
-This repository is intentionally small. It supports:
+Alpha Lab is a research system for Level 1 factor discovery and Level 2
+portfolio construction validation, focused on correctness, robustness, and
+reproducibility.
+
+`alpha-lab` is explicitly scoped as a research system for correctness,
+robustness, and reproducibility. It supports:
 
 - reusable factor code under `src/alpha_lab`
-- tests, linting, and type checking for local development
-- documented data conventions for auditable research
+- point-in-time and anti-leakage integrity checks
+- factor evaluation diagnostics (IC/RankIC, quantile spread, turnover, subperiod robustness, instability flags)
+- research-level portfolio validation (weight mapping, constraints, turnover, simple costs)
+- reproducible reporting and experiment export to quant-knowledge
 
-It does not currently provide a full backtesting engine, production data ingestion
-pipeline, realistic execution simulation, or broker integration.
+`alpha-lab` is **not**:
+
+- an execution replay engine
+- an implementability-grade platform
+- an order-fill simulator
+- a microstructure-aware execution simulator
+- a real execution-semantics validator
 
 ## Architecture
 
-The repository is structured around three research layers.  Each layer has a
-well-defined scope and does **not** model execution, order routing, or position
-accounting.
+The repository is structured around core Level 1/2 layers only.
 
 ```
-Factor Research Layer
+Layer A — Research Integrity Layer
+  alpha_lab.research_integrity.*   — PIT/as-of discipline, anti-leakage checks,
+                                      cross-timeframe correctness, bar-completeness checks
+
+Layer B — Factor Research Layer
   alpha_lab.factors.*          — factor computation (e.g. momentum)
   alpha_lab.labels             — forward-return label generation
   alpha_lab.evaluation         — IC / Rank-IC computation
@@ -28,7 +45,7 @@ Factor Research Layer
   alpha_lab.turnover           — quantile / long-short turnover
   alpha_lab.preprocess         — winsorize, z-score
 
-Strategy Construction Intent Layer
+Layer C — Portfolio Research Layer
   alpha_lab.strategy.StrategySpec   — explicit portfolio construction spec:
                                       long_top_k, short_bottom_k,
                                       weighting_method, holding_period,
@@ -36,12 +53,18 @@ Strategy Construction Intent Layer
                                       (n_quantiles is a factor-evaluation
                                        param, not part of StrategySpec)
 
-Portfolio Research Layer
   alpha_lab.portfolio_research — portfolio_weights, simulate_portfolio_returns,
                                  portfolio_turnover,
                                  portfolio_cost_adjusted_returns
 
-Orchestration
+Layer D — Reporting / Registry / Knowledge Export
+  alpha_lab.reporting          — summaries, markdown, experiment-card export
+  alpha_lab.reporting.research_validation_package
+                               — reproducible Level 1/2 research package export
+  alpha_lab.registry           — append-only research registry
+  alpha_lab.comparison         — side-by-side research comparison
+
+Orchestration (Level 1/2)
   alpha_lab.experiment         — run_factor_experiment (single split)
   alpha_lab.walk_forward       — run_walk_forward_experiment (rolling OOS)
 ```
@@ -52,9 +75,8 @@ how to weight them, and how often to rebalance.  Passing a `StrategySpec` to
 `run_factor_experiment` or `run_walk_forward_experiment` makes all portfolio
 construction intent visible in one place rather than spread across call sites.
 
-**This is still NOT a full trading system or execution simulator.**  There is no
-order routing, market impact model, position accounting, broker integration, or
-portfolio optimiser.  All portfolio outputs are research-level approximations.
+**Core boundary**: portfolio outputs are research-level approximations for Level
+2 validation. They are not fill-level execution simulations.
 
 ## Setup
 
@@ -67,6 +89,14 @@ Install the environment:
 
 ```bash
 uv sync --all-extras
+```
+
+Large vendor-backed datasets should live outside the repository. By default the
+external data root resolves to `~/.local/share/alpha-lab/data`; override it
+when needed:
+
+```bash
+export ALPHA_LAB_DATA_ROOT=/path/to/alpha-lab-data
 ```
 
 Run the local checks:
@@ -96,7 +126,14 @@ UV_CACHE_DIR=/tmp/uv-cache make check
 
 1. Add or modify reusable logic under `src/alpha_lab`.
 2. Add tests for every reusable function and every known leakage or alignment risk.
-3. Run:
+3. Use `alpha-lab data ...` to ingest/update vendor data and export small case
+   slices as `prices.csv` / `universe.csv` inputs, with factor CSVs exported only
+   when explicitly requested.
+4. Use `alpha-lab bridge ...` to manage one factor-project pack under
+   `quant-knowledge/55_projects/`, generate one round context bundle for
+   ChatGPT Projects, scaffold `alpha-lab` case drafts, and stage reviewed
+   writeback drafts before applying them to `50_experiments/`.
+5. Run:
 
 ```bash
 make lint
@@ -109,6 +146,161 @@ Or:
 ```bash
 make check
 ```
+
+For read-only inspection of the external canonical store, use:
+
+```bash
+alpha-lab data query --sql "select count(*) as n_rows from daily_bars"
+```
+
+If you already have a local nested ZIP of per-asset A-share daily CSV files,
+you can ingest it directly into the canonical store. The importer writes
+`daily_bars` / `adj_factor` / `asset_status` as Parquet datasets partitioned
+by `asset=<ts_code>` so the warehouse stays efficient for symbol-scoped
+inspection while preserving the existing Level 1/2 slice/export flow:
+
+```bash
+alpha-lab data ingest local-zip ashare-daily \
+  --zip-path "/path/to/股票日线.zip"
+```
+
+For daily price-volume research, export raw or前复权 price slices directly:
+
+```bash
+alpha-lab data export-case-inputs \
+  --output-dir data/processed/real_case_inputs/ashare_qfq \
+  --slice-preset standard
+```
+
+Built-in slice presets for A-share daily price-volume research:
+
+- `pilot`: recent 3 years, `top_liquid_300`, `qfq`
+- `standard`: recent 5 years, `listed_90d`, `qfq`
+- `robust`: recent 8 years, `listed_90d`, `qfq`
+
+Explicit `--start-date` / `--end-date` / `--universe` / `--adjustment` still override the preset.
+
+Supported liquidity universes now include:
+
+- `top_liquid_300`
+- `top_liquid_500`
+- `top_liquid_800`
+
+These are ranked by trailing 60-trading-day average `amount`, not same-day amount.
+
+The Web UI auto-data-source flow now also defaults to `standard`, and exposes
+`pilot / standard / robust` directly in the form.
+
+For A-share daily price-volume research, exported `prices.csv` now includes the
+standard research columns needed by most daily factor recipes:
+
+- `open`, `high`, `low`, `close`, `pre_close`
+- `volume`, `amount`, `vwap`, `turnover_rate`
+- `up_limit`, `down_limit`, `is_limit_up`, `is_limit_down`
+- `is_suspended`, `is_st`
+- `is_hs300`, `is_zz500`, `is_zz1000`, `is_sz50`
+
+When the corresponding canonical tables are available, `export-case-inputs`
+also writes:
+
+- `asset_status.csv`
+- `index_membership.csv`
+
+Coverage rules for the external A-share daily store:
+
+- minimum requirement: latest available date must have at least recent 3 years of history
+- robust target: latest available date should have recent 8 years of history
+- `export-case-inputs` rejects windows outside the available `daily_bars` coverage, while treating non-trading start/end dates via the open-day calendar boundary
+
+Long Tushare ingest/update runs are chunked automatically by default:
+
+- default ingest/update chunk size: `6` months
+- progress is printed per chunk and per ingest stage
+- pass `--chunk-months 0` to disable chunking for a single long request
+
+For daily price-volume research only, prefer:
+
+```bash
+alpha-lab data ingest tushare core \
+  --start-date 2023-04-01 \
+  --end-date 2026-04-01 \
+  --asset-limit 1000 \
+  --daily-research-only
+```
+
+This skips slow ROE financial-indicator fetches while retaining the daily
+research tables needed for OHLCV, turnover, limit prices, suspension/ST, and
+index-membership flags.
+
+## Research Bridge
+
+`alpha-lab bridge` is the opt-in project layer for the hybrid workflow:
+
+- `quant-knowledge`: long-term knowledge and project state
+- `alpha-lab`: Level 1/2 experiment execution
+- `ChatGPT Projects`: discussion, synthesis, and lightweight web search
+
+The bridge keeps the formal memory in your own vault rather than in platform
+memory alone. First create one project:
+
+```bash
+alpha-lab bridge init-project \
+  --slug momentum-factor \
+  --title-zh 动量因子项目 \
+  --category factor_family \
+  --owner yukun \
+  --market ashare \
+  --frequency daily \
+  --chatgpt-project-name "Momentum Factor"
+```
+
+This creates `quant-knowledge/55_projects/momentum-factor/` with:
+
+- `project.yaml`
+- `01_project_brief.md`
+- `02_project_rules.md`
+- `03_card_map.md`
+- `10_active_state.md`
+- `20_decision_log.md`
+- `30_rounds/`
+- `40_specs/`
+- `50_writeback_drafts/`
+
+Then use the round workflow:
+
+```bash
+alpha-lab bridge start-round \
+  --project momentum-factor \
+  --topic "三个月成交额加权动量"
+
+alpha-lab bridge scaffold-case \
+  --project momentum-factor \
+  --round <round_id> \
+  --case-name mom_amt_60
+
+alpha-lab bridge summarize-run \
+  --project momentum-factor \
+  --round <round_id> \
+  --run-root dist/bridge_runs/momentum-factor/mom_amt_60/<run_dir>
+```
+
+`summarize-run` writes:
+
+- `30_rounds/<round_id>/latest_experiment_feedback.md`
+- `50_writeback_drafts/*__writeback_draft.md`
+- `50_writeback_drafts/*__state_update_patch.md`
+
+Only after manual review should you edit the draft frontmatter to
+`review_status: approved` and apply it:
+
+```bash
+alpha-lab bridge apply-writeback \
+  --project momentum-factor \
+  --draft /path/to/*__writeback_draft.md
+```
+
+That copies experiment artifacts into `50_experiments/`, updates
+`10_active_state.md`, and appends a project-level `20_decision_log.md` entry.
 
 ## Canonical Factor Output Schema
 
@@ -139,6 +331,7 @@ Example:
 - [docs/system_manual.md](docs/system_manual.md) — API reference and usage patterns
 - [docs/developer_guide.md](docs/developer_guide.md) — how to extend the codebase
 - [docs/data_conventions.md](docs/data_conventions.md) — canonical timestamp, merge, and storage rules
+- [docs/module_classification.md](docs/module_classification.md) — core module map
 
 ## Current Reusable Components
 
@@ -234,7 +427,9 @@ result = run_factor_experiment(
 
 print(result.summary)
 # ExperimentSummary(mean_ic=..., mean_rank_ic=..., ic_ir=...,
-#                   mean_long_short_return=..., long_short_hit_rate=..., n_dates=...)
+#                   ic_positive_rate=..., long_short_ir=...,
+#                   subperiod_ic_positive_share=...,
+#                   eval_coverage_ratio_mean=..., instability_flags=(...))
 ```
 
 `result.factor_df` and `result.label_df` always cover the full sample.
@@ -325,6 +520,165 @@ spread variation, short-borrow fees, or execution timing.
 A thin command-line wrapper over the existing pipeline lives at
 `scripts/run_experiment.py`.  It does not redesign the pipeline — it parses
 arguments and delegates to the same modules used in notebook workflows.
+
+Top-level CLI routing is also available via:
+
+- `alpha-lab run ...` (legacy single-experiment route)
+- `alpha-lab real-case ...` (Level 1/2 research-validation workflows)
+- `alpha-lab campaign ...` (Level 1/2 campaign workflows)
+- `alpha-lab profiles` (evaluation-profile discovery)
+- `alpha-lab web ui` (local browser UI for single-factor runs)
+
+Default real-case/campaign workflow stages are:
+
+1. Level 1 factor evaluation (IC, rank-IC, long-short, stability, uncertainty)
+2. Campaign triage
+3. Level 2 promotion gate
+4. Level 2 portfolio validation (for promoted cases by default)
+
+Evaluation thresholds are selected by `--evaluation-profile`
+(currently `default_research`; future profiles can be added centrally).
+Real-case inputs (`prices_path`, `universe.path`, and single-factor `factor_path`)
+support both CSV (`.csv`) and Parquet (`.parquet` / `.pq`).
+
+```bash
+# See all available Level 1/2 evaluation profiles.
+alpha-lab profiles
+
+# Single-factor real-case workflow with explicit evaluation profile
+alpha-lab real-case single-factor run configs/real_cases/single_factor/bp.yaml \
+    --evaluation-profile default_research
+
+# Composite real-case workflow with explicit evaluation profile
+alpha-lab real-case composite run configs/real_cases/composite/value_quality_lowvol.yaml \
+    --evaluation-profile default_research
+
+# Campaign workflow with explicit evaluation profile
+alpha-lab campaign run research_campaign_1 --evaluation-profile default_research
+
+# Profile-aware campaign comparison (built-in lightweight deterministic example)
+alpha-lab campaign compare-profiles \
+    --source example \
+    --output-root-dir dist/examples/profile_aware_campaign_level12 \
+    --profiles exploratory_screening default_research stricter_research
+
+# Profile-aware campaign comparison for an existing campaign definition
+alpha-lab campaign compare-profiles \
+    --source campaign \
+    --campaign-config configs/campaigns/research_campaign_1/campaign.yaml \
+    --output-root-dir dist/campaign_profile_comparisons/research_campaign_1 \
+    --profiles exploratory_screening default_research stricter_research
+
+# Render a Chinese-first local HTML dashboard from comparison artifacts
+alpha-lab campaign render-dashboard \
+    --comparison-json dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json
+
+# Start local browser UI (upload single-factor spec and run from web page)
+alpha-lab web ui --host 127.0.0.1 --port 8765
+```
+
+Web UI run result panel now includes simple charts for IC, Rank IC, long-short
+spread (derived from group returns), turnover, and rolling mean IC.
+
+Each run prints the selected evaluation profile, triage label, promotion
+decision, portfolio-validation status, and artifact paths.
+
+### End-to-End Level 1/2 Walkthrough
+
+This is the default repository workflow from one case to campaign review.
+
+```bash
+# 1) Discover available governance profiles.
+alpha-lab profiles
+
+# 2) Run a single-factor case (Level 1 evaluation -> triage -> promotion -> Level 2 validation).
+alpha-lab real-case single-factor run configs/real_cases/single_factor/bp.yaml \
+    --evaluation-profile default_research \
+    --render-report
+
+# 3) Run a composite case with the same profile.
+alpha-lab real-case composite run configs/real_cases/composite/value_quality_lowvol.yaml \
+    --evaluation-profile default_research \
+    --render-report
+
+# 4) Run the campaign to rank cases and aggregate promotion/validation outcomes.
+alpha-lab campaign run research_campaign_1 --evaluation-profile default_research --render-report
+```
+
+After each case run, inspect:
+
+- `run_manifest.json` for canonical input/output pointers and integrity summary
+- `metrics.json` for Level 1 verdict, campaign triage, promotion, and Level 2 validation fields
+- `level2_portfolio_validation/` for standardized Level 2 portfolio-validation exports
+- `*_workflow_summary.json` (package scripts) and `research_validation_package.json` for auditable export payloads
+- Core JSON artifact contracts are now validated at write/read boundaries for:
+  `run_manifest.json`, `metrics.json`, `campaign_manifest.json`,
+  `campaign_results.json`, `research_validation_package.json`,
+  `portfolio_validation_summary.json`, `portfolio_validation_metrics.json`,
+  `portfolio_validation_package.json`, and `campaign_profile_comparison.json`.
+
+### Profile-Aware Compact Example
+
+For a reproducible profile comparison on one lightweight case, run:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_level12_example.py \
+    --output-root-dir dist/examples/profile_aware_level12 \
+    --profiles exploratory_screening default_research
+```
+
+Then inspect:
+
+- `dist/examples/profile_aware_level12/profile_comparison.md`
+- `dist/examples/profile_aware_level12/runs/<profile>/profile_aware_bp_single_factor/metrics.json`
+
+Detailed walkthrough: `docs/profile_aware_level12_example.md`.
+
+### Profile-Aware Campaign Comparison (First-Class CLI)
+
+Use the main CLI to compare campaign outcomes across multiple evaluation
+profiles and export standardized campaign-level comparison artifacts:
+
+```bash
+alpha-lab campaign compare-profiles \
+    --source example \
+    --output-root-dir dist/examples/profile_aware_campaign_level12 \
+    --profiles exploratory_screening default_research stricter_research
+```
+
+Or compare an existing campaign definition:
+
+```bash
+alpha-lab campaign compare-profiles \
+    --source campaign \
+    --campaign-config configs/campaigns/research_campaign_1/campaign.yaml \
+    --output-root-dir dist/campaign_profile_comparisons/research_campaign_1 \
+    --profiles exploratory_screening default_research stricter_research
+```
+
+Primary artifacts:
+
+- `campaign_profile_comparison.md`
+- `campaign_profile_comparison.json`
+- `campaign_profile_case_matrix.csv`
+- `campaign_profile_dashboard_zh.html` (factor-first local research workbench dashboard)
+
+Generate the local dashboard explicitly:
+
+```bash
+alpha-lab campaign render-dashboard \
+    --comparison-json dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json \
+    --output-html dist/examples/profile_aware_campaign_level12/campaign_profile_dashboard_zh.html \
+    --overwrite
+```
+
+Legacy script compatibility is retained:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_campaign_level12_example.py \
+    --output-root-dir dist/examples/profile_aware_campaign_level12 \
+    --profiles exploratory_screening default_research stricter_research
+```
 
 **Input CSV** must contain at least the columns `date`, `asset`, and `close`.
 Extra columns are ignored.
@@ -556,4 +910,5 @@ short-borrow costs, execution timing, or partial fills.
 
 - no full backtesting engine or realistic execution simulation
 - no transaction-cost model beyond linear flat-rate research approximation
-- no database, dashboard, or experiment tracking framework
+- no database, deployed multi-user dashboard, or experiment tracking framework
+- Execution/implementability code is intentionally not part of this release

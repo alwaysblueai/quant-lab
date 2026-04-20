@@ -164,12 +164,10 @@ def _interpret_comparison(
     material_loss_hits = sum(
         condition
         for condition in (
-            mean_ic_delta is not None
-            and mean_ic_delta <= -thresholds.material_mean_ic_loss,
+            mean_ic_delta is not None and mean_ic_delta <= -thresholds.material_mean_ic_loss,
             mean_rank_ic_delta is not None
             and mean_rank_ic_delta <= -thresholds.material_mean_rank_ic_loss,
-            mean_ls_delta is not None
-            and mean_ls_delta <= -thresholds.material_long_short_loss,
+            mean_ls_delta is not None and mean_ls_delta <= -thresholds.material_long_short_loss,
             ic_ir_delta is not None and ic_ir_delta <= -thresholds.material_ic_ir_loss,
         )
     )

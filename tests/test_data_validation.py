@@ -1,4 +1,5 @@
 """Tests for alpha_lab.data_validation.validate_price_panel."""
+
 from __future__ import annotations
 
 import numpy as np

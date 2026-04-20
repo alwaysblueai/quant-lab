@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabExperimentError
-
 from alpha_lab.factors import amplitude, downside_volatility, low_volatility, momentum, reversal
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.signal_transforms import (
@@ -17,7 +16,6 @@ from alpha_lab.signal_transforms import (
     winsorize_cross_section,
     zscore_cross_section,
 )
-
 
 # ---------------------------------------------------------------------------
 # Factor registry
@@ -52,9 +50,11 @@ class FactorRegistry:
 
     def register_factor(self, name: str) -> Callable[[_FactorBuilderFn], _FactorBuilderFn]:
         """Decorator form of :meth:`register`."""
+
         def decorator(fn: _FactorBuilderFn) -> _FactorBuilderFn:
             self.register(name, fn)
             return fn
+
         return decorator
 
     def get(self, name: str) -> _FactorBuilderFn | None:
@@ -267,9 +267,7 @@ def _build_vcimom_signal(
         raise FactorRecipeError("base.momentum_window must be > base.skip_recent")
 
     frame = prices.copy()
-    frame["return"] = (
-        frame.groupby("asset", sort=False)["close"].pct_change(fill_method=None)
-    )
+    frame["return"] = frame.groupby("asset", sort=False)["close"].pct_change(fill_method=None)
     market_return = (
         frame.groupby("date", sort=False)["return"].mean().rename("market_return").reset_index()
     )
@@ -639,21 +637,17 @@ def _rolling_beta(
         .var(ddof=1)
         .reset_index(level=0, drop=True)
     )
-    cov = (
-        (returns * market_returns).groupby(assets, sort=False)
+    cov = (returns * market_returns).groupby(assets, sort=False).rolling(
+        window, min_periods=min_periods
+    ).mean().reset_index(level=0, drop=True) - (
+        returns.groupby(assets, sort=False)
         .rolling(window, min_periods=min_periods)
         .mean()
         .reset_index(level=0, drop=True)
-        - (
-            returns.groupby(assets, sort=False)
-            .rolling(window, min_periods=min_periods)
-            .mean()
-            .reset_index(level=0, drop=True)
-            * market_returns.groupby(assets, sort=False)
-            .rolling(window, min_periods=min_periods)
-            .mean()
-            .reset_index(level=0, drop=True)
-        )
+        * market_returns.groupby(assets, sort=False)
+        .rolling(window, min_periods=min_periods)
+        .mean()
+        .reset_index(level=0, drop=True)
     )
     out.loc[:] = cov.div(market_var.replace(0.0, np.nan))
     return out

@@ -1,7 +1,7 @@
 """Core Level 1/2 research-validation packaging helpers.
 
 This module packages research workflow outputs without replay/implementability
-requirements. Replay-specific add-ons live under `alpha_lab.experimental_level3`.
+assumptions.
 """
 
 from __future__ import annotations
@@ -603,9 +603,7 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
     )
     promotion_gate_metrics = project_promotion_gate_metrics(contract_projection_input)
     profile_summary_metrics = project_campaign_profile_summary_metrics(contract_projection_input)
-    portfolio_validation_contract = project_portfolio_validation_metrics(
-        contract_projection_input
-    )
+    portfolio_validation_contract = project_portfolio_validation_metrics(contract_projection_input)
     level12_transition = project_level12_transition_summary(contract_projection_input)
     uncertainty_metrics = promotion_gate_metrics["uncertainty"]
     rolling_metrics = promotion_gate_metrics["rolling"]
@@ -642,27 +640,19 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
             [
                 "",
                 "## Evaluation Standard",
-                (
-                    "- Profile: "
-                    f"`{_safe_str(evaluation_payload.get('profile_name')) or 'N/A'}`"
-                ),
+                (f"- Profile: `{_safe_str(evaluation_payload.get('profile_name')) or 'N/A'}`"),
             ]
         )
         uncertainty_cfg = _coerce_mapping(snapshot.get("uncertainty"))
         rolling_cfg = _coerce_mapping(snapshot.get("rolling_stability"))
         if uncertainty_cfg:
+            lines.append("- Uncertainty method: " + _format_value(uncertainty_cfg.get("method")))
             lines.append(
-                "- Uncertainty method: "
-                + _format_value(uncertainty_cfg.get("method"))
-            )
-            lines.append(
-                "- Uncertainty CI level: "
-                + _format_value(uncertainty_cfg.get("confidence_level"))
+                "- Uncertainty CI level: " + _format_value(uncertainty_cfg.get("confidence_level"))
             )
         if rolling_cfg:
             lines.append(
-                "- Rolling window size: "
-                + _format_value(rolling_cfg.get("rolling_window_size"))
+                "- Rolling window size: " + _format_value(rolling_cfg.get("rolling_window_size"))
             )
 
     if verdict_payload:
@@ -685,14 +675,8 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
             [
                 "",
                 "## Campaign Triage",
-                (
-                    "- Triage: "
-                    f"`{_safe_str(triage_payload.get('campaign_triage')) or 'N/A'}`"
-                ),
-                (
-                    "- Priority: "
-                    + _format_value(triage_payload.get("campaign_triage_priority"))
-                ),
+                (f"- Triage: `{_safe_str(triage_payload.get('campaign_triage')) or 'N/A'}`"),
+                ("- Priority: " + _format_value(triage_payload.get("campaign_triage_priority"))),
                 (
                     "- Ranking metrics (ICIR / L-S / rolling+ min): "
                     f"{_format_value(triage_payload.get('campaign_rank_primary_metric'))} / "
@@ -761,18 +745,9 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                 "## Level 1 to Level 2 Transition",
                 f"- Transition label: `{transition_label or 'N/A'}`",
                 f"- Interpretation: {transition_interpretation or 'N/A'}",
-                (
-                    "- Level 1 status: "
-                    + _format_value(level12_transition.get("level1_status"))
-                ),
-                (
-                    "- Level 2 status: "
-                    + _format_value(level12_transition.get("level2_status"))
-                ),
-                (
-                    "- Confirmation vs degradation: "
-                    + _format_value(transition_confirmation_note)
-                ),
+                ("- Level 1 status: " + _format_value(level12_transition.get("level1_status"))),
+                ("- Level 2 status: " + _format_value(level12_transition.get("level2_status"))),
+                ("- Confirmation vs degradation: " + _format_value(transition_confirmation_note)),
             ]
         )
         if transition_reasons:
@@ -795,20 +770,15 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
         robustness = _coerce_mapping(
             portfolio_validation_summary.get("portfolio_robustness_summary")
         )
-        robustness_label = (
-            portfolio_validation_contract["portfolio_validation_robustness_label"]
-            or _safe_str(robustness.get("taxonomy_label"))
-        )
+        robustness_label = portfolio_validation_contract[
+            "portfolio_validation_robustness_label"
+        ] or _safe_str(robustness.get("taxonomy_label"))
         baseline_return = _format_value(
             portfolio_validation_summary.get("base_mean_portfolio_return")
         )
-        baseline_turnover = _format_value(
-            portfolio_validation_summary.get("base_mean_turnover")
-        )
+        baseline_turnover = _format_value(portfolio_validation_summary.get("base_mean_turnover"))
         baseline_cost_adjusted = _format_value(
-            portfolio_validation_summary.get(
-                "base_cost_adjusted_return_review_rate"
-            )
+            portfolio_validation_summary.get("base_cost_adjusted_return_review_rate")
         )
         lines.extend(
             [
@@ -819,9 +789,7 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                 (
                     "- Remains credible at portfolio level: "
                     + _format_value(
-                        portfolio_validation_summary.get(
-                            "remains_credible_at_portfolio_level"
-                        )
+                        portfolio_validation_summary.get("remains_credible_at_portfolio_level")
                     )
                 ),
                 (
@@ -832,10 +800,7 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                 ),
             ]
         )
-        lines.append(
-            "- Portfolio robustness taxonomy: "
-            f"`{_safe_str(robustness_label) or 'N/A'}`"
-        )
+        lines.append(f"- Portfolio robustness taxonomy: `{_safe_str(robustness_label) or 'N/A'}`")
         scenario_notes = list(
             portfolio_validation_contract["portfolio_validation_scenario_sensitivity_notes"]
         ) or _to_text_list(robustness.get("scenario_sensitivity_notes"))
@@ -854,22 +819,19 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
         if fragility_reasons:
             for reason in fragility_reasons:
                 lines.append(f"- Robustness fragility: {reason}")
-        benchmark_support_note = (
-            portfolio_validation_contract["portfolio_validation_benchmark_support_note"]
-            or _safe_str(robustness.get("benchmark_relative_support_note"))
-        )
+        benchmark_support_note = portfolio_validation_contract[
+            "portfolio_validation_benchmark_support_note"
+        ] or _safe_str(robustness.get("benchmark_relative_support_note"))
         if benchmark_support_note is not None:
             lines.append(f"- Benchmark-relative support note: {benchmark_support_note}")
-        cost_support_note = (
-            portfolio_validation_contract["portfolio_validation_cost_sensitivity_note"]
-            or _safe_str(robustness.get("cost_sensitivity_note"))
-        )
+        cost_support_note = portfolio_validation_contract[
+            "portfolio_validation_cost_sensitivity_note"
+        ] or _safe_str(robustness.get("cost_sensitivity_note"))
         if cost_support_note is not None:
             lines.append(f"- Cost sensitivity note: {cost_support_note}")
-        concentration_note = (
-            portfolio_validation_contract["portfolio_validation_concentration_turnover_note"]
-            or _safe_str(robustness.get("concentration_turnover_risk_note"))
-        )
+        concentration_note = portfolio_validation_contract[
+            "portfolio_validation_concentration_turnover_note"
+        ] or _safe_str(robustness.get("concentration_turnover_risk_note"))
         if concentration_note is not None:
             lines.append(f"- Concentration/turnover note: {concentration_note}")
         risks = list(profile_summary_metrics["portfolio_validation_major_risks"]) or _to_text_list(
@@ -894,18 +856,12 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
             if benchmark or any(
                 value is not None
                 for value in (
-                    portfolio_validation_contract[
-                        "portfolio_validation_benchmark_relative_status"
-                    ],
+                    portfolio_validation_contract["portfolio_validation_benchmark_relative_status"],
                     portfolio_validation_contract[
                         "portfolio_validation_benchmark_relative_assessment"
                     ],
-                    portfolio_validation_contract[
-                        "portfolio_validation_benchmark_excess_return"
-                    ],
-                    portfolio_validation_contract[
-                        "portfolio_validation_benchmark_tracking_error"
-                    ],
+                    portfolio_validation_contract["portfolio_validation_benchmark_excess_return"],
+                    portfolio_validation_contract["portfolio_validation_benchmark_tracking_error"],
                     portfolio_validation_contract["benchmark_active_return"],
                     portfolio_validation_contract["benchmark_information_ratio"],
                 )
@@ -934,15 +890,11 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                         ]
                     )
                     + " / "
-                    + _format_value(
-                        portfolio_validation_contract["benchmark_active_return"]
-                    )
+                    + _format_value(portfolio_validation_contract["benchmark_active_return"])
                 )
                 lines.append(
                     "- Benchmark-relative information ratio / tracking error: "
-                    + _format_value(
-                        portfolio_validation_contract["benchmark_information_ratio"]
-                    )
+                    + _format_value(portfolio_validation_contract["benchmark_information_ratio"])
                     + " / "
                     + _format_value(
                         portfolio_validation_contract[
@@ -954,9 +906,7 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                 if benchmark_risks:
                     for benchmark_risk in benchmark_risks:
                         lines.append(f"- Benchmark-relative risk: {benchmark_risk}")
-            turnover_summary = _coerce_mapping(
-                portfolio_validation_metrics.get("turnover_summary")
-            )
+            turnover_summary = _coerce_mapping(portfolio_validation_metrics.get("turnover_summary"))
             if turnover_summary:
                 lines.append(
                     "- Turnover sensitivity range (mean): "
@@ -964,21 +914,25 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
                     f"{_format_value(turnover_summary.get('scenario_mean_turnover_max'))}"
                 )
 
-    if uncertainty_payload or any(
-        value is not None
-        for value in (
-            uncertainty_metrics["mean_ic_ci_lower"],
-            uncertainty_metrics["mean_ic_ci_upper"],
-            uncertainty_metrics["mean_rank_ic_ci_lower"],
-            uncertainty_metrics["mean_rank_ic_ci_upper"],
-            uncertainty_metrics["mean_long_short_return_ci_lower"],
-            uncertainty_metrics["mean_long_short_return_ci_upper"],
-            uncertainty_metrics["uncertainty_method"],
-            uncertainty_metrics["uncertainty_confidence_level"],
-            uncertainty_metrics["uncertainty_bootstrap_resamples"],
-            uncertainty_metrics["uncertainty_bootstrap_block_length"],
+    if (
+        uncertainty_payload
+        or any(
+            value is not None
+            for value in (
+                uncertainty_metrics["mean_ic_ci_lower"],
+                uncertainty_metrics["mean_ic_ci_upper"],
+                uncertainty_metrics["mean_rank_ic_ci_lower"],
+                uncertainty_metrics["mean_rank_ic_ci_upper"],
+                uncertainty_metrics["mean_long_short_return_ci_lower"],
+                uncertainty_metrics["mean_long_short_return_ci_upper"],
+                uncertainty_metrics["uncertainty_method"],
+                uncertainty_metrics["uncertainty_confidence_level"],
+                uncertainty_metrics["uncertainty_bootstrap_resamples"],
+                uncertainty_metrics["uncertainty_bootstrap_block_length"],
+            )
         )
-    ) or uncertainty_metrics["uncertainty_flags"]:
+        or uncertainty_metrics["uncertainty_flags"]
+    ):
         lines.extend(["", "## Uncertainty"])
         lines.append(
             "- Method / CI level / bootstrap resamples / block length: "
@@ -1014,22 +968,25 @@ def _package_markdown(package: ResearchValidationPackage) -> str:
         else:
             lines.append("- Uncertainty Flags: none")
 
-    if rolling_payload or any(
-        value is not None
-        for value in (
-            rolling_metrics["rolling_window_size"],
-            rolling_metrics["rolling_ic_positive_share"],
-            rolling_metrics["rolling_rank_ic_positive_share"],
-            rolling_metrics["rolling_long_short_positive_share"],
-            rolling_metrics["rolling_ic_min_mean"],
-            rolling_metrics["rolling_rank_ic_min_mean"],
-            rolling_metrics["rolling_long_short_min_mean"],
+    if (
+        rolling_payload
+        or any(
+            value is not None
+            for value in (
+                rolling_metrics["rolling_window_size"],
+                rolling_metrics["rolling_ic_positive_share"],
+                rolling_metrics["rolling_rank_ic_positive_share"],
+                rolling_metrics["rolling_long_short_positive_share"],
+                rolling_metrics["rolling_ic_min_mean"],
+                rolling_metrics["rolling_rank_ic_min_mean"],
+                rolling_metrics["rolling_long_short_min_mean"],
+            )
         )
-    ) or rolling_metrics["rolling_instability_flags"]:
+        or rolling_metrics["rolling_instability_flags"]
+    ):
         lines.extend(["", "## Rolling Stability"])
         lines.append(
-            "- Rolling window size: "
-            + _format_value(rolling_metrics["rolling_window_size"])
+            "- Rolling window size: " + _format_value(rolling_metrics["rolling_window_size"])
         )
         lines.append(
             "- Rolling positive share (IC / RankIC / long-short): "
@@ -1661,16 +1618,12 @@ def _extract_neutralization_comparison(
         },
         "delta": {
             "mean_ic_delta": neutralization_metrics["neutralization_mean_ic_delta"],
-            "mean_rank_ic_delta": neutralization_metrics[
-                "neutralization_mean_rank_ic_delta"
-            ],
+            "mean_rank_ic_delta": neutralization_metrics["neutralization_mean_rank_ic_delta"],
             "mean_long_short_return_delta": neutralization_metrics[
                 "neutralization_mean_long_short_return_delta"
             ],
             "ic_ir_delta": neutralization_metrics["neutralization_ic_ir_delta"],
-            "valid_ratio_min_delta": neutralization_metrics[
-                "neutralization_valid_ratio_min_delta"
-            ],
+            "valid_ratio_min_delta": neutralization_metrics["neutralization_valid_ratio_min_delta"],
             "eval_coverage_ratio_mean_delta": neutralization_metrics[
                 "neutralization_eval_coverage_ratio_mean_delta"
             ],
@@ -1702,7 +1655,4 @@ def _format_value(value: object) -> str:
 
 
 def _format_transition(raw: object, neutralized: object, delta: object) -> str:
-    return (
-        f"{_format_value(raw)} -> {_format_value(neutralized)} "
-        f"(delta={_format_value(delta)})"
-    )
+    return f"{_format_value(raw)} -> {_format_value(neutralized)} (delta={_format_value(delta)})"

@@ -6,7 +6,40 @@ How to extend and maintain Alpha Lab.  For system-level API reference see
 
 ---
 
+## Scope Guardrails
+
+- Treat this repository as a Level 1/2 research system.
+- Keep defaults focused on research integrity, factor research, and
+  portfolio-level validation.
+- Do not move replay/implementability abstractions into core APIs.
+
+---
+
+## Evaluation Profiles
+
+- Discover available Level 1/2 profiles with:
+  `alpha-lab profiles`
+- Profile intent:
+  - `default_research`: balanced baseline for routine Level 1/2 work
+  - `exploratory_screening`: more permissive candidate discovery
+  - `stricter_research`: more conservative evidence standards for Level 2 readiness
+- Real-case and campaign workflows should pass `--evaluation-profile` explicitly
+  when reproducibility/auditability is required.
+- Profile selection changes standards across factor verdicts, campaign triage,
+  Level 2 promotion, and Level 2 portfolio-validation guardrails.
+- Uncertainty settings are centralized in `UncertaintyConfig`, including
+  `method` (`normal`, `bootstrap`, or `block_bootstrap`) and bootstrap controls
+  (`bootstrap_resamples`, `bootstrap_confidence_level`, `bootstrap_random_seed`,
+  `block_bootstrap_block_length`).
+- Keep profile additions centralized in `alpha_lab.research_evaluation_config`;
+  avoid per-command ad-hoc threshold flags in default workflows.
+
+---
+
 ## Adding a New Factor
+
+For quick Level 1/2 batch validation workflow and cache/parallel options, see
+`docs/single_factor_quick_pipeline.md`.
 
 1. Create `src/alpha_lab/factors/<factor_name>.py`.
 2. Export one public function with signature:
@@ -130,8 +163,8 @@ make check
 - `UP` — pyupgrade
 - Line length 100 (configured in `pyproject.toml`)
 
-**Mypy**: strict mode on `src/alpha_lab`.  All public functions must have
-complete type annotations.
+**Mypy**: strict defaults are enabled on `src/alpha_lab`, with explicit
+`pyproject.toml` overrides where necessary. Keep overrides narrow and documented.
 
 ---
 
@@ -146,6 +179,13 @@ complete type annotations.
 - Use `np.random.default_rng(seed)` for reproducible synthetic data.
 - Do not use `pytest.raises(Exception)` — be specific (`ValueError`,
   `AttributeError`, `TypeError`, etc.).
+- Golden artifact regression coverage for key Level 1/2 user-facing outputs
+  lives in `tests/test_artifact_golden_regression.py`.
+  Covered workflows are intentionally compact:
+  - deterministic single-factor Level 1/2 run
+  - deterministic campaign profile-comparison example output
+  Refresh goldens only when output drift is intentional:
+  `ALPHA_LAB_UPDATE_GOLDENS=1 uv run --no-sync --frozen pytest -q tests/test_artifact_golden_regression.py`
 
 ---
 
@@ -191,9 +231,64 @@ null assets, null factor names).
 
 ## Entrypoint
 
-The CLI entry point is `scripts/run_experiment.py`, which delegates to
-`alpha_lab.cli`.  There is no `main.py`.
+The installed CLI entry point is `alpha-lab` (`alpha_lab.cli:main`).
+`scripts/run_experiment.py` remains as the legacy single-experiment wrapper.
+There is no `main.py`.
 
-To add a new CLI command, extend `alpha_lab.cli` and expose it through a new
-script in `scripts/`.  Do not add top-level `main.py` files — the CLI module
-is the single entry point.
+To add a new CLI command, extend `alpha_lab.cli` routing first; only add a
+script wrapper in `scripts/` when a dedicated standalone entrypoint is still
+needed. Do not add top-level `main.py` files.
+
+---
+
+## Unified Research Frontend (`web_unified.py`)
+
+### Overview
+
+`alpha-lab web unified` launches a single-file local HTTP server (port 8766 by default)
+integrating four subsystems into one 5-page SPA:
+
+| Page | URL fragment | Purpose |
+|---|---|---|
+| Dashboard | `#dashboard` | Project count, pending writebacks, run status overview |
+| Knowledge Ops | `#knowledge` | Card search, vault inbox, vault stats |
+| Bridge Workspace | `#bridge` | Project lifecycle, rounds, GPT export, case scaffolding |
+| Validation Console | `#validation` | Run launcher, live run table, artifact viewer |
+| Writeback Review | `#writeback` | Draft review, patch, preview, apply |
+
+### Entry point
+
+```
+alpha-lab web unified [--host HOST] [--port PORT] [--workspace-root DIR]
+                      [--vault-root DIR] [--no-open-browser]
+```
+
+Default: `127.0.0.1:8766`. `web cockpit` has been formally deprecated and is now
+only a compatibility alias that routes to `web unified` with a deprecation warning.
+
+### Implementation constraints
+
+- **Single-file, no framework**: `web_unified.py` is a self-contained Python module
+  using `ThreadingHTTPServer` with inline HTML/CSS/JS. Do not introduce Streamlit,
+  Dash, or a JS bundler — the pattern is intentional for portability.
+- **File size caps**: `_MAX_TEXT_BYTES = 512 KB` on reads; `_MAX_REQUEST_BODY_BYTES = 2 MB`
+  on request bodies. Adjust these constants if legitimate files exceed the limit.
+- **Path traversal**: all file reads resolve the path with `.resolve()` and verify it
+  starts with the expected root directory. Never bypass this check.
+- **Error format**: all JSON error responses must include `"ok": False` and `"error"`.
+
+### Adding a new API endpoint
+
+1. Add the route pattern to `do_GET` / `do_POST` / `do_PATCH` / `do_PUT` in
+   `_UnifiedRequestHandler` (follow the existing `parts[]` pattern).
+2. Add the service method to `_UnifiedService`.
+3. Add path-safety checks if the method reads files from user-supplied names.
+4. Add a test in `tests/test_web_unified.py`.
+
+### Adding a new frontend panel
+
+All HTML is in `_index_html()`. Each page is a `<section id="view-{name}">` block.
+JS is inline at the bottom of the function. Follow the existing `api()` helper for
+all fetch calls — it centralises error handling and JSON parsing.
+
+---

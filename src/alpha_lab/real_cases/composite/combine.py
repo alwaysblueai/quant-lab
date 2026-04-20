@@ -60,9 +60,8 @@ def build_linear_composite(
         weighted_sum=("weighted_value", "sum"),
         abs_weight_sum=("abs_weight_present", "sum"),
     ).reset_index()
-    composite["value"] = (
-        composite["weighted_sum"]
-        / composite["abs_weight_sum"].replace(0.0, np.nan)
+    composite["value"] = composite["weighted_sum"] / composite["abs_weight_sum"].replace(
+        0.0, np.nan
     )
     composite["factor"] = spec.name
     composite_factor = composite[["date", "asset", "factor", "value"]].copy()
@@ -79,12 +78,12 @@ def build_linear_composite(
                 "date",
             ]
         )
-        component_values = component_values[
-            component_values["date"].isin(keep_dates)
-        ].reset_index(drop=True)
-        composite_factor = composite_factor[
-            composite_factor["date"].isin(keep_dates)
-        ].reset_index(drop=True)
+        component_values = component_values[component_values["date"].isin(keep_dates)].reset_index(
+            drop=True
+        )
+        composite_factor = composite_factor[composite_factor["date"].isin(keep_dates)].reset_index(
+            drop=True
+        )
         coverage_by_date = _coverage_by_date(
             component_values,
             composite_factor,
@@ -165,8 +164,8 @@ def _prepare_component(
     transformed["effective_weight"] = effective_weight
     transformed["signed_value"] = transformed["transformed_value"] * sign
     transformed["weighted_value"] = transformed["transformed_value"] * effective_weight
-    transformed["abs_weight_present"] = (
-        np.where(transformed["transformed_value"].notna(), abs(effective_weight), 0.0)
+    transformed["abs_weight_present"] = np.where(
+        transformed["transformed_value"].notna(), abs(effective_weight), 0.0
     )
 
     cols = [
@@ -271,8 +270,8 @@ def _coverage_by_date(
 
     composite_cov = composite_factor.copy()
     composite_cov["non_null"] = composite_cov["value"].notna().astype(float)
-    comp_by_date = composite_cov.groupby("date", sort=True)["non_null"].mean().rename(
-        "composite_coverage"
+    comp_by_date = (
+        composite_cov.groupby("date", sort=True)["non_null"].mean().rename("composite_coverage")
     )
 
     out = per_date.join(comp_by_date, how="left").reset_index()

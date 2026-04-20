@@ -122,9 +122,7 @@ def summarize_checks(
         highest = max(checks, key=lambda check: _severity_rank(check.severity)).severity
 
     hard_failures = tuple(
-        check.check_name
-        for check in checks
-        if check.status == "fail" and check.severity == "error"
+        check.check_name for check in checks if check.status == "fail" and check.severity == "error"
     )
 
     return IntegrityReportSummary(

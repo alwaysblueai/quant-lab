@@ -43,12 +43,8 @@ def __getattr__(name: str) -> Any:
         )
 
         return {
-            "render_campaign_profile_dashboard_html": (
-                render_campaign_profile_dashboard_html
-            ),
-            "write_campaign_profile_dashboard_html": (
-                write_campaign_profile_dashboard_html
-            ),
+            "render_campaign_profile_dashboard_html": (render_campaign_profile_dashboard_html),
+            "write_campaign_profile_dashboard_html": (write_campaign_profile_dashboard_html),
         }[name]
 
     raise AttributeError(name)

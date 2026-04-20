@@ -1,19 +1,23 @@
 """Tests for web_unified.py — service layer, CLI routing, and key invariants."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from alpha_lab.web_unified import (
-    _RunRecord,
-    _UnifiedService,
+    _build_frontend_batch_parallel_config,
     _extract_metrics_summary,
     _index_html_raw,
+    _RunRecord,
+    _RunStore,
+    _RunTask,
+    _UnifiedService,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -340,13 +344,23 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
 
     assert "IC显著性" in html
     assert "Factor Snapshot" in html
+    assert "10 项核心指标" in html
+    assert "IC t-stat" in html
+    assert "Decay Retention (5/1)" in html
     assert "收益率曲线" in html
     assert "RankIC 时序" in html
     assert "Rolling IC" in html
     assert "IC Decay" in html
     assert "因子自相关" in html
     assert "换手率时序" in html
+    assert "回测窗口：" in html
     assert "artifact-overview-charts" in html
+    assert "metrics-screening-grid" in html
+    assert "metrics-screening-grid-fast" in html
+    assert "metrics-screening-card" in html
+    assert "artifact-group-quick" in html
+    assert "metrics-run-header-label" in html
+    assert "quantile_returns" in html
     assert "loadRunOverviewSnapshot" in html
     assert "renderRunOverviewSection" in html
     assert "renderOverviewLineChart" in html
@@ -355,12 +369,22 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "renderPurgedKfoldSummaryJson" in html
     assert "renderPurgedKfoldFoldsCsv" in html
     assert "renderPortfolioValidationMetricsJson" in html
-    assert "renderBarraAttributionSummaryJson" in html
-    assert "renderMarketImpactSummaryJson" in html
-    assert "renderBarraAttributionTimeseriesCsv" in html
     assert "renderStackedAreaChart" in html
     assert "堆叠面积" in html
-    assert "实验隔离 (L3)" in html
+    assert "快速筛选模式 · 固定 9 项核心指标" not in html
+
+
+def test_index_html_escapes_script_close_tag_in_print_template() -> None:
+    html = _index_html_raw()
+    start = html.find("function buildMetricsPrintDocument")
+    end = html.find("function exportMetricsReportPdf")
+
+    assert start >= 0
+    assert end > start
+
+    snippet = html[start:end]
+    assert "<\\/script>" in snippet
+    assert "</script>" not in snippet
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +557,10 @@ def test_explore_idea_free_mode_returns_structured_prompt(tmp_path: Path) -> Non
     assert isinstance(result["related_cards"], list)
     assert isinstance(result["gpt_prompt"], str)
     assert "Structured Exploration" in result["gpt_prompt"]
-    assert "允许写候选表达式，但不允许做最终选择、ranking 或输出 single best idea。" in result["gpt_prompt"]
+    assert (
+        "允许写候选表达式，但不允许做最终选择、ranking 或输出 single best idea。"
+        in result["gpt_prompt"]
+    )
     assert "[候选表达]" in result["gpt_prompt"]
     assert "[风险识别]" in result["gpt_prompt"]
     assert "[与已有因子的差异]" in result["gpt_prompt"]
@@ -553,7 +580,10 @@ def test_explore_idea_constrained_mode_returns_report(tmp_path: Path) -> None:
     assert "Graph 约束模式（硬约束）" in result["gpt_prompt"]
     assert "你只能使用以下数据节点与算子构造信号，不允许引入新变量。" in result["gpt_prompt"]
     assert "只保留总评分最高的 1-2 个机制。" in result["gpt_prompt"]
-    assert "如果反对意见成立，请明确写出：修改假设，还是回到 Step 2 重新选择机制。" in result["gpt_prompt"]
+    assert (
+        "如果反对意见成立，请明确写出：修改假设，还是回到 Step 2 重新选择机制。"
+        in result["gpt_prompt"]
+    )
     assert "- close" in result["gpt_prompt"]
     assert "- volume" in result["gpt_prompt"]
     cr = result["constraint_report"]
@@ -664,13 +694,33 @@ def test_list_cases_empty_for_unknown_project(tmp_path: Path) -> None:
     assert cases == []
 
 
+def test_get_project_truncates_large_documents_for_snapshot(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    slug, _ = _create_project_and_case(svc)
+
+    project_dir = vault / "55_projects" / slug
+    large_block = ("# 标题\n\n" + ("很长的项目内容。\n" * 20000)).encode("utf-8")
+    (project_dir / "decision_log.md").write_bytes(large_block)
+    (project_dir / "runs").mkdir(parents=True, exist_ok=True)
+    (project_dir / "runs" / "latest.md").write_bytes(large_block)
+
+    result = svc.get_project(slug)
+
+    assert result["project"]["slug"] == slug
+    documents = result["documents"]
+    assert "内容已截断" in documents["decision_log"]
+    assert "内容已截断" in documents["latest_run"]
+    assert len(documents["decision_log"]) < len(large_block.decode("utf-8"))
+    assert len(documents["latest_run"]) < len(large_block.decode("utf-8"))
+
+
 # ---------------------------------------------------------------------------
 # CLI routing: web unified
 # ---------------------------------------------------------------------------
 
 
 def test_cli_routes_web_unified(monkeypatch: pytest.MonkeyPatch) -> None:
-    from typing import Any
 
     captured: dict[str, Any] = {}
 
@@ -773,16 +823,19 @@ def test_register_custom_factor(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
 
-    result = svc.register_custom_factor({
-        "name": "test_vol",
-        "code": _VALID_FACTOR_CODE,
-        "description": "test volatility factor",
-    })
+    result = svc.register_custom_factor(
+        {
+            "name": "test_vol",
+            "code": _VALID_FACTOR_CODE,
+            "description": "test volatility factor",
+        }
+    )
 
     assert result["registered"] is True
     assert result["name"] == "test_vol"
     # Verify it's in the registry
     from alpha_lab.factor_recipe import factor_registry
+
     assert "test_vol" in factor_registry
     # Verify persistence
     meta_path = tmp_path / "custom_factors" / "test_vol.json"
@@ -807,12 +860,15 @@ def test_register_and_delete_custom_factor(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
 
-    svc.register_custom_factor({
-        "name": "temp_factor",
-        "code": _VALID_FACTOR_CODE,
-    })
+    svc.register_custom_factor(
+        {
+            "name": "temp_factor",
+            "code": _VALID_FACTOR_CODE,
+        }
+    )
 
     from alpha_lab.factor_recipe import factor_registry
+
     assert "temp_factor" in factor_registry
 
     svc.delete_custom_factor("temp_factor")
@@ -849,11 +905,13 @@ def test_get_custom_factor_code(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
 
-    svc.register_custom_factor({
-        "name": "view_test",
-        "code": _VALID_FACTOR_CODE,
-        "description": "viewable factor",
-    })
+    svc.register_custom_factor(
+        {
+            "name": "view_test",
+            "code": _VALID_FACTOR_CODE,
+            "description": "viewable factor",
+        }
+    )
 
     result = svc.get_custom_factor_code("view_test")
 
@@ -863,6 +921,7 @@ def test_get_custom_factor_code(tmp_path: Path) -> None:
 
     # Clean up
     from alpha_lab.factor_recipe import factor_registry
+
     factor_registry._builders.pop("view_test", None)
 
 
@@ -870,19 +929,202 @@ def test_persisted_factors_reload_on_init(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc1 = _make_service(tmp_path, vault)
 
-    svc1.register_custom_factor({
-        "name": "persist_test",
-        "code": _VALID_FACTOR_CODE,
-    })
+    svc1.register_custom_factor(
+        {
+            "name": "persist_test",
+            "code": _VALID_FACTOR_CODE,
+        }
+    )
 
     from alpha_lab.factor_recipe import factor_registry
+
     # Remove from in-memory registry to simulate fresh start
     factor_registry._builders.pop("persist_test", None)
     assert "persist_test" not in factor_registry
 
     # Create new service — should reload from disk
-    svc2 = _make_service(tmp_path, vault)
+    _make_service(tmp_path, vault)
     assert "persist_test" in factor_registry
 
     # Clean up
     factor_registry._builders.pop("persist_test", None)
+
+
+def test_frontend_batch_parallel_config_prefers_process_mode() -> None:
+    config = _build_frontend_batch_parallel_config(5)
+
+    assert config.mode == "process"
+    assert config.max_workers == 4
+    assert config.factors_per_worker == 2
+
+
+def test_run_store_claims_queued_tasks_into_batch_groups() -> None:
+    store = _RunStore()
+    task_a = _RunTask(
+        run_id="run-a",
+        project_slug="proj-a",
+        case_name="case-a",
+        round_id=None,
+        spec_path="/tmp/case-a.yaml",
+        evaluation_profile="exploratory_screening",
+        output_root_dir=None,
+        render_report=True,
+    )
+    task_b = _RunTask(
+        run_id="run-b",
+        project_slug="proj-b",
+        case_name="case-b",
+        round_id=None,
+        spec_path="/tmp/case-b.yaml",
+        evaluation_profile="exploratory_screening",
+        output_root_dir=None,
+        render_report=True,
+    )
+    task_c = _RunTask(
+        run_id="run-c",
+        project_slug="proj-c",
+        case_name="case-c",
+        round_id=None,
+        spec_path="/tmp/case-c.yaml",
+        evaluation_profile="default_research",
+        output_root_dir=None,
+        render_report=True,
+    )
+
+    with store._lock:  # noqa: SLF001 - test seeds in-memory state directly
+        for task in (task_a, task_b, task_c):
+            store._tasks[task.run_id] = task  # noqa: SLF001
+            store._records[task.run_id] = _RunRecord(  # noqa: SLF001
+                run_id=task.run_id,
+                project_slug=task.project_slug,
+                case_name=task.case_name,
+                round_id=task.round_id,
+                spec_path=task.spec_path,
+                submitted_at_utc="2026-04-19T00:00:00Z",
+                evaluation_profile=task.evaluation_profile,
+                output_root_dir=task.output_root_dir,
+                render_report=task.render_report,
+                status="queued",
+            )
+
+    groups = store._claim_queued_task_groups()  # noqa: SLF001
+
+    assert len(groups) == 2
+    assert [task.run_id for task in groups[0]] == ["run-a", "run-b"]
+    assert [task.run_id for task in groups[1]] == ["run-c"]
+    assert store.get("run-a").status == "running"
+    assert store.get("run-b").status == "running"
+    assert store.get("run-c").status == "running"
+
+
+def test_run_store_reuses_input_bundle_cache_across_single_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _RunStore()
+    spec_path = tmp_path / "case.yaml"
+    spec_path.write_text("name: demo\n", encoding="utf-8")
+    prices_path = tmp_path / "prices.parquet"
+    prices_path.write_text("stub", encoding="utf-8")
+    universe_path = tmp_path / "universe.parquet"
+    universe_path.write_text("stub", encoding="utf-8")
+
+    fake_spec = SimpleNamespace(
+        prices_path=str(prices_path),
+        universe=SimpleNamespace(
+            path=str(universe_path),
+            in_universe_column="in_universe",
+        ),
+    )
+
+    bundle_load_count = 0
+
+    def _fake_load_spec(_path: Path) -> SimpleNamespace:
+        return fake_spec
+
+    def _fake_load_inputs(_spec: object) -> object:
+        nonlocal bundle_load_count
+        bundle_load_count += 1
+        return {"bundle_id": bundle_load_count}
+
+    call_bundles: list[object] = []
+
+    class _FakeResult:
+        def __init__(self, output_dir: Path, metrics_path: Path) -> None:
+            self.output_dir = output_dir
+            self.artifact_paths = {"metrics": metrics_path}
+
+    def _fake_run_single_factor_case(
+        _spec: object,
+        *,
+        output_root_dir: str | None,
+        evaluation_profile: str,
+        vault_export_mode: str,
+        progress_callback: object,
+        input_bundle: object,
+    ) -> _FakeResult:
+        del output_root_dir, evaluation_profile, vault_export_mode, progress_callback
+        call_bundles.append(input_bundle)
+        run_idx = len(call_bundles)
+        output_dir = tmp_path / f"run-{run_idx}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        metrics_path = output_dir / "metrics.json"
+        metrics_path.write_text(
+            json.dumps({"metrics": {"factor_verdict": "Pass"}}),
+            encoding="utf-8",
+        )
+        return _FakeResult(output_dir=output_dir, metrics_path=metrics_path)
+
+    monkeypatch.setattr("alpha_lab.web_unified.load_single_factor_case_spec", _fake_load_spec)
+    monkeypatch.setattr("alpha_lab.web_unified.load_standard_inputs", _fake_load_inputs)
+    monkeypatch.setattr(
+        "alpha_lab.web_unified.run_single_factor_case", _fake_run_single_factor_case
+    )
+
+    tasks = [
+        _RunTask(
+            run_id="run-1",
+            project_slug="proj",
+            case_name="case",
+            round_id=None,
+            spec_path=str(spec_path),
+            evaluation_profile="exploratory_screening",
+            output_root_dir=None,
+            render_report=False,
+        ),
+        _RunTask(
+            run_id="run-2",
+            project_slug="proj",
+            case_name="case",
+            round_id=None,
+            spec_path=str(spec_path),
+            evaluation_profile="exploratory_screening",
+            output_root_dir=None,
+            render_report=False,
+        ),
+    ]
+
+    with store._lock:  # noqa: SLF001 - seed run store directly
+        for idx, task in enumerate(tasks, start=1):
+            store._tasks[task.run_id] = task  # noqa: SLF001
+            store._records[task.run_id] = _RunRecord(  # noqa: SLF001
+                run_id=task.run_id,
+                project_slug=task.project_slug,
+                case_name=task.case_name,
+                round_id=task.round_id,
+                spec_path=task.spec_path,
+                submitted_at_utc=f"2026-04-20T00:00:0{idx}Z",
+                evaluation_profile=task.evaluation_profile,
+                output_root_dir=task.output_root_dir,
+                render_report=task.render_report,
+                status="running",
+            )
+
+    for task in tasks:
+        store._execute_single_task(task, allow_fallback=False)  # noqa: SLF001
+
+    assert bundle_load_count == 1
+    assert len(call_bundles) == 2
+    assert call_bundles[0] is call_bundles[1]
+    assert store.get("run-1").status == "succeeded"
+    assert store.get("run-2").status == "succeeded"

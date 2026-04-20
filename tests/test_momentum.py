@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 
@@ -140,7 +141,7 @@ def test_constant_prices_zero_return():
 
 def test_missing_column_raises():
     df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=5), "close": range(5)})
-    with pytest.raises(KeyError, match="asset"):
+    with pytest.raises(AlphaLabDataError, match="asset"):
         momentum(df)
 
 
