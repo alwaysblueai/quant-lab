@@ -27,6 +27,13 @@ def load_tabular_frame(path_value: str, *, object_name: str) -> pd.DataFrame:
     - ``.csv``
     - ``.parquet``
     - ``.pq``
+
+    Parquet-first resolution: when ``path_value`` points at a ``.csv`` and a
+    sibling ``.parquet`` (or ``.pq``) exists alongside it whose mtime is at
+    least as recent as the CSV, the parquet file is loaded instead. This keeps
+    specs CSV-oriented while letting case inputs transparently upgrade to
+    parquet for faster IO. If the parquet is older than the CSV (stale export),
+    the CSV still wins.
     """
 
     path = Path(path_value)
@@ -35,6 +42,9 @@ def load_tabular_frame(path_value: str, *, object_name: str) -> pd.DataFrame:
 
     suffix = path.suffix.lower()
     if suffix == ".csv":
+        parquet_sibling = _resolve_parquet_sibling(path)
+        if parquet_sibling is not None:
+            return pd.read_parquet(parquet_sibling)
         return pd.read_csv(path)
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path)
@@ -42,6 +52,23 @@ def load_tabular_frame(path_value: str, *, object_name: str) -> pd.DataFrame:
     raise AlphaLabIOError(
         f"{object_name} file must use one of ['.csv', '.parquet', '.pq']; got: {path}"
     )
+
+
+def _resolve_parquet_sibling(csv_path: Path) -> Path | None:
+    """Return a fresh-enough sibling .parquet/.pq for a CSV, or None."""
+    try:
+        csv_mtime = csv_path.stat().st_mtime
+    except OSError:
+        return None
+    for suffix in (".parquet", ".pq"):
+        sibling = csv_path.with_suffix(suffix)
+        try:
+            sibling_mtime = sibling.stat().st_mtime
+        except OSError:
+            continue
+        if sibling_mtime >= csv_mtime:
+            return sibling
+    return None
 
 
 def load_prices(path_value: str) -> pd.DataFrame:

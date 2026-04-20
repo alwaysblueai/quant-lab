@@ -1,0 +1,30 @@
+{
+  "benchmark_relative_assessment": null,
+  "benchmark_relative_excess_return": null,
+  "benchmark_relative_risks": [],
+  "benchmark_relative_status": "not_available",
+  "benchmark_relative_tracking_error": null,
+  "major_caveats": [
+    "Portfolio validation skipped because promotion gate was not passed."
+  ],
+  "major_risks": [
+    "blocked by unstable rolling evidence"
+  ],
+  "portfolio_robustness_summary": {
+    "benchmark_relative_support_note": "Benchmark-relative support is unavailable in current case evidence.",
+    "concentration_turnover_risk_note": "Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.",
+    "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
+    "fragility_reasons": [
+      "blocked by unstable rolling evidence"
+    ],
+    "scenario_sensitivity_notes": [
+      "Sensitivity diagnostics are inconclusive because portfolio validation did not complete."
+    ],
+    "support_reasons": [],
+    "taxonomy_label": "Inconclusive portfolio evidence"
+  },
+  "promotion_decision": "Blocked from Level 2",
+  "recommendation": "Not evaluated (not promoted)",
+  "remains_credible_at_portfolio_level": null,
+  "validation_status": "skipped_not_promoted"
+}
