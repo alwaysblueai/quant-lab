@@ -10,6 +10,7 @@ from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 from alpha_lab.evaluation import compute_ic, compute_ic_summary, compute_rank_ic
 from alpha_lab.labels import forward_return
@@ -185,29 +186,32 @@ def compute_factor_autocorrelation(
     pd.DataFrame
         One row per lag with columns: ``[lag, mean_autocorr, std_autocorr, n_dates]``.
     """
-    dates = np.sort(factor_df["date"].unique())
-
     # Pivot to wide form: rows=dates, cols=assets
     wide = factor_df.pivot(index="date", columns="asset", values="value")
     wide = wide.sort_index()
+    values = wide.to_numpy(dtype=float, copy=False)
+    n_dates = int(values.shape[0])
 
     rows: list[dict[str, object]] = []
     for lag in lags:
+        lag_int = int(lag)
+        if lag_int >= n_dates:
+            rows.append(
+                {
+                    "lag": lag,
+                    "mean_autocorr": float("nan"),
+                    "std_autocorr": float("nan"),
+                    "n_dates": 0,
+                }
+            )
+            continue
+
         corrs: list[float] = []
-        for i in range(lag, len(dates)):
-            current = wide.iloc[i]
-            previous = wide.iloc[i - lag]
-            # Only keep assets present in both
-            valid = current.notna() & previous.notna()
-            if valid.sum() < 3:
+        for i in range(lag_int, n_dates):
+            corr = _spearman_corr_on_overlap(values[i], values[i - lag_int], min_assets=3)
+            if not np.isfinite(corr):
                 continue
-            c = current[valid].rank(method="average")
-            p = previous[valid].rank(method="average")
-            # Check for zero variance
-            if c.std() == 0 or p.std() == 0:
-                corrs.append(float("nan"))
-                continue
-            corrs.append(float(c.corr(p)))
+            corrs.append(corr)
 
         clean = [c for c in corrs if np.isfinite(c)]
         rows.append(
@@ -220,3 +224,24 @@ def compute_factor_autocorrelation(
         )
 
     return pd.DataFrame(rows)
+
+
+def _spearman_corr_on_overlap(
+    current: np.ndarray,
+    previous: np.ndarray,
+    *,
+    min_assets: int,
+) -> float:
+    valid = np.isfinite(current) & np.isfinite(previous)
+    if int(valid.sum()) < min_assets:
+        return float("nan")
+
+    current_rank = scipy_stats.rankdata(current[valid], method="average")
+    previous_rank = scipy_stats.rankdata(previous[valid], method="average")
+
+    current_dev = current_rank - current_rank.mean()
+    previous_dev = previous_rank - previous_rank.mean()
+    denom = float(np.sqrt(np.dot(current_dev, current_dev) * np.dot(previous_dev, previous_dev)))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return float("nan")
+    return float(np.dot(current_dev, previous_dev) / denom)

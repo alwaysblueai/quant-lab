@@ -6,6 +6,9 @@ using exchange-provided adjustment factors.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+import numpy as np
 import pandas as pd
 
 
@@ -115,26 +118,97 @@ def adjust_for_dividends(
 
     df = prices_df.copy()
     df = df.sort_values(["asset", "date"]).reset_index(drop=True)
+    if dividend_df.empty:
+        return df
 
-    # For each dividend event, compute the adjustment ratio
-    # On ex-date: adjusted_price = price * (1 - dividend / prev_close)
-    # All prior prices are scaled by this ratio
-    for _, row in dividend_df.iterrows():
-        asset = row["asset"]
-        ex_date = row["date"]
-        div = row["dividend_per_share"]
+    @dataclass
+    class _AssetState:
+        start: int
+        end: int
+        dates: np.ndarray
+        close_values: np.ndarray
+        diff_log: np.ndarray
+        fenwick_tree: np.ndarray
 
-        mask = (df["asset"] == asset) & (df["date"] < ex_date)
-        # Get the closing price on the day before ex-date
-        pre_ex = df[(df["asset"] == asset) & (df["date"] < ex_date)]
-        if pre_ex.empty:
-            continue
-        prev_close = pre_ex.sort_values("date").iloc[-1]["close"]
-        if prev_close <= 0:
-            continue
-        ratio = 1.0 - div / prev_close
-        if ratio <= 0:
-            continue
-        df.loc[mask, "close"] = df.loc[mask, "close"] * ratio
+        @property
+        def size(self) -> int:
+            return self.end - self.start
 
+    def _fenwick_add(tree: np.ndarray, idx: int, delta: float) -> None:
+        i = idx + 1
+        n = tree.size - 1
+        while i <= n:
+            tree[i] += delta
+            i += i & -i
+
+    def _fenwick_point_query(tree: np.ndarray, idx: int) -> float:
+        i = idx + 1
+        total = 0.0
+        while i > 0:
+            total += float(tree[i])
+            i -= i & -i
+        return total
+
+    close_values = pd.to_numeric(df["close"], errors="coerce").to_numpy(copy=True, dtype=float)
+    date_values = pd.to_datetime(df["date"], errors="coerce").to_numpy(dtype="datetime64[ns]")
+
+    asset_states: dict[object, _AssetState] = {}
+    for asset, group in df.groupby("asset", sort=False, observed=True):
+        idx = group.index.to_numpy(dtype=int)
+        if idx.size == 0:
+            continue
+        start = int(idx[0])
+        end = int(idx[-1]) + 1
+        size = end - start
+        asset_states[asset] = _AssetState(
+            start=start,
+            end=end,
+            dates=date_values[start:end],
+            close_values=close_values[start:end],
+            diff_log=np.zeros(size + 1, dtype=float),
+            fenwick_tree=np.zeros(size + 1, dtype=float),
+        )
+
+    events = dividend_df[["asset", "date", "dividend_per_share"]]
+    for asset, ex_date_raw, div_raw in events.itertuples(index=False, name=None):
+        state = asset_states.get(asset)
+        if state is None:
+            continue
+
+        ex_date = pd.to_datetime(ex_date_raw, errors="coerce")
+        if pd.isna(ex_date):
+            continue
+        div = pd.to_numeric(div_raw, errors="coerce")
+        if not pd.notna(div):
+            continue
+        div_value = float(div)
+
+        ex_np = np.datetime64(pd.Timestamp(ex_date), "ns")
+        insert_pos = int(np.searchsorted(state.dates, ex_np, side="left"))
+        if insert_pos <= 0:
+            continue
+
+        prev_idx = insert_pos - 1
+        prev_scale_log = _fenwick_point_query(state.fenwick_tree, prev_idx)
+        prev_close = float(state.close_values[prev_idx] * np.exp(prev_scale_log))
+        if not np.isfinite(prev_close) or prev_close <= 0.0:
+            continue
+
+        ratio = 1.0 - div_value / prev_close
+        if not np.isfinite(ratio) or ratio <= 0.0:
+            continue
+
+        log_ratio = float(np.log(ratio))
+        state.diff_log[0] += log_ratio
+        state.diff_log[insert_pos] -= log_ratio
+
+        _fenwick_add(state.fenwick_tree, 0, log_ratio)
+        if insert_pos < state.size:
+            _fenwick_add(state.fenwick_tree, insert_pos, -log_ratio)
+
+    for state in asset_states.values():
+        log_scale = np.cumsum(state.diff_log[:-1], dtype=float)
+        state.close_values[:] = state.close_values * np.exp(log_scale)
+
+    df["close"] = close_values
     return df

@@ -22,7 +22,11 @@ from alpha_lab.decay import (
     compute_ic_decay,
     estimate_ic_half_life,
 )
-from alpha_lab.evaluation import compute_ic, compute_ic_summary
+from alpha_lab.evaluation import (
+    compute_ic,
+    compute_ic_summary,
+    compute_mean_rank_ic_permutation_null,
+)
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
 from alpha_lab.grouped_evaluation import (
     conditional_ic_by_cross_section_size,
@@ -146,6 +150,7 @@ def evaluate_single_factor_case(
             n_quantiles=spec.n_quantiles,
             rolling_stability_thresholds=evaluation_config.rolling_stability,
             label_fn=close_label_fn,
+            precomputed_forward_labels=precomputed_forward_labels,
         ),
     )
 
@@ -174,6 +179,7 @@ def evaluate_single_factor_case(
                 n_quantiles=spec.n_quantiles,
                 rolling_stability_thresholds=evaluation_config.rolling_stability,
                 label_fn=close_label_fn,
+                precomputed_forward_labels=precomputed_forward_labels,
             ),
         )
         raw_summary_df = summarise_experiment_result(
@@ -1820,62 +1826,16 @@ def _merge_random_factor_baseline_metrics(
     if factor_df.empty or label_df.empty:
         return empty_null
 
-    left = factor_df[["date", "asset", "value"]].rename(columns={"value": "_f"})
-    right = label_df[["date", "asset", "value"]].rename(columns={"value": "_y"})
-    merged = left.merge(right, on=["date", "asset"], how="inner").dropna()
-    if merged.empty:
-        return empty_null
-
-    # Per-date observed rank-IC using Spearman.
-    def _date_ic(frame: pd.DataFrame) -> float:
-        if len(frame) < 3:
-            return np.nan
-        return float(frame["_f"].corr(frame["_y"], method="spearman"))
-
-    observed_per_date = (
-        merged.groupby("date", sort=False)
-        .apply(_date_ic)
-        .replace([np.inf, -np.inf], np.nan)
-        .dropna()
+    observed_mean, arr = compute_mean_rank_ic_permutation_null(
+        factor_df,
+        label_df,
+        n_permutations=int(n_permutations),
+        seed=int(seed),
+        min_assets_per_date=3,
     )
-    if observed_per_date.empty:
-        return empty_null
-    observed_mean = float(observed_per_date.mean())
-
-    rng = np.random.default_rng(seed)
-    # Group labels (rank) and factor (rank) per date once, then permute.
-    groups = list(merged.groupby("date", sort=False))
-    date_ranks: list[tuple[np.ndarray, np.ndarray]] = []
-    for _, frame in groups:
-        if len(frame) < 3:
-            continue
-        f_rank = pd.Series(frame["_f"]).rank(method="average").to_numpy(dtype=float)
-        y_rank = pd.Series(frame["_y"]).rank(method="average").to_numpy(dtype=float)
-        date_ranks.append((f_rank, y_rank))
-    if not date_ranks:
+    if not np.isfinite(observed_mean) or arr.size == 0:
         return empty_null
 
-    null_means: list[float] = []
-    for _ in range(int(n_permutations)):
-        per_date: list[float] = []
-        for f_rank, y_rank in date_ranks:
-            shuffled = rng.permutation(f_rank)
-            # Pearson on ranks ≡ Spearman rho.
-            f_mean = shuffled.mean()
-            y_mean = y_rank.mean()
-            num = float(((shuffled - f_mean) * (y_rank - y_mean)).sum())
-            denom = float(
-                np.sqrt(((shuffled - f_mean) ** 2).sum() * ((y_rank - y_mean) ** 2).sum())
-            )
-            if denom > 0.0:
-                per_date.append(num / denom)
-        if per_date:
-            null_means.append(float(np.mean(per_date)))
-
-    if not null_means:
-        return empty_null
-
-    arr = np.asarray(null_means, dtype=float)
     metrics["random_baseline_n_permutations"] = int(arr.size)
     metrics["random_baseline_mean_ic_mean"] = float(arr.mean())
     metrics["random_baseline_mean_ic_std"] = float(arr.std(ddof=1)) if arr.size >= 2 else 0.0

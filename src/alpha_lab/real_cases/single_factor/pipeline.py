@@ -22,6 +22,7 @@ from alpha_lab.real_cases.common_io import (
     load_prices,
     load_tabular_frame,
     load_universe_mask,
+    resolve_tabular_frame_path,
 )
 from alpha_lab.research_contracts import validate_canonical_signal_table
 from alpha_lab.research_evaluation_config import get_research_evaluation_config
@@ -158,14 +159,22 @@ def load_standard_inputs(
 ) -> SingleFactorInputBundle:
     """Load and standardize prices/universe once for multi-factor reuse."""
     spec = _resolve_single_factor_spec(spec_or_path)
-    universe_mask = load_universe_mask(spec.universe)
+    resolved_prices_path = str(resolve_tabular_frame_path(spec.prices_path, object_name="prices"))
+    resolved_universe_path: str | None = None
+    if spec.universe.path is not None:
+        resolved_universe_path = str(
+            resolve_tabular_frame_path(spec.universe.path, object_name="universe")
+        )
+    resolved_universe_spec = replace(spec.universe, path=resolved_universe_path)
+
+    universe_mask = load_universe_mask(resolved_universe_spec)
     if universe_mask is not None:
         universe_mask = universe_mask.sort_values(["date", "asset"], kind="mergesort").reset_index(
             drop=True
         )
         universe_mask["in_universe"] = universe_mask["in_universe"].astype(bool)
 
-    prices_all = load_prices(spec.prices_path)
+    prices_all = load_prices(resolved_prices_path)
     prices_panel = (
         apply_universe_to_prices(prices_all, universe_mask)
         if universe_mask is not None
@@ -179,8 +188,8 @@ def load_standard_inputs(
     prices_panel_enriched = base_feature_cache.prices_enriched
 
     return SingleFactorInputBundle(
-        prices_path=spec.prices_path,
-        universe_path=spec.universe.path,
+        prices_path=resolved_prices_path,
+        universe_path=resolved_universe_path,
         universe_in_column=spec.universe.in_universe_column,
         prices_all=prices_all,
         prices_panel=prices_panel_enriched,
@@ -778,7 +787,7 @@ def _resolve_batch_path(path_text: str, *, base_dir: Path) -> Path:
 
 
 def _input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
-    return (spec.prices_path, spec.universe.path, spec.universe.in_universe_column)
+    return _resolved_input_bundle_key(spec)
 
 
 def _chunk_list(
@@ -1012,14 +1021,27 @@ def _ensure_bundle_compatible(
     *,
     spec: SingleFactorCaseSpec,
 ) -> None:
-    if bundle.prices_path != spec.prices_path:
+    (
+        expected_prices_path,
+        expected_universe_path,
+        expected_universe_col,
+    ) = _resolved_input_bundle_key(spec)
+    if bundle.prices_path != expected_prices_path:
         raise AlphaLabConfigError("input_bundle.prices_path does not match spec.prices_path")
-    if bundle.universe_path != spec.universe.path:
+    if bundle.universe_path != expected_universe_path:
         raise AlphaLabConfigError("input_bundle.universe_path does not match spec.universe.path")
-    if bundle.universe_in_column != spec.universe.in_universe_column:
+    if bundle.universe_in_column != expected_universe_col:
         raise AlphaLabConfigError(
             "input_bundle.universe_in_column does not match spec.universe.in_universe_column"
         )
+
+
+def _resolved_input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
+    prices_path = str(resolve_tabular_frame_path(spec.prices_path, object_name="prices"))
+    universe_path: str | None = None
+    if spec.universe.path is not None:
+        universe_path = str(resolve_tabular_frame_path(spec.universe.path, object_name="universe"))
+    return (prices_path, universe_path, spec.universe.in_universe_column)
 
 
 def _default_factor_loader(spec: SingleFactorCaseSpec) -> pd.DataFrame:

@@ -71,30 +71,25 @@ def _build_conditional_ic(inputs: Tier1Inputs) -> dict[str, Any]:
 
 
 def _build_random_null(inputs: Tier1Inputs) -> dict[str, Any]:
-    # Minimal random-null via shuffled factor values per date.
-    import numpy as np
-
-    from alpha_lab.evaluation import compute_rank_ic
+    from alpha_lab.evaluation import compute_mean_rank_ic_permutation_null
     from alpha_lab.labels import forward_return
 
-    rng = np.random.default_rng(seed=20260419)
     labels = forward_return(inputs.prices, horizon=inputs.horizon)
     n_trials = 200
-    base_ranks = []
-    for _ in range(n_trials):
-        shuffled = inputs.factor_df.copy()
-        shuffled["value"] = shuffled.groupby("date", sort=False)["value"].transform(
-            lambda s: pd.Series(rng.permutation(s.values), index=s.index)
-        )
-        r_df = compute_rank_ic(shuffled, labels)
-        vals = pd.to_numeric(r_df["rank_ic"], errors="coerce").dropna()
-        base_ranks.append(float(vals.mean()) if len(vals) else float("nan"))
-    s = pd.Series(base_ranks).dropna()
-    from alpha_lab.evaluation import compute_rank_ic as _cri
-
-    actual_df = _cri(inputs.factor_df, labels)
-    actual = float(pd.to_numeric(actual_df["rank_ic"], errors="coerce").dropna().mean())
-    pct = float((s > abs(actual)).mean()) if not s.empty else float("nan")
+    actual, null_samples = compute_mean_rank_ic_permutation_null(
+        inputs.factor_df,
+        labels,
+        n_permutations=n_trials,
+        seed=20260419,
+        min_assets_per_date=3,
+    )
+    s = pd.Series(null_samples, dtype=float).dropna()
+    if s.empty or not pd.notna(actual):
+        pct = float("nan")
+    elif actual >= 0:
+        pct = float((s >= actual).mean())
+    else:
+        pct = float((s <= actual).mean())
     return {
         "n_trials": n_trials,
         "null_mean_rank_ic_samples": s.tolist(),
@@ -126,15 +121,13 @@ def _build_purged_kfold(inputs: Tier1Inputs) -> dict[str, Any]:
 
 
 def _build_turnover_ts(inputs: Tier1Inputs) -> dict[str, Any]:
-    from alpha_lab.experiment import run_factor_experiment
+    from alpha_lab.quantile import quantile_assignments
+    from alpha_lab.turnover import long_short_turnover, quantile_turnover
 
-    result = run_factor_experiment(
-        inputs.prices,
-        lambda _p: inputs.factor_df.copy(),
-        horizon=inputs.horizon,
-        n_quantiles=inputs.n_quantiles,
-    )
-    return {"turnover_ts": _df_to_records(result.long_short_turnover_df)}
+    assignments = quantile_assignments(inputs.factor_df, n_quantiles=inputs.n_quantiles)
+    qto = quantile_turnover(assignments)
+    lsto = long_short_turnover(qto)
+    return {"turnover_ts": _df_to_records(lsto)}
 
 
 def _build_coverage_ts(inputs: Tier1Inputs) -> dict[str, Any]:

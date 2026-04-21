@@ -4,7 +4,8 @@ import hashlib
 import json
 import re
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -196,6 +197,8 @@ class DataCatalog:
 
     def __init__(self, root: str | Path | None = None) -> None:
         self.root = resolve_data_root(root)
+        self._refresh_defer_depth = 0
+        self._deferred_refresh_tables: set[str] = set()
 
     @property
     def raw_root(self) -> Path:
@@ -267,6 +270,28 @@ class DataCatalog:
                 "duckdb_available": bool(_optional_duckdb() is not None),
             },
         )
+
+    @contextmanager
+    def upsert_session(self) -> Iterator[None]:
+        """Batch DuckDB catalog refreshes across multiple upserts.
+
+        Within the session, ``upsert_table`` records changed table names and
+        delays the DuckDB view refresh until the outermost session exits
+        successfully. If the session fails with an exception, deferred refresh
+        requests are discarded to avoid exposing a partially written batch.
+        """
+        self._refresh_defer_depth += 1
+        success = False
+        try:
+            yield
+            success = True
+        finally:
+            self._refresh_defer_depth = max(0, self._refresh_defer_depth - 1)
+            if self._refresh_defer_depth == 0:
+                if success:
+                    self._flush_deferred_refresh()
+                else:
+                    self._deferred_refresh_tables.clear()
 
     def table_root(self, table_name: str) -> Path:
         return self.canonical_root / table_name
@@ -387,7 +412,7 @@ class DataCatalog:
                 "written_partitions": [str(path) for path in written_dirs],
             },
         )
-        self.refresh_duckdb_catalog([table_name])
+        self._schedule_catalog_refresh([table_name])
         return tuple(written_dirs)
 
     def load_table(
@@ -1435,6 +1460,22 @@ class DataCatalog:
                 "catalog_path": str(self.duckdb_catalog_path),
             },
         )
+
+    def _schedule_catalog_refresh(self, table_names: Iterable[str]) -> None:
+        names = sorted({str(name) for name in table_names if str(name).strip()})
+        if not names:
+            return
+        if self._refresh_defer_depth > 0:
+            self._deferred_refresh_tables.update(names)
+            return
+        self.refresh_duckdb_catalog(names)
+
+    def _flush_deferred_refresh(self) -> None:
+        if not self._deferred_refresh_tables:
+            return
+        names = sorted(self._deferred_refresh_tables)
+        self._deferred_refresh_tables.clear()
+        self.refresh_duckdb_catalog(names)
 
     def _apply_universe(self, prices: pd.DataFrame, *, universe_name: str) -> pd.DataFrame:
         frame = prices.copy()

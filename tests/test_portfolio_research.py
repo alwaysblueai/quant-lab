@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import alpha_lab.experiment as experiment_module
 from alpha_lab.experiment import PortfolioSummary, run_factor_experiment
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.labels import forward_return
@@ -531,6 +532,51 @@ def test_experiment_portfolio_return_uses_1period_labels_when_horizon_gt_1() -> 
             df1["portfolio_return"].values,
             rtol=1e-9,
         )
+
+
+def test_experiment_precomputed_labels_avoid_recomputing_forward_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prices = _make_prices(n_days=60)
+    def factor_fn(prices_df: pd.DataFrame) -> pd.DataFrame:
+        return momentum(prices_df, window=5)
+
+    cached_labels = {
+        1: forward_return(prices, horizon=1),
+        5: forward_return(prices, horizon=5),
+    }
+
+    original_forward_return = experiment_module.forward_return
+    calls = {"count": 0}
+
+    def _wrapped_forward_return(*args, **kwargs):
+        calls["count"] += 1
+        return original_forward_return(*args, **kwargs)
+
+    monkeypatch.setattr(experiment_module, "forward_return", _wrapped_forward_return)
+
+    run_factor_experiment(
+        prices,
+        factor_fn,
+        horizon=5,
+        holding_period=1,
+        rebalance_frequency=1,
+    )
+    without_cache = calls["count"]
+
+    calls["count"] = 0
+    run_factor_experiment(
+        prices,
+        factor_fn,
+        horizon=5,
+        holding_period=1,
+        rebalance_frequency=1,
+        precomputed_forward_labels=cached_labels,
+    )
+    with_cache = calls["count"]
+
+    assert without_cache >= 2
+    assert with_cache == 0
 
 
 def test_experiment_portfolio_weights_columns() -> None:

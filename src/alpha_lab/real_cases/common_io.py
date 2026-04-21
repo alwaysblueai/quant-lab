@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from alpha_lab.data_quality.corporate_actions import adjust_for_dividends
 from alpha_lab.exceptions import AlphaLabDataError, AlphaLabIOError
 from alpha_lab.real_cases.common_spec import UniverseSpec
 from alpha_lab.research_contracts import validate_prices_table
@@ -36,6 +37,20 @@ def load_tabular_frame(path_value: str, *, object_name: str) -> pd.DataFrame:
     the CSV still wins.
     """
 
+    resolved = resolve_tabular_frame_path(path_value, object_name=object_name)
+    suffix = resolved.suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(resolved)
+    return pd.read_parquet(resolved)
+
+
+def resolve_tabular_frame_path(path_value: str, *, object_name: str) -> Path:
+    """Resolve the concrete file path to read from a CSV/Parquet input.
+
+    Resolution rules:
+    - ``.parquet`` / ``.pq`` inputs are used directly.
+    - ``.csv`` inputs prefer a fresh-enough sibling parquet file.
+    """
     path = Path(path_value)
     if not path.exists() or not path.is_file():
         raise AlphaLabIOError(f"{object_name} file does not exist: {path}")
@@ -43,11 +58,9 @@ def load_tabular_frame(path_value: str, *, object_name: str) -> pd.DataFrame:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         parquet_sibling = _resolve_parquet_sibling(path)
-        if parquet_sibling is not None:
-            return pd.read_parquet(parquet_sibling)
-        return pd.read_csv(path)
+        return parquet_sibling if parquet_sibling is not None else path
     if suffix in {".parquet", ".pq"}:
-        return pd.read_parquet(path)
+        return path
 
     raise AlphaLabIOError(
         f"{object_name} file must use one of ['.csv', '.parquet', '.pq']; got: {path}"
@@ -90,8 +103,32 @@ def load_prices(path_value: str) -> pd.DataFrame:
     prices = prices.copy()
     prices["date"] = pd.to_datetime(prices["date"], errors="coerce")
     prices = prices.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
+    prices = _apply_optional_dividend_adjustment(prices)
     validate_prices_table(prices)
     return prices
+
+
+def _apply_optional_dividend_adjustment(prices: pd.DataFrame) -> pd.DataFrame:
+    """Apply default dividend back-adjustment when event column is present.
+
+    The daily price panel may include an optional ``dividend_per_share`` column
+    where non-zero entries mark ex-dividend dates. When present, the single-
+    factor pipeline should use adjusted close prices by default so all downstream
+    labels (including cached horizon=1 labels) are aligned to the same adjusted
+    close path.
+    """
+
+    if "dividend_per_share" not in prices.columns:
+        return prices
+
+    div = pd.to_numeric(prices["dividend_per_share"], errors="coerce")
+    event_mask = div.notna() & div.ne(0.0)
+    if not bool(event_mask.any()):
+        return prices
+
+    events = prices.loc[event_mask, ["asset", "date"]].copy()
+    events["dividend_per_share"] = div.loc[event_mask].astype(float).to_numpy()
+    return adjust_for_dividends(prices, events)
 
 
 # ---------------------------------------------------------------------------

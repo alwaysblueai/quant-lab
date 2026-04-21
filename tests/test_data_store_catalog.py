@@ -842,6 +842,247 @@ def test_data_catalog_query_sql_reads_duckdb_views(
     assert result.to_dict(orient="records") == [{"n_rows": 2}]
 
 
+def test_upsert_table_refreshes_catalog_immediately_by_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    catalog = DataCatalog()
+    catalog.ensure_layout()
+
+    refresh_calls: list[tuple[str, ...]] = []
+
+    def _fake_refresh(table_names=None):
+        if table_names is None:
+            refresh_calls.append(tuple())
+            return
+        refresh_calls.append(tuple(table_names))
+
+    monkeypatch.setattr(catalog, "refresh_duckdb_catalog", _fake_refresh)
+
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.0,
+                "volume": 1.0,
+                "amount": 10.0,
+            }
+        ]
+    )
+    catalog.upsert_table(
+        "daily_bars", daily_bars, key_cols=("date", "asset"), partition_column="date"
+    )
+
+    assert refresh_calls == [("daily_bars",)]
+
+
+def test_upsert_session_batches_refresh_calls_until_session_end(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    catalog = DataCatalog()
+    catalog.ensure_layout()
+
+    refresh_calls: list[tuple[str, ...]] = []
+
+    def _fake_refresh(table_names=None):
+        if table_names is None:
+            refresh_calls.append(tuple())
+            return
+        refresh_calls.append(tuple(table_names))
+
+    monkeypatch.setattr(catalog, "refresh_duckdb_catalog", _fake_refresh)
+
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.0,
+                "volume": 1.0,
+                "amount": 10.0,
+            }
+        ]
+    )
+    daily_basic = pd.DataFrame(
+        [{"date": "2024-01-02", "asset": "000001.SZ", "pb": 2.0}]
+    )
+    with catalog.upsert_session():
+        catalog.upsert_table(
+            "daily_bars",
+            daily_bars,
+            key_cols=("date", "asset"),
+            partition_column="date",
+        )
+        catalog.upsert_table(
+            "daily_bars",
+            daily_bars,
+            key_cols=("date", "asset"),
+            partition_column="date",
+        )
+        catalog.upsert_table(
+            "daily_basic",
+            daily_basic,
+            key_cols=("date", "asset"),
+            partition_column="date",
+        )
+        assert refresh_calls == []
+
+    assert refresh_calls == [("daily_bars", "daily_basic")]
+
+
+def test_upsert_session_drops_deferred_refresh_when_session_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    catalog = DataCatalog()
+    catalog.ensure_layout()
+
+    refresh_calls: list[tuple[str, ...]] = []
+
+    def _fake_refresh(table_names=None):
+        if table_names is None:
+            refresh_calls.append(tuple())
+            return
+        refresh_calls.append(tuple(table_names))
+
+    monkeypatch.setattr(catalog, "refresh_duckdb_catalog", _fake_refresh)
+
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.0,
+                "volume": 1.0,
+                "amount": 10.0,
+            }
+        ]
+    )
+    with pytest.raises(RuntimeError, match="session failure"):
+        with catalog.upsert_session():
+            catalog.upsert_table(
+                "daily_bars",
+                daily_bars,
+                key_cols=("date", "asset"),
+                partition_column="date",
+            )
+            raise RuntimeError("session failure")
+
+    assert refresh_calls == []
+
+    daily_basic = pd.DataFrame(
+        [{"date": "2024-01-02", "asset": "000001.SZ", "pb": 2.0}]
+    )
+    catalog.upsert_table(
+        "daily_basic",
+        daily_basic,
+        key_cols=("date", "asset"),
+        partition_column="date",
+    )
+    assert refresh_calls == [("daily_basic",)]
+
+
+def test_upsert_session_keeps_rows_identical_to_immediate_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_root_immediate = tmp_path / "warehouse_immediate"
+    data_root_batched = tmp_path / "warehouse_batched"
+
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.0,
+                "volume": 1.0,
+                "amount": 10.0,
+            },
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.1,
+                "volume": 2.0,
+                "amount": 20.0,
+            },
+            {
+                "date": "2024-01-03",
+                "asset": "000001.SZ",
+                "close": 10.2,
+                "volume": 3.0,
+                "amount": 30.0,
+            },
+        ]
+    )
+    daily_basic = pd.DataFrame(
+        [
+            {"date": "2024-01-02", "asset": "000001.SZ", "pb": 2.0},
+            {"date": "2024-01-02", "asset": "000001.SZ", "pb": 2.2},
+            {"date": "2024-01-03", "asset": "000001.SZ", "pb": 2.4},
+        ]
+    )
+
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(data_root_immediate))
+    immediate_catalog = DataCatalog()
+    immediate_catalog.ensure_layout()
+    immediate_catalog.upsert_table(
+        "daily_bars",
+        daily_bars,
+        key_cols=("date", "asset"),
+        partition_column="date",
+    )
+    immediate_catalog.upsert_table(
+        "daily_basic",
+        daily_basic,
+        key_cols=("date", "asset"),
+        partition_column="date",
+    )
+
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(data_root_batched))
+    batched_catalog = DataCatalog()
+    batched_catalog.ensure_layout()
+    with batched_catalog.upsert_session():
+        batched_catalog.upsert_table(
+            "daily_bars",
+            daily_bars,
+            key_cols=("date", "asset"),
+            partition_column="date",
+        )
+        batched_catalog.upsert_table(
+            "daily_basic",
+            daily_basic,
+            key_cols=("date", "asset"),
+            partition_column="date",
+        )
+
+    immediate_bars = immediate_catalog.load_table("daily_bars").sort_values(
+        ["date", "asset"], kind="mergesort"
+    )
+    immediate_basic = immediate_catalog.load_table("daily_basic").sort_values(
+        ["date", "asset"], kind="mergesort"
+    )
+    batched_bars = batched_catalog.load_table("daily_bars").sort_values(
+        ["date", "asset"], kind="mergesort"
+    )
+    batched_basic = batched_catalog.load_table("daily_basic").sort_values(
+        ["date", "asset"], kind="mergesort"
+    )
+
+    pd.testing.assert_frame_equal(
+        immediate_bars.reset_index(drop=True),
+        batched_bars.reset_index(drop=True),
+    )
+    pd.testing.assert_frame_equal(
+        immediate_basic.reset_index(drop=True),
+        batched_basic.reset_index(drop=True),
+    )
+
+
 def test_data_catalog_query_sql_rejects_non_read_only(
     tmp_path: Path,
     monkeypatch,

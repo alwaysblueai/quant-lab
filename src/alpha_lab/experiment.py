@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import subprocess
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -455,6 +455,7 @@ def run_factor_experiment(
     rolling_stability_thresholds: RollingStabilityConfig = DEFAULT_ROLLING_STABILITY_THRESHOLDS,
     regime_analysis_config: RegimeAnalysisConfig = DEFAULT_REGIME_ANALYSIS_CONFIG,
     label_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
+    precomputed_forward_labels: Mapping[int, pd.DataFrame] | None = None,
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -524,6 +525,12 @@ def run_factor_experiment(
         selection is explicit rather than implicit.  ``n_quantiles`` and
         ``portfolio_cost_rate`` are not part of the strategy spec — they remain
         separate parameters.
+    precomputed_forward_labels:
+        Optional mapping ``horizon -> forward-return labels`` in canonical
+        ``[date, asset, factor, value]`` schema.  When provided, the runner
+        reuses cached labels for both the main evaluation horizon (when
+        ``label_fn`` is not provided) and the portfolio 1-period simulation
+        labels, and only falls back to ``forward_return`` for missing horizons.
 
     Returns
     -------
@@ -621,7 +628,11 @@ def run_factor_experiment(
         label_df = label_fn(prices)
         validate_factor_output(label_df)
     else:
-        label_df = forward_return(prices, horizon=horizon)
+        cached = _cached_forward_labels(
+            precomputed_forward_labels,
+            horizon=horizon,
+        )
+        label_df = cached if cached is not None else forward_return(prices, horizon=horizon)
     _record_integrity(pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df"))
     _record_integrity(
         check_factor_label_temporal_order(
@@ -781,6 +792,7 @@ def run_factor_experiment(
     port_summary: PortfolioSummary | None = None
 
     if holding_period is not None and rebalance_frequency is not None:
+        one_period_labels = _cached_forward_labels(precomputed_forward_labels, horizon=1)
         port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df = _run_portfolio_block(
             eval_factor=eval_factor,
             prices=prices,
@@ -790,6 +802,7 @@ def run_factor_experiment(
             weighting_method=weighting_method,
             portfolio_cost_rate=portfolio_cost_rate,
             strategy=strategy,
+            one_period_labels=one_period_labels,
         )
         port_summary = _summarise_portfolio(port_return_df, port_turnover_df, port_cost_adj_df)
         eval_max_date = (
@@ -1431,6 +1444,7 @@ def _run_portfolio_block(
     weighting_method: str,
     portfolio_cost_rate: float | None,
     strategy: StrategySpec | None = None,
+    one_period_labels: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     """Run the optional portfolio simulation block inside :func:`run_factor_experiment`.
 
@@ -1474,7 +1488,10 @@ def _run_portfolio_block(
     # H-period forward returns (used for IC/quantile evaluation) would
     # incorrectly compound in the staggered-portfolio model when
     # holding_period > 1.
-    one_period_labels = forward_return(prices, horizon=1)
+    if one_period_labels is None:
+        one_period_labels = forward_return(prices, horizon=1)
+    else:
+        one_period_labels = one_period_labels.copy()
     eval_1p = one_period_labels[one_period_labels["date"].isin(eval_date_index)].reset_index(
         drop=True
     )
@@ -1512,3 +1529,16 @@ def _run_portfolio_block(
         port_cost_adj_df = None
 
     return port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df
+
+
+def _cached_forward_labels(
+    precomputed_forward_labels: Mapping[int, pd.DataFrame] | None,
+    *,
+    horizon: int,
+) -> pd.DataFrame | None:
+    if precomputed_forward_labels is None:
+        return None
+    cached = precomputed_forward_labels.get(int(horizon))
+    if cached is None:
+        return None
+    return cached.copy()

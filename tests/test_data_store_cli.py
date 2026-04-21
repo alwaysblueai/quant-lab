@@ -181,7 +181,7 @@ def test_data_cli_ingest_uses_chunked_path_and_prints_progress(
 
     assert rc == 0
     assert captured["chunk_months"] == 6
-    assert captured["mode"] == "full"
+    assert captured["mode"] == "daily"
     assert captured["daily_research_only"] is True
     assert callable(captured["progress_callback"])
     out = capsys.readouterr().out

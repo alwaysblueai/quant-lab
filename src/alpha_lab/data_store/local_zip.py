@@ -259,37 +259,38 @@ class LocalZipAshareDailyIngestor:
         row_counts: dict[str, int] = {}
         rewritten_tables: list[str] = []
 
-        for table_name, key_cols, partition_column in table_specs:
-            frame = self.catalog.load_table(table_name, date_field=partition_column)
-            row_counts[table_name] = int(len(frame))
-            if frame.empty:
-                continue
-            if progress_callback is not None:
-                progress_callback(
-                    f"rewriting {table_name} into year/month partitions ({len(frame)} rows)"
+        with self.catalog.upsert_session():
+            for table_name, key_cols, partition_column in table_specs:
+                frame = self.catalog.load_table(table_name, date_field=partition_column)
+                row_counts[table_name] = int(len(frame))
+                if frame.empty:
+                    continue
+                if progress_callback is not None:
+                    progress_callback(
+                        f"rewriting {table_name} into year/month partitions ({len(frame)} rows)"
+                    )
+                table_root = self.catalog.table_root(table_name)
+                if table_root.exists():
+                    shutil.rmtree(table_root)
+                self.catalog.upsert_table(
+                    table_name,
+                    frame,
+                    key_cols=key_cols,
+                    partition_column=partition_column,
                 )
-            table_root = self.catalog.table_root(table_name)
-            if table_root.exists():
-                shutil.rmtree(table_root)
-            self.catalog.upsert_table(
-                table_name,
-                frame,
-                key_cols=key_cols,
-                partition_column=partition_column,
-            )
-            rewritten_tables.append(table_name)
+                rewritten_tables.append(table_name)
 
-        notes: dict[str, object] = {
-            "source_vendor": "local_zip",
-            "storage_layout": "year_month",
-            "reorganized_from": "asset_partitioned_local_zip_import",
-        }
-        dataset_version = self.catalog.write_dataset_version(
-            dataset_name=self.catalog.CORE_DATASET_NAME,
-            table_names=tuple(rewritten_tables),
-            raw_snapshot_id=None,
-            notes=notes,
-        )
+            notes: dict[str, object] = {
+                "source_vendor": "local_zip",
+                "storage_layout": "year_month",
+                "reorganized_from": "asset_partitioned_local_zip_import",
+            }
+            dataset_version = self.catalog.write_dataset_version(
+                dataset_name=self.catalog.CORE_DATASET_NAME,
+                table_names=tuple(rewritten_tables),
+                raw_snapshot_id=None,
+                notes=notes,
+            )
         return LocalZipAshareDailyOrganizeResult(
             dataset_version=dataset_version,
             rewritten_tables=tuple(rewritten_tables),

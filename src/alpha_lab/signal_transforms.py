@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
-from alpha_lab.preprocess import winsorize_series, zscore_series
+from alpha_lab.preprocess import winsorize_series
 from alpha_lab.research_integrity.leakage_checks import check_cross_section_transform_scope
 
 _REQUIRED_COLUMNS: frozenset[str] = frozenset({"date", "asset", "value"})
@@ -114,15 +114,30 @@ def zscore_cross_section(
 
     _validate_signal_frame(df)
     out = df.copy()
+    values = pd.to_numeric(out["value"], errors="coerce")
+    out["value"] = values
 
-    for idx in _date_groups(out):
-        values = pd.to_numeric(out.loc[idx, "value"], errors="coerce")
-        valid = values.notna()
-        if int(valid.sum()) < min_group_size:
-            out.loc[idx, "value"] = np.nan
-            continue
-        out.loc[idx, "value"] = np.nan
-        out.loc[values.index[valid], "value"] = zscore_series(values.loc[valid])
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    mean = grouped.transform("mean")
+    # pandas transform("std") uses sample std (ddof=1); convert to ddof=0
+    # to match zscore_series semantics.
+    std_sample = grouped.transform("std")
+    scale = pd.Series(np.nan, index=out.index, dtype=float)
+    positive_count = valid_count > 0
+    scale.loc[positive_count] = np.sqrt(
+        (valid_count.loc[positive_count] - 1.0) / valid_count.loc[positive_count]
+    )
+    std_pop = std_sample * scale
+
+    small_group = valid_count < min_group_size
+    valid_row = values.notna() & (~small_group)
+    std_zero_or_nan = (~np.isfinite(std_pop)) | std_pop.eq(0.0)
+
+    out.loc[:, "value"] = np.nan
+    out.loc[valid_row & std_zero_or_nan, "value"] = 0.0
+    z_mask = valid_row & (~std_zero_or_nan)
+    out.loc[z_mask, "value"] = (values.loc[z_mask] - mean.loc[z_mask]) / std_pop.loc[z_mask]
 
     out = _coerce_sort(out)
     return _validate_transform_scope(
@@ -149,19 +164,17 @@ def rank_cross_section(
 
     _validate_signal_frame(df)
     out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
 
-    for idx in _date_groups(out):
-        values = pd.to_numeric(out.loc[idx, "value"], errors="coerce")
-        valid = values.notna()
-        if int(valid.sum()) < min_group_size:
-            out.loc[idx, "value"] = np.nan
-            continue
-        out.loc[idx, "value"] = np.nan
-        out.loc[values.index[valid], "value"] = values.loc[valid].rank(
-            method="average",
-            ascending=True,
-            pct=pct,
-        )
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    ranked = grouped.rank(
+        method="average",
+        ascending=True,
+        pct=pct,
+    )
+    out["value"] = ranked
+    out.loc[valid_count < min_group_size, "value"] = np.nan
 
     out = _coerce_sort(out)
     return _validate_transform_scope(

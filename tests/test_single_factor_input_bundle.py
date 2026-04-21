@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ import yaml
 
 import alpha_lab.decay as decay_module
 import alpha_lab.experiment as experiment
+import alpha_lab.real_cases.single_factor.evaluate as sf_evaluate_module
 import alpha_lab.real_cases.single_factor.pipeline as sf_pipeline
 from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.factors.reversal import reversal
@@ -87,6 +89,130 @@ def test_single_factor_input_bundle_keeps_results_unchanged(tmp_path: Path) -> N
         set(bundle.prices_panel.columns)
     )
     assert {5, 10, 20}.issubset(set(bundle.base_feature_cache.forward_labels_by_horizon))
+
+
+def test_load_standard_inputs_prefers_parquet_slice_and_bundle_reuses_parquet_spec(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_single_factor_case(
+        tmp_path,
+        factor_name="bp",
+        enable_neutralization=False,
+    )
+    spec_csv = load_single_factor_case_spec(spec_path)
+    assert spec_csv.universe.path is not None
+
+    prices_csv = Path(spec_csv.prices_path)
+    universe_csv = Path(spec_csv.universe.path)
+    prices_parquet = prices_csv.with_suffix(".parquet")
+    universe_parquet = universe_csv.with_suffix(".parquet")
+    pd.read_csv(prices_csv).to_parquet(prices_parquet, index=False)
+    pd.read_csv(universe_csv).to_parquet(universe_parquet, index=False)
+
+    now = time.time()
+    os.utime(prices_csv, (now, now))
+    os.utime(universe_csv, (now, now))
+    os.utime(prices_parquet, (now + 5.0, now + 5.0))
+    os.utime(universe_parquet, (now + 5.0, now + 5.0))
+
+    bundle = load_standard_inputs(spec_csv)
+    assert bundle.prices_path == str(prices_parquet)
+    assert bundle.universe_path == str(universe_parquet)
+
+    spec_parquet = replace(
+        spec_csv,
+        prices_path=str(prices_parquet),
+        universe=replace(spec_csv.universe, path=str(universe_parquet)),
+    )
+    run = run_single_factor_case(
+        spec_parquet,
+        evaluation_profile="exploratory_screening",
+        input_bundle=bundle,
+    )
+    assert not run.factor_df.empty
+
+
+def test_single_factor_case_passes_precomputed_labels_to_experiment_runner(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_single_factor_case(
+        tmp_path,
+        factor_name="bp",
+        enable_neutralization=False,
+    )
+    captured_precomputed: list[dict[int, pd.DataFrame] | None] = []
+    original_runner = sf_evaluate_module.run_factor_experiment
+
+    def _wrapped_runner(*args, **kwargs):
+        captured_precomputed.append(kwargs.get("precomputed_forward_labels"))
+        return original_runner(*args, **kwargs)
+
+    with patch.object(sf_evaluate_module, "run_factor_experiment", _wrapped_runner):
+        run_single_factor_case(
+            spec_path,
+            evaluation_profile="exploratory_screening",
+        )
+
+    assert captured_precomputed
+    cache = captured_precomputed[0]
+    assert cache is not None
+    assert 1 in cache
+    assert 5 in cache
+
+
+def test_load_standard_inputs_uses_dividend_adjusted_close_for_cached_labels(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_single_factor_case(
+        tmp_path,
+        factor_name="bp",
+        enable_neutralization=False,
+    )
+    spec = load_single_factor_case_spec(spec_path)
+    prices_path = Path(spec.prices_path)
+
+    prices = pd.read_csv(prices_path)
+    prices["dividend_per_share"] = 0.0
+    first_asset = str(prices.loc[0, "asset"])
+    first_asset_panel = (
+        prices[prices["asset"] == first_asset]
+        .copy()
+        .assign(date=lambda x: pd.to_datetime(x["date"], errors="coerce"))
+        .sort_values("date", kind="mergesort")
+        .reset_index(drop=True)
+    )
+    assert len(first_asset_panel) >= 4
+
+    ex_date = pd.Timestamp(first_asset_panel.loc[2, "date"])
+    div_value = float(first_asset_panel.loc[1, "close"]) * 0.1
+    ex_mask = (prices["asset"] == first_asset) & (
+        pd.to_datetime(prices["date"], errors="coerce") == ex_date
+    )
+    prices.loc[ex_mask, "dividend_per_share"] = div_value
+    prices.to_csv(prices_path, index=False)
+
+    spec_no_universe = replace(spec, universe=replace(spec.universe, path=None))
+    bundle = load_standard_inputs(spec_no_universe)
+    adjusted = (
+        bundle.prices_panel[bundle.prices_panel["asset"] == first_asset]
+        .sort_values("date", kind="mergesort")
+        .reset_index(drop=True)
+    )
+    raw = first_asset_panel
+
+    ratio = 1.0 - div_value / float(raw.loc[1, "close"])
+    assert adjusted.loc[0, "close"] == pytest.approx(float(raw.loc[0, "close"]) * ratio)
+    assert adjusted.loc[1, "close"] == pytest.approx(float(raw.loc[1, "close"]) * ratio)
+    assert adjusted.loc[2, "close"] == pytest.approx(float(raw.loc[2, "close"]))
+
+    labels_1d = bundle.base_feature_cache.forward_labels_by_horizon[1]
+    first_date = pd.Timestamp(raw.loc[0, "date"])
+    first_label = labels_1d[
+        (labels_1d["asset"] == first_asset) & (labels_1d["date"] == first_date)
+    ]
+    assert not first_label.empty
+    expected_ret = float(adjusted.loc[1, "close"] / adjusted.loc[0, "close"] - 1.0)
+    assert float(first_label.iloc[0]["value"]) == pytest.approx(expected_ret)
 
 
 @pytest.mark.parametrize(

@@ -7,8 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import yaml
 
+import alpha_lab.evaluation as evaluation_module
+import alpha_lab.experiment as experiment_module
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.fast_screen import (
     CORE_CHART_KEYS,
@@ -225,6 +228,92 @@ def test_tier2_coverage_ts_roundtrip(tmp_path: Path):
     payload = json.loads(result_path.read_text())
     assert "coverage_ts" in payload
     assert len(payload["coverage_ts"]) > 0
+
+
+def test_tier2_turnover_ts_does_not_rerun_full_experiment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    tier1 = run_tier1(_tier1_inputs())
+    save_tier1_result(tmp_path, tier1)
+
+    def _fail_run_factor_experiment(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("turnover_ts should not call run_factor_experiment")
+
+    monkeypatch.setattr(experiment_module, "run_factor_experiment", _fail_run_factor_experiment)
+    statuses = run_tier2_modules(
+        _tier1_inputs(),
+        artifact_root=tmp_path,
+        factor_name=tier1.factor_name,
+        run_id=tier1.run_id,
+        modules=["turnover_ts"],
+        inputs_hash=tier1.inputs_hash,
+    )
+    assert statuses["turnover_ts"].status is MetricStatus.COMPUTED
+    result_path = (
+        tmp_path / tier1.factor_name / tier1.run_id / "tier2" / "turnover_ts" / "result.json"
+    )
+    payload = json.loads(result_path.read_text())
+    assert "turnover_ts" in payload
+    assert isinstance(payload["turnover_ts"], list)
+    assert len(payload["turnover_ts"]) > 0
+
+
+def test_tier2_random_null_roundtrip(tmp_path: Path):
+    tier1 = run_tier1(_tier1_inputs())
+    save_tier1_result(tmp_path, tier1)
+    statuses = run_tier2_modules(
+        _tier1_inputs(),
+        artifact_root=tmp_path,
+        factor_name=tier1.factor_name,
+        run_id=tier1.run_id,
+        modules=["random_null"],
+        inputs_hash=tier1.inputs_hash,
+    )
+    assert statuses["random_null"].status is MetricStatus.COMPUTED
+    result_path = (
+        tmp_path / tier1.factor_name / tier1.run_id / "tier2" / "random_null" / "result.json"
+    )
+    payload = json.loads(result_path.read_text())
+    assert int(payload["n_trials"]) == 200
+    samples = payload["null_mean_rank_ic_samples"]
+    assert isinstance(samples, list)
+    assert len(samples) > 0
+
+
+def test_tier2_random_null_one_sided_p_value_respects_negative_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tier1 = run_tier1(_tier1_inputs())
+    save_tier1_result(tmp_path, tier1)
+
+    def _fake_permutation_null(*args, **kwargs):
+        del args, kwargs
+        return -0.20, np.asarray([-0.30, -0.20, -0.10, 0.00], dtype=float)
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "compute_mean_rank_ic_permutation_null",
+        _fake_permutation_null,
+    )
+    statuses = run_tier2_modules(
+        _tier1_inputs(),
+        artifact_root=tmp_path,
+        factor_name=tier1.factor_name,
+        run_id=tier1.run_id,
+        modules=["random_null"],
+        inputs_hash=tier1.inputs_hash,
+    )
+    assert statuses["random_null"].status is MetricStatus.COMPUTED
+
+    result_path = (
+        tmp_path / tier1.factor_name / tier1.run_id / "tier2" / "random_null" / "result.json"
+    )
+    payload = json.loads(result_path.read_text())
+    assert payload["actual_mean_rank_ic"] == pytest.approx(-0.20)
+    assert payload["p_value_one_sided"] == pytest.approx(0.5)
 
 
 def test_sanitize_paths_accept_unusual_factor_names(tmp_path: Path):

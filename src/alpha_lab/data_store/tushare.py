@@ -483,140 +483,141 @@ class TushareIngestor:
         written_tables: list[str] = []
         if progress_callback is not None:
             progress_callback("upserting canonical tables")
-        if resolved_mode in {"daily", "full"} and not trade_calendar.empty:
-            self.catalog.upsert_table(
-                "trade_calendar",
-                trade_calendar,
-                key_cols=("date",),
-                partition_column="date",
-            )
-            written_tables.append("trade_calendar")
-        if not instruments.empty:
-            self.catalog.upsert_table(
-                "instruments",
-                instruments,
-                key_cols=("asset",),
-                partition_column="list_date",
-            )
-            written_tables.append("instruments")
-        if resolved_mode in {"daily", "full"}:
-            self.catalog.upsert_table(
-                "daily_bars",
-                daily_bars,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "adj_factor",
-                adj_factor,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "daily_basic",
-                daily_basic,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "asset_status",
-                asset_status,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "index_membership",
-                index_membership,
-                key_cols=("date", "index_code", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "moneyflow",
-                moneyflow,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            self.catalog.upsert_table(
-                "liquidity_profile",
-                liquidity_profile,
-                key_cols=("date", "asset"),
-                partition_column="date",
-            )
-            written_tables.extend(
-                [
+        with self.catalog.upsert_session():
+            if resolved_mode in {"daily", "full"} and not trade_calendar.empty:
+                self.catalog.upsert_table(
+                    "trade_calendar",
+                    trade_calendar,
+                    key_cols=("date",),
+                    partition_column="date",
+                )
+                written_tables.append("trade_calendar")
+            if not instruments.empty:
+                self.catalog.upsert_table(
+                    "instruments",
+                    instruments,
+                    key_cols=("asset",),
+                    partition_column="list_date",
+                )
+                written_tables.append("instruments")
+            if resolved_mode in {"daily", "full"}:
+                self.catalog.upsert_table(
                     "daily_bars",
+                    daily_bars,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "adj_factor",
+                    adj_factor,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "daily_basic",
+                    daily_basic,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "asset_status",
+                    asset_status,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "index_membership",
+                    index_membership,
+                    key_cols=("date", "index_code", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "moneyflow",
+                    moneyflow,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
+                )
+                self.catalog.upsert_table(
                     "liquidity_profile",
-                ]
-            )
-        if resolved_mode in {"fundamental", "full"}:
-            self.catalog.upsert_table(
-                "financial_indicator",
-                financial_indicator,
-                key_cols=("asset", "ann_date", "end_date"),
-                partition_column="ann_date",
-            )
-            self.catalog.upsert_table(
-                "balance_sheet",
-                balance_sheet,
-                key_cols=("asset", "ann_date", "end_date"),
-                partition_column="ann_date",
-            )
-            self.catalog.upsert_table(
-                "income_statement",
-                income_statement,
-                key_cols=("asset", "ann_date", "end_date"),
-                partition_column="ann_date",
-            )
-            self.catalog.upsert_table(
-                "cash_flow_statement",
-                cash_flow_statement,
-                key_cols=("asset", "ann_date", "end_date"),
-                partition_column="ann_date",
-            )
-            if not industry_classification.empty:
-                self.catalog.upsert_table(
-                    "industry_classification",
-                    industry_classification,
-                    key_cols=("snapshot_date", "industry_standard", "index_code"),
-                    partition_column="snapshot_date",
+                    liquidity_profile,
+                    key_cols=("date", "asset"),
+                    partition_column="date",
                 )
-                written_tables.append("industry_classification")
-            if not industry_membership.empty:
-                self.catalog.upsert_table(
-                    "industry_membership",
-                    industry_membership,
-                    key_cols=("industry_standard", "asset", "l3_code", "in_date", "out_date"),
-                    partition_column="in_date",
+                written_tables.extend(
+                    [
+                        "daily_bars",
+                        "adj_factor",
+                        "daily_basic",
+                        "asset_status",
+                        "index_membership",
+                        "moneyflow",
+                        "liquidity_profile",
+                    ]
                 )
-                written_tables.append("industry_membership")
-            written_tables.extend(
-                [
+            if resolved_mode in {"fundamental", "full"}:
+                self.catalog.upsert_table(
                     "financial_indicator",
+                    financial_indicator,
+                    key_cols=("asset", "ann_date", "end_date"),
+                    partition_column="ann_date",
+                )
+                self.catalog.upsert_table(
                     "balance_sheet",
+                    balance_sheet,
+                    key_cols=("asset", "ann_date", "end_date"),
+                    partition_column="ann_date",
+                )
+                self.catalog.upsert_table(
                     "income_statement",
+                    income_statement,
+                    key_cols=("asset", "ann_date", "end_date"),
+                    partition_column="ann_date",
+                )
+                self.catalog.upsert_table(
                     "cash_flow_statement",
-                ]
-            )
+                    cash_flow_statement,
+                    key_cols=("asset", "ann_date", "end_date"),
+                    partition_column="ann_date",
+                )
+                if not industry_classification.empty:
+                    self.catalog.upsert_table(
+                        "industry_classification",
+                        industry_classification,
+                        key_cols=("snapshot_date", "industry_standard", "index_code"),
+                        partition_column="snapshot_date",
+                    )
+                    written_tables.append("industry_classification")
+                if not industry_membership.empty:
+                    self.catalog.upsert_table(
+                        "industry_membership",
+                        industry_membership,
+                        key_cols=("industry_standard", "asset", "l3_code", "in_date", "out_date"),
+                        partition_column="in_date",
+                    )
+                    written_tables.append("industry_membership")
+                written_tables.extend(
+                    [
+                        "financial_indicator",
+                        "balance_sheet",
+                        "income_statement",
+                        "cash_flow_statement",
+                    ]
+                )
 
-        dataset_version = self.catalog.write_dataset_version(
-            dataset_name=DataCatalog.CORE_DATASET_NAME,
-            table_names=tuple(written_tables),
-            raw_snapshot_id=snapshot_manifest.snapshot_id,
-            notes={
-                "start_date": start_date,
-                "end_date": end_date,
-                "n_assets": len(selected_assets),
-                "roe_source_column": fundamentals.roe_source_column,
-                "financial_indicator_rows_dropped_missing_ann_date": dropped_missing_ann_date,
-                "daily_research_only": daily_research_only,
-                "mode": resolved_mode,
-            },
-        )
+            dataset_version = self.catalog.write_dataset_version(
+                dataset_name=DataCatalog.CORE_DATASET_NAME,
+                table_names=tuple(written_tables),
+                raw_snapshot_id=snapshot_manifest.snapshot_id,
+                notes={
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "n_assets": len(selected_assets),
+                    "roe_source_column": fundamentals.roe_source_column,
+                    "financial_indicator_rows_dropped_missing_ann_date": dropped_missing_ann_date,
+                    "daily_research_only": daily_research_only,
+                    "mode": resolved_mode,
+                },
+            )
         if progress_callback is not None:
             progress_callback(f"completed {start_date} -> {end_date}")
         row_counts: dict[str, int] = {"instruments": int(len(instruments))}
@@ -724,27 +725,28 @@ class TushareIngestor:
         }
         written_tables: set[str] = set()
 
-        for index, (chunk_start, chunk_end) in enumerate(chunk_ranges, start=1):
-            chunk_prefix = f"[chunk {index}/{len(chunk_ranges)} {chunk_start} -> {chunk_end}]"
-            chunk_progress = _prefixed_progress_callback(progress_callback, prefix=chunk_prefix)
-            if chunk_progress is not None:
-                chunk_progress("starting")
-            result = self.ingest_core(
-                start_date=chunk_start,
-                end_date=chunk_end,
-                token=resolved_token,
-                assets=resolved_assets,
-                asset_limit=asset_limit,
-                mode=resolved_mode,
-                include_reference_data=include_reference_data and index == 1,
-                daily_research_only=daily_research_only,
-                progress_callback=chunk_progress,
-            )
-            last_result = result
-            written_tables.update(result.written_tables)
-            for name, count in result.row_counts.items():
-                aggregate_counts[name] = int(aggregate_counts.get(name, 0)) + int(count)
-            combined_notes.update(result.quality_notes)
+        with self.catalog.upsert_session():
+            for index, (chunk_start, chunk_end) in enumerate(chunk_ranges, start=1):
+                chunk_prefix = f"[chunk {index}/{len(chunk_ranges)} {chunk_start} -> {chunk_end}]"
+                chunk_progress = _prefixed_progress_callback(progress_callback, prefix=chunk_prefix)
+                if chunk_progress is not None:
+                    chunk_progress("starting")
+                result = self.ingest_core(
+                    start_date=chunk_start,
+                    end_date=chunk_end,
+                    token=resolved_token,
+                    assets=resolved_assets,
+                    asset_limit=asset_limit,
+                    mode=resolved_mode,
+                    include_reference_data=include_reference_data and index == 1,
+                    daily_research_only=daily_research_only,
+                    progress_callback=chunk_progress,
+                )
+                last_result = result
+                written_tables.update(result.written_tables)
+                for name, count in result.row_counts.items():
+                    aggregate_counts[name] = int(aggregate_counts.get(name, 0)) + int(count)
+                combined_notes.update(result.quality_notes)
 
         if last_result is None:
             raise AlphaLabDataError("No chunks were executed for the requested ingest window.")

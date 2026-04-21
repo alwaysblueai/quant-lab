@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alpha_lab.evaluation import compute_ic, compute_mutual_information, compute_rank_ic
+from alpha_lab.evaluation import (
+    compute_ic,
+    compute_mean_rank_ic_permutation_null,
+    compute_mutual_information,
+    compute_rank_ic,
+)
 
 
 def _canonical(
@@ -64,6 +69,159 @@ def test_compute_rank_ic_basic_correctness():
 
     assert list(result.columns) == ["date", "factor", "label", "rank_ic"]
     assert result.loc[0, "rank_ic"] == pytest.approx(-0.5)
+
+
+def test_compute_mean_rank_ic_permutation_null_is_deterministic_for_seed() -> None:
+    factors = _canonical(
+        dates=[
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+        ],
+        assets=["A", "B", "C", "D", "A", "B", "C", "D"],
+        factor_name="f",
+        values=[1.0, 2.0, 4.0, 3.0, 2.0, 1.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=[
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+        ],
+        assets=["A", "B", "C", "D", "A", "B", "C", "D"],
+        factor_name="y",
+        values=[10.0, 11.0, 14.0, 12.0, 7.0, 6.0, 8.0, 9.0],
+    )
+
+    observed_1, null_1 = compute_mean_rank_ic_permutation_null(
+        factors,
+        labels,
+        n_permutations=25,
+        seed=123,
+    )
+    observed_2, null_2 = compute_mean_rank_ic_permutation_null(
+        factors,
+        labels,
+        n_permutations=25,
+        seed=123,
+    )
+
+    assert np.isfinite(observed_1)
+    assert observed_1 == pytest.approx(observed_2)
+    assert len(null_1) == 25
+    assert np.all(np.isfinite(null_1))
+    np.testing.assert_allclose(null_1, null_2, rtol=0.0, atol=0.0)
+
+
+def test_compute_mean_rank_ic_permutation_null_is_invariant_to_batch_size() -> None:
+    factors = _canonical(
+        dates=[
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+        ],
+        assets=["A", "B", "C", "D", "A", "B", "C", "D"],
+        factor_name="f",
+        values=[1.0, 2.0, 4.0, 3.0, 2.0, 1.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=[
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+            "2024-01-03",
+        ],
+        assets=["A", "B", "C", "D", "A", "B", "C", "D"],
+        factor_name="y",
+        values=[10.0, 11.0, 14.0, 12.0, 7.0, 6.0, 8.0, 9.0],
+    )
+
+    observed_1, null_1 = compute_mean_rank_ic_permutation_null(
+        factors,
+        labels,
+        n_permutations=25,
+        seed=123,
+        batch_size=3,
+    )
+    observed_2, null_2 = compute_mean_rank_ic_permutation_null(
+        factors,
+        labels,
+        n_permutations=25,
+        seed=123,
+        batch_size=17,
+    )
+
+    assert observed_1 == pytest.approx(observed_2)
+    np.testing.assert_allclose(null_1, null_2, rtol=0.0, atol=0.0)
+
+
+def test_compute_mean_rank_ic_permutation_null_returns_empty_when_cross_section_too_small() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="f",
+        values=[1.0, 2.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="y",
+        values=[10.0, 11.0],
+    )
+
+    observed, null_samples = compute_mean_rank_ic_permutation_null(
+        factors,
+        labels,
+        n_permutations=10,
+        seed=1,
+        min_assets_per_date=3,
+    )
+
+    assert np.isnan(observed)
+    assert null_samples.size == 0
+
+
+def test_compute_mean_rank_ic_permutation_null_rejects_non_positive_batch_size() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="y",
+        values=[10.0, 11.0, 12.0],
+    )
+
+    with pytest.raises(ValueError, match="batch_size must be > 0"):
+        compute_mean_rank_ic_permutation_null(
+            factors,
+            labels,
+            n_permutations=10,
+            seed=1,
+            batch_size=0,
+        )
 
 
 def test_compute_mutual_information_detects_nonlinear_dependence() -> None:
