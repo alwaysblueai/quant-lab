@@ -24,6 +24,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from alpha_lab.research_bridge.output_lint import (
     LintReport,
@@ -175,7 +176,7 @@ def read_explore_session(
     path = explore_sessions_root(workspace_root) / f"{sid}.json"
     if not path.exists():
         raise FileNotFoundError(f"explore session not found: {sid}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
 
 
 def list_explore_sessions(

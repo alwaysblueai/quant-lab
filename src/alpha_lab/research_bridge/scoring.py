@@ -9,6 +9,7 @@ This module has no I/O — it consumes pre-extracted ``CardMetadata`` and
 returns scalar scores. Callers source metadata from VaultGraph,
 CARD-INDEX.tsv, and frontmatter.
 """
+
 from __future__ import annotations
 
 import re
