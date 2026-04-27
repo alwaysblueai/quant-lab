@@ -34,7 +34,7 @@ It is a Level 1/2 research system and does not provide execution replay.
 │   alpha_lab.reporting    summaries + experiment-card export     │
 │   alpha_lab.reporting.research_validation_package               │
 │   alpha_lab.registry     append-only experiment registry        │
-│   alpha_lab.comparison   experiment comparison/ranking          │
+│   alpha_lab.comparison   legacy comparison/ranking helper       │
 ├─────────────────────────────────────────────────────────────────┤
 │ Orchestration (Level 1/2)                                      │
 │   alpha_lab.experiment      run_factor_experiment (one split)  │
@@ -92,7 +92,7 @@ attaches these to `ExperimentResult` optional fields.
 | `alpha_lab.research_integrity.asof`, `leakage_checks`, `reporting` | Core (Level 1/2) | Research temporal correctness and leakage control |
 | `alpha_lab.factors`, `model_factor`, `labels`, `evaluation`, `quantile`, `turnover`, `neutralization` | Core (Level 1/2) | Factor discovery and robustness diagnostics |
 | `alpha_lab.strategy`, `portfolio_research`, `experiment`, `walk_forward` | Core (Level 2) | Portfolio construction validation with research approximations |
-| `alpha_lab.reporting`, `reporting.research_validation_package`, `registry`, `comparison`, `vault_export` | Core (Level 1/2) | Reproducible reporting and knowledge export |
+| `alpha_lab.reporting`, `reporting.research_validation_package`, `registry`, legacy `comparison`, `vault_export` | Core (Level 1/2) | Reproducible reporting and knowledge export; new comparison workflows should prefer campaign profile artifacts |
 
 ## Data Flow (single experiment)
 

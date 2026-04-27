@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test check format clean
+.PHONY: lint typecheck test check format clean clean-outputs
 
 UV_RUN = uv run --no-sync --frozen
 
@@ -23,3 +23,7 @@ check:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+clean-outputs:
+	rm -rf -- outputs/real_cases/_web_runs outputs/model_lab_tutorial
+	find outputs/real_cases -maxdepth 1 -type d \( -name "*smoke*" -o -name "*labdemo*" \) -exec rm -rf {} + 2>/dev/null || true

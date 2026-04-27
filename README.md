@@ -62,7 +62,7 @@ Layer D — Reporting / Registry / Knowledge Export
   alpha_lab.reporting.research_validation_package
                                — reproducible Level 1/2 research package export
   alpha_lab.registry           — append-only research registry
-  alpha_lab.comparison         — side-by-side research comparison
+  alpha_lab.comparison         — legacy side-by-side research comparison helper
 
 Orchestration (Level 1/2)
   alpha_lab.experiment         — run_factor_experiment (single split)
@@ -188,8 +188,9 @@ Supported liquidity universes now include:
 
 These are ranked by trailing 60-trading-day average `amount`, not same-day amount.
 
-The Web UI auto-data-source flow now also defaults to `standard`, and exposes
-`pilot / standard / robust` directly in the form.
+The legacy Web UI auto-data-source flow also defaults to `standard`, and exposes
+`pilot / standard / robust` directly in the form. New interactive research
+workflows should use `alpha-lab web unified`.
 
 For A-share daily price-volume research, exported `prices.csv` now includes the
 standard research columns needed by most daily factor recipes:
@@ -357,8 +358,8 @@ Example:
 - `alpha_lab.preprocess.winsorize_series`
 - `alpha_lab.preprocess.zscore_series`
 - `alpha_lab.interfaces.validate_factor_output`
-- `alpha_lab.comparison.compare_experiments`
-- `alpha_lab.comparison.rank_experiments`
+- `alpha_lab.comparison.compare_experiments` (legacy helper)
+- `alpha_lab.comparison.rank_experiments` (legacy helper)
 - `alpha_lab.registry.register_experiment`
 - `alpha_lab.registry.load_registry`
 - `alpha_lab.registry.append_to_registry`
@@ -527,7 +528,8 @@ Top-level CLI routing is also available via:
 - `alpha-lab real-case ...` (Level 1/2 research-validation workflows)
 - `alpha-lab campaign ...` (Level 1/2 campaign workflows)
 - `alpha-lab profiles` (evaluation-profile discovery)
-- `alpha-lab web ui` (local browser UI for single-factor runs)
+- `alpha-lab web unified` (maintained local research frontend)
+- `alpha-lab web ui` (deprecated legacy single-factor UI)
 
 Default real-case/campaign workflow stages are:
 
@@ -573,12 +575,12 @@ alpha-lab campaign compare-profiles \
 alpha-lab campaign render-dashboard \
     --comparison-json dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json
 
-# Start local browser UI (upload single-factor spec and run from web page)
-alpha-lab web ui --host 127.0.0.1 --port 8765
+# Start the maintained local research frontend
+alpha-lab web unified --host 127.0.0.1 --port 8766
 ```
 
-Web UI run result panel now includes simple charts for IC, Rank IC, long-short
-spread (derived from group returns), turnover, and rolling mean IC.
+The deprecated `alpha-lab web ui` command remains available during the
+compatibility window for older single-factor upload flows.
 
 Each run prints the selected evaluation profile, triage label, promotion
 decision, portfolio-validation status, and artifact paths.
@@ -722,8 +724,11 @@ outside `--output-dir`.
 
 ## Comparison and Registry
 
-Run multiple experiments, compare them side-by-side, and persist results to a
-lightweight CSV registry:
+`alpha_lab.comparison` is a legacy low-level helper for side-by-side summaries.
+For new Level 1/2 comparison workflows, prefer campaign profile comparison
+artifacts such as `campaign_profile_comparison.json` and
+`campaign_profile_case_matrix.csv`. The helper remains available for older
+notebooks that compare one-row experiment summaries:
 
 ```python
 from alpha_lab.comparison import compare_experiments, rank_experiments

@@ -253,8 +253,9 @@ Re-check the token value and reset `TUSHARE_TOKEN`.
 
 它们都按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
 
-Web UI 的自动数据源表单也默认使用 `standard`，并提供 `pilot / standard / robust`
-可选项；你仍然可以在表单里继续手动修改开始/结束日期。
+旧版兼容命令 `alpha-lab web ui` 的自动数据源表单也默认使用 `standard`，
+并提供 `pilot / standard / robust` 可选项；你仍然可以在表单里继续手动修改
+开始/结束日期。新的交互式研究流程默认推荐使用 `alpha-lab web unified`。
 
 针对 A 股日频量价因子研究，`alpha-lab data export-case-inputs` 现在默认导出更完整的
 研究列：
@@ -360,7 +361,10 @@ alpha-lab bridge apply-writeback --project momentum-factor --draft <draft_path>
 - 更新 `55_projects/<slug>/10_active_state.md`
 - 向 `55_projects/<slug>/20_decision_log.md` 追加一条项目级结论
 
-### Web UI + BaoStock 自定义因子输入（推荐）
+### 旧版 Web UI + BaoStock 自定义因子输入（兼容）
+
+`alpha-lab web ui` 已进入兼容期；新交互式流程优先使用
+`alpha-lab web unified`。以下内容仅用于仍依赖旧版单因子上传页面的场景。
 
 在 Web UI 里选择 `data_source=baostock` 时，内置只会自动映射 `bp/roe_ttm`。
 如果你要跑自定义因子，推荐两种方式：
@@ -798,6 +802,10 @@ Schema is validated on every append and load; mismatches raise `ValueError`.
 ---
 
 ### Comparison
+
+`alpha_lab.comparison` 是旧版低层 helper，保留给已有 notebook 和脚本兼容。
+新的 Level 1/2 对比流程优先使用 `campaign_profile_comparison.json`、
+`campaign_profile_case_matrix.csv` 等 campaign profile comparison artifacts。
 
 ```python
 from alpha_lab.comparison import compare_experiments, rank_experiments

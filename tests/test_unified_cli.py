@@ -594,7 +594,10 @@ def test_unified_cli_profiles_lists_available_profiles(
     assert "candidate discovery" in captured.out
 
 
-def test_unified_cli_routes_web_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unified_cli_routes_web_ui(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     captured: dict[str, Any] = {}
 
     def _fake_start_web_ui_server(
@@ -625,6 +628,9 @@ def test_unified_cli_routes_web_ui(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
     )
     assert rc == 0
+    captured_stdio = capsys.readouterr()
+    assert "deprecated" in captured_stdio.err.lower()
+    assert "web unified" in captured_stdio.err.lower()
     assert captured == {
         "host": "0.0.0.0",
         "port": 8899,

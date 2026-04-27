@@ -677,7 +677,7 @@ def build_unified_parser() -> argparse.ArgumentParser:
     web_commands = web.add_subparsers(dest="web_action", required=True)
     web_ui = web_commands.add_parser(
         "ui",
-        help="Run local web UI server and operate via browser.",
+        help="[DEPRECATED] Run legacy web UI server; use `alpha-lab web unified`.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     web_ui.add_argument(
@@ -913,6 +913,11 @@ def unified_main(argv: list[str] | None = None) -> int:
         if args.port <= 0 or args.port > 65535:
             parser.error("--port must be within 1..65535")
         if args.web_action == "ui":
+            print(
+                "[DEPRECATED] `alpha-lab web ui` is deprecated. "
+                "Use `alpha-lab web unified` for the maintained research frontend.",
+                file=sys.stderr,
+            )
             from alpha_lab.web_ui import start_web_ui_server
 
             try:
