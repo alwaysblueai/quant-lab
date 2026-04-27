@@ -120,6 +120,15 @@ def compute_ic_decay(
         One row per horizon with columns:
         ``[horizon, mean_ic, mean_rank_ic, ic_ir, t_stat, p_value, n_dates]``.
     """
+    if precomputed_labels_by_horizon is None:
+        fast = _compute_ic_decay_wide_fast_path(
+            factor_df=factor_df,
+            prices_df=prices_df,
+            horizons=horizons,
+        )
+        if fast is not None:
+            return fast
+
     rows: list[dict[str, object]] = []
     for h in horizons:
         labels: pd.DataFrame | None = None
@@ -167,6 +176,97 @@ def compute_ic_decay(
         rows.append(
             {
                 "horizon": h,
+                "mean_ic": summary["mean_ic"],
+                "mean_rank_ic": mean_rank_ic,
+                "ic_ir": summary["ic_ir"],
+                "t_stat": summary["t_stat"],
+                "p_value": summary["p_value"],
+                "n_dates": summary["n_obs"],
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _compute_ic_decay_wide_fast_path(
+    *,
+    factor_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    horizons: tuple[int, ...],
+) -> pd.DataFrame | None:
+    if not horizons or factor_df.empty or prices_df.empty:
+        return None
+    if any(int(horizon) <= 0 for horizon in horizons):
+        return None
+    if not {"date", "asset", "factor", "value"}.issubset(factor_df.columns):
+        return None
+    if not {"date", "asset", "close"}.issubset(prices_df.columns):
+        return None
+    if factor_df["factor"].nunique(dropna=False) != 1:
+        return None
+    if factor_df.duplicated(subset=["date", "asset"]).any():
+        return None
+    if prices_df.duplicated(subset=["date", "asset"]).any():
+        return None
+
+    factor_panel = factor_df[["date", "asset", "value"]].copy()
+    price_panel = prices_df[["date", "asset", "close"]].copy()
+    factor_panel["date"] = pd.to_datetime(factor_panel["date"], errors="coerce")
+    price_panel["date"] = pd.to_datetime(price_panel["date"], errors="coerce")
+    if factor_panel["date"].isna().any() or price_panel["date"].isna().any():
+        return None
+
+    factor_dates = pd.Index(factor_panel["date"].drop_duplicates()).sort_values()
+    price_dates = pd.Index(price_panel["date"].drop_duplicates()).sort_values()
+    factor_assets = pd.Index(factor_panel["asset"].drop_duplicates()).sort_values()
+    price_assets = pd.Index(price_panel["asset"].drop_duplicates()).sort_values()
+    if not factor_dates.equals(price_dates) or not factor_assets.equals(price_assets):
+        return None
+
+    expected_rows = int(len(factor_dates) * len(factor_assets))
+    if len(factor_panel) != expected_rows or len(price_panel) != expected_rows:
+        return None
+
+    factor_wide = (
+        factor_panel.pivot(index="date", columns="asset", values="value")
+        .reindex(index=factor_dates, columns=factor_assets)
+        .astype(float)
+    )
+    close_wide = (
+        price_panel.pivot(index="date", columns="asset", values="close")
+        .reindex(index=factor_dates, columns=factor_assets)
+        .astype(float)
+    )
+    close_wide = close_wide.where(close_wide > 0.0)
+    factor_values = factor_wide.to_numpy(dtype=float, copy=False)
+    factor_rank_values = factor_wide.rank(axis=1, method="average").to_numpy(
+        dtype=float,
+        copy=False,
+    )
+
+    rows: list[dict[str, object]] = []
+    for horizon in horizons:
+        h = int(horizon)
+        returns_wide = close_wide.shift(-h).div(close_wide).sub(1.0)
+        return_values = returns_wide.to_numpy(dtype=float, copy=False)
+        ic_values = _rowwise_pearson_corr(factor_values, return_values, min_assets=2)
+
+        return_rank_values = returns_wide.rank(axis=1, method="average").to_numpy(
+            dtype=float,
+            copy=False,
+        )
+        rank_ic_values = _rowwise_pearson_corr(
+            factor_rank_values,
+            return_rank_values,
+            min_assets=2,
+        )
+
+        summary = compute_ic_summary(pd.Series(ic_values, dtype=float))
+        finite_rank = rank_ic_values[np.isfinite(rank_ic_values)]
+        mean_rank_ic = float(np.mean(finite_rank)) if finite_rank.size else float("nan")
+        rows.append(
+            {
+                "horizon": horizon,
                 "mean_ic": summary["mean_ic"],
                 "mean_rank_ic": mean_rank_ic,
                 "ic_ir": summary["ic_ir"],
