@@ -95,11 +95,19 @@ model-lab 使用同一条 `workflow_stage` 轴，但研究对象从“因子机�
 | `signal_mapping` | 把上游机制映射成可测试 spec/run 版本；每个字段标 role，并说明 remove-and-test 理由 | 生成新机制、选择赢家、忽略 PIT / leakage / overfit / turnover / feature stability |
 | `validation_kill_tests` | 审计模型改进是否只是 baseline/ridge、regularization-only、feature-count、leakage、split luck 或 turnover/cost artifact | 用“需要更多数据/进一步研究”等回避语替代 KILL/HOLD 判定 |
 
-model-lab 的 lint / session / UI 闭环：
+model-lab 的代码入口与 alpha-lab 结构镜像：
 
-- 响应 lint：`output_lint.py::lint_model_idea_response`，并通过 `describe_model_lint_contract` 注入 prompt 自检。
-- 回灌响应：`model_idea.py::record_model_idea_response`，写入 `response`、`response_sections`、`lint_report`。
-- 跨阶段 chaining：`find_upstream_model_idea_session` 与 `render_model_upstream_artifact_header` 把上一阶段结构化产物注入下一阶段 prompt。
-- 数据库存推断：未显式传入 `available_data` 时，`model_idea.py::explore_model_idea` 会从当前 spec 的 `rebalance_frequency` 调用 `scoring.py::infer_available_data_from_frequency`，让日频模型和 alpha-lab 一样过滤掉依赖 HFT 数据的知识卡片。
-- CLI：`python -m alpha_lab.research_bridge.model_idea record-response --session-id ... --response-text ...`。
-- Web：`/api/model-lab/idea-explorer/record-response`，页面里的“回灌响应并 Lint”按钮会调用该接口。
+| 关注点 | alpha-lab | model-lab |
+| --- | --- | --- |
+| Stage 常量 + 推进规则 | `scoring.py::WORKFLOW_STAGES` / `recommend_next_stage` | 同左 |
+| Mode 规整 | `service.py::_normalize_explore_mode` | `model_idea.py` 内 `_SUPPORTED_MODES` + `normalize_workflow_stage` |
+| Stage-first prompt 派发 | `service.py::_build_factor_recipe_exploration_prompt` | `model_idea.py::_build_model_idea_exploration_prompt` |
+| `mechanism_discovery` builder | `_build_factor_recipe_start_prompt` / `_build_factor_recipe_structured_prompt` / `_build_factor_recipe_constrained_prompt` | `_build_model_idea_mechanism_start_prompt` / `_build_model_idea_mechanism_structured_prompt` / `_build_model_idea_mechanism_constrained_prompt` |
+| `signal_mapping` builder | `_build_factor_recipe_signal_mapping_prompt` | `_build_model_idea_signal_mapping_prompt` |
+| `validation_kill_tests` builder | `_build_factor_recipe_validation_kill_tests_prompt` | `_build_model_idea_validation_kill_tests_prompt` |
+| 响应 lint | `output_lint.py::lint_explore_response` | `output_lint.py::lint_model_idea_response` |
+| lint 自检注入 | `describe_lint_contract` | `describe_model_lint_contract` |
+| 回灌响应 | `sessions.py::record_explore_response` | `model_idea.py::record_model_idea_response` |
+| 跨阶段 chaining | `find_upstream_session` / `render_upstream_artifact_header` | `find_upstream_model_idea_session` / `render_model_upstream_artifact_header` |
+| 数据库存推断 | `scoring.py::infer_available_data_from_frequency` via project frequency | 同一函数 via spec `rebalance_frequency` |
+| CLI / Web 回灌 | `/api/vault/record-explore-response` | `python -m alpha_lab.research_bridge.model_idea record-response ...` / `/api/model-lab/idea-explorer/record-response` |

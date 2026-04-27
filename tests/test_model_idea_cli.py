@@ -9,6 +9,30 @@ from alpha_lab.research_bridge.model_idea import main as model_idea_main
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 
 
+def _minimal_model_prompt_report() -> dict[str, object]:
+    return {
+        "system_contracts": {
+            "supported_model_families": ["ridge"],
+            "supported_feature_preprocess": {},
+            "supported_training": {},
+            "supported_selection_metrics": [],
+            "supported_feature_importance": {},
+        },
+        "current_spec": {"status": "unavailable"},
+        "validated_baselines": [],
+        "recent_failures": [],
+        "recommendations": {
+            "extras": {
+                "knowledge_matches": [],
+                "knowledge_handling_patterns": [],
+                "session_memory": [],
+                "warnings": [],
+            },
+            "source_anchors": [],
+        },
+    }
+
+
 def test_model_idea_cli_empty_idea_errors(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         model_idea_main(["explore", "--idea", "   "])
@@ -274,3 +298,125 @@ def test_model_idea_stage_prompts_align_with_lint_anchors() -> None:
         assert "not yet specialized" not in prompt
         for anchor in anchors:
             assert anchor in prompt
+
+
+def test_model_idea_mechanism_start_prompt_builder_contract_direct() -> None:
+    from alpha_lab.research_bridge.model_idea import (
+        _build_model_idea_mechanism_start_prompt,
+    )
+
+    prompt = _build_model_idea_mechanism_start_prompt(
+        idea="Borrow robust training ideas.",
+        mode="start",
+        report=_minimal_model_prompt_report(),
+        spec_patch_hint=None,
+    )
+
+    assert "> Stage: mechanism_discovery" in prompt
+    assert "> Mode: start" in prompt
+    assert "[模型机制候选]" in prompt
+    assert "[实现假设草图]" in prompt
+    assert "kickoff" in prompt.lower()
+    assert "discussion-only" in prompt
+    assert "needs-extension" in prompt
+    assert "transfer cost" in prompt
+    assert "[Model Mechanism Mapping]" not in prompt
+    assert "[Alias / 问题归因审计]" not in prompt
+
+
+def test_model_idea_mechanism_structured_prompt_builder_contract_direct() -> None:
+    from alpha_lab.research_bridge.model_idea import (
+        _build_model_idea_mechanism_structured_prompt,
+    )
+
+    prompt = _build_model_idea_mechanism_structured_prompt(
+        idea="Improve model selection without parameter-only tuning.",
+        mode="explore",
+        report=_minimal_model_prompt_report(),
+        spec_patch_hint=None,
+    )
+
+    assert "> Stage: mechanism_discovery" in prompt
+    assert "> Mode: explore" in prompt
+    assert "[模型机制候选]" in prompt
+    assert "[与当前 spec / baseline 的关系]" in prompt
+    assert "why it is not just parameter tuning" in prompt
+    assert "single best model" in prompt
+    assert "contract extension" not in prompt
+    assert "最多保留 3 个机制候选" not in prompt
+    assert "binary alias-tag" not in prompt
+    assert "[Model Mechanism Mapping]" not in prompt
+
+
+def test_model_idea_mechanism_constrained_prompt_builder_contract_direct() -> None:
+    from alpha_lab.research_bridge.model_idea import (
+        _build_model_idea_mechanism_constrained_prompt,
+    )
+
+    prompt = _build_model_idea_mechanism_constrained_prompt(
+        idea="Constrain candidate mechanisms to runnable contracts.",
+        mode="constrained",
+        report=_minimal_model_prompt_report(),
+        spec_patch_hint=None,
+    )
+
+    assert "> Stage: mechanism_discovery" in prompt
+    assert "> Mode: constrained" in prompt
+    assert "[模型机制候选]" in prompt
+    assert "[不确定性与失败路径]" in prompt
+    assert "最多保留 3 个机制候选" in prompt
+    assert "requires_code_change" in prompt
+    assert "alpha/lambda/window/depth" in prompt
+    assert "[Alias / 问题归因审计]" not in prompt
+
+
+def test_model_idea_signal_mapping_prompt_builder_contract_direct() -> None:
+    from alpha_lab.research_bridge.model_idea import (
+        _build_model_idea_signal_mapping_prompt,
+    )
+
+    prompt = _build_model_idea_signal_mapping_prompt(
+        idea="Map upstream mechanisms into runnable variants.",
+        mode="constrained",
+        report=_minimal_model_prompt_report(),
+        spec_patch_hint=None,
+        strict=True,
+    )
+
+    assert "> Stage: signal_mapping" in prompt
+    assert "> Mode: constrained" in prompt
+    assert "[Model Mechanism Mapping]" in prompt
+    assert "[当前实现解释]" in prompt
+    assert "[模型风险控制]" in prompt
+    assert "[可测试模型版本]" in prompt
+    assert "`feature availability / PIT`" in prompt
+    assert "binary alias-tag" in prompt
+    assert "baseline linear/ridge" in prompt
+    assert "[模型机制候选]" not in prompt
+    assert "[Alias / 问题归因审计]" not in prompt
+
+
+def test_model_idea_validation_kill_tests_prompt_builder_contract_direct() -> None:
+    from alpha_lab.research_bridge.model_idea import (
+        _build_model_idea_validation_kill_tests_prompt,
+    )
+
+    prompt = _build_model_idea_validation_kill_tests_prompt(
+        idea="Audit whether the model idea survives kill tests.",
+        mode="constrained",
+        report=_minimal_model_prompt_report(),
+        spec_patch_hint=None,
+        strict=True,
+    )
+
+    assert "> Stage: validation_kill_tests" in prompt
+    assert "> Mode: constrained" in prompt
+    assert "[Alias / 问题归因审计]" in prompt
+    assert "[数据与时间完整性]" in prompt
+    assert "[训练与验证稳健性]" in prompt
+    assert "[特征与解释稳定性]" in prompt
+    assert "[成本与组合影响]" in prompt
+    assert "[最终判定]" in prompt
+    assert "KILL 或 HOLD-FOR-AUDIT" in prompt
+    assert "`baseline linear/ridge`" in prompt
+    assert "[Model Mechanism Mapping]" not in prompt

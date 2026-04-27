@@ -305,10 +305,8 @@ def explore_model_idea(
         raise ValueError(
             f"unsupported mode: {mode!r}; expected one of {sorted(_SUPPORTED_MODES)}"
         )
-    # Stage axis is symmetric with alpha-lab's. Same WORKFLOW_STAGES,
-    # same default. Prompts get a stage banner; full per-stage prompt
-    # rewrites are a follow-up — for now the stage is observable in
-    # diagnostics and the recommended_next_stage progression works.
+    # Stage axis is symmetric with alpha-lab's: a named dispatcher picks
+    # the workflow stage first, then mode adjusts strictness inside that stage.
     normalized_stage = normalize_workflow_stage(stage)
     normalized_top_k = max(int(top_k), 1)
     normalized_memory_limit = max(int(memory_limit), 0)
@@ -319,6 +317,7 @@ def explore_model_idea(
     resolved_workspace = Path(workspace_root).expanduser().resolve()
     contracts = list_model_contracts()
     current_spec, spec_warnings = _load_current_spec_summary(spec)
+    available_data_set: frozenset[str] | None
     available_data_source = "none"
     if available_data is not None:
         available_data_set = normalize_data_set(available_data)
@@ -393,7 +392,7 @@ def explore_model_idea(
         mode=normalized_mode,
         constraint_report=constraint_report,
     )
-    gpt_prompt = _build_prompt(
+    gpt_prompt = _build_model_idea_exploration_prompt(
         idea=normalized_idea,
         mode=normalized_mode,
         report=constraint_report,
@@ -1545,7 +1544,7 @@ def _build_recommendations(
     }
 
 
-def _build_prompt(
+def _build_model_idea_exploration_prompt(
     *,
     idea: str,
     mode: str,
@@ -1555,6 +1554,200 @@ def _build_prompt(
     drift_header: str = "",
     upstream_header: str = "",
 ) -> str:
+    if stage == MECHANISM_DISCOVERY:
+        if mode == "start":
+            return _build_model_idea_mechanism_start_prompt(
+                idea=idea,
+                mode=mode,
+                report=report,
+                spec_patch_hint=spec_patch_hint,
+                stage=stage,
+                drift_header=drift_header,
+                upstream_header=upstream_header,
+            )
+        if mode == "constrained":
+            return _build_model_idea_mechanism_constrained_prompt(
+                idea=idea,
+                mode=mode,
+                report=report,
+                spec_patch_hint=spec_patch_hint,
+                stage=stage,
+                drift_header=drift_header,
+                upstream_header=upstream_header,
+            )
+        return _build_model_idea_mechanism_structured_prompt(
+            idea=idea,
+            mode=mode,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            stage=stage,
+            drift_header=drift_header,
+            upstream_header=upstream_header,
+        )
+    if stage == SIGNAL_MAPPING:
+        return _build_model_idea_signal_mapping_prompt(
+            idea=idea,
+            mode=mode,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            stage=stage,
+            strict=mode == "constrained",
+            drift_header=drift_header,
+            upstream_header=upstream_header,
+        )
+    return _build_model_idea_validation_kill_tests_prompt(
+        idea=idea,
+        mode=mode,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        stage=stage,
+        strict=mode == "constrained",
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+
+
+def _build_model_idea_mechanism_start_prompt(
+    *,
+    idea: str,
+    mode: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    stage: str = MECHANISM_DISCOVERY,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> str:
+    lines = _build_model_idea_common_prompt_lines(
+        idea=idea,
+        mode=mode,
+        stage=stage,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+    lines.extend(["", "## Task"])
+    _append_model_mechanism_discovery_task(lines, mode="start")
+    _append_model_lint_self_check(lines, stage=stage, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_model_idea_mechanism_structured_prompt(
+    *,
+    idea: str,
+    mode: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    stage: str = MECHANISM_DISCOVERY,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> str:
+    lines = _build_model_idea_common_prompt_lines(
+        idea=idea,
+        mode=mode,
+        stage=stage,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+    lines.extend(["", "## Task"])
+    _append_model_mechanism_discovery_task(lines, mode="explore")
+    _append_model_lint_self_check(lines, stage=stage, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_model_idea_mechanism_constrained_prompt(
+    *,
+    idea: str,
+    mode: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    stage: str = MECHANISM_DISCOVERY,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> str:
+    lines = _build_model_idea_common_prompt_lines(
+        idea=idea,
+        mode=mode,
+        stage=stage,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+    lines.extend(["", "## Task"])
+    _append_model_mechanism_discovery_task(lines, mode="constrained")
+    _append_model_lint_self_check(lines, stage=stage, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_model_idea_signal_mapping_prompt(
+    *,
+    idea: str,
+    mode: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    stage: str = SIGNAL_MAPPING,
+    strict: bool = False,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> str:
+    lines = _build_model_idea_common_prompt_lines(
+        idea=idea,
+        mode=mode,
+        stage=stage,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+    lines.extend(["", "## Task"])
+    _append_model_signal_mapping_task(
+        lines, mode="constrained" if strict else mode
+    )
+    _append_model_lint_self_check(lines, stage=stage, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_model_idea_validation_kill_tests_prompt(
+    *,
+    idea: str,
+    mode: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    stage: str = VALIDATION_KILL_TESTS,
+    strict: bool = False,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> str:
+    lines = _build_model_idea_common_prompt_lines(
+        idea=idea,
+        mode=mode,
+        stage=stage,
+        report=report,
+        spec_patch_hint=spec_patch_hint,
+        drift_header=drift_header,
+        upstream_header=upstream_header,
+    )
+    lines.extend(["", "## Task"])
+    _append_model_validation_kill_tests_task(
+        lines, mode="constrained" if strict else mode
+    )
+    _append_model_lint_self_check(lines, stage=stage, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_model_idea_common_prompt_lines(
+    *,
+    idea: str,
+    mode: str,
+    stage: str,
+    report: dict[str, object],
+    spec_patch_hint: dict[str, object] | None,
+    drift_header: str = "",
+    upstream_header: str = "",
+) -> list[str]:
     system_contracts = _as_mapping(report.get("system_contracts"))
     current_spec = _as_mapping(report.get("current_spec"))
     validated_baselines = _as_dict_list(report.get("validated_baselines"))
@@ -1579,20 +1772,73 @@ def _build_prompt(
     source_anchors = _as_dict_list(recommendations.get("source_anchors"))
     next_stage = recommend_next_stage(stage)
 
-    lines: list[str] = [
-        "# Model Lab Idea Explorer Prompt",
-        f"> Mode: {mode}",
-        f"> Stage: {stage}"
-        + (f" (next recommended: {next_stage})" if next_stage else ""),
-        "",
-        "## Research Idea",
-        idea,
-        "",
-    ]
+    lines: list[str] = []
+    _append_model_research_idea_section(
+        lines, idea=idea, mode=mode, stage=stage, next_stage=next_stage
+    )
     if upstream_header.strip():
         lines = [upstream_header.strip(), "", *lines]
     if drift_header.strip():
         lines = [drift_header.strip(), "", *lines]
+    _append_model_system_contracts_section(
+        lines,
+        model_families=model_families,
+        supported_preprocess=supported_preprocess,
+        supported_training=supported_training,
+        supported_selection_metrics=supported_selection_metrics,
+        supported_feature_importance=supported_feature_importance,
+        mode=mode,
+    )
+    _append_model_current_spec_section(lines, current_spec=current_spec)
+    _append_model_knowledge_cards_section(
+        lines,
+        knowledge_matches=knowledge_matches,
+        handling_patterns=handling_patterns,
+    )
+    _append_model_experiment_session_memory_section(
+        lines,
+        recent_failures=recent_failures,
+        validated_baselines=validated_baselines,
+        session_memory_rows=session_memory_rows,
+        source_anchors=source_anchors,
+        spec_patch_hint=spec_patch_hint,
+    )
+    _append_model_warnings_section(lines, warnings=warnings)
+    return lines
+
+
+def _append_model_research_idea_section(
+    lines: list[str],
+    *,
+    idea: str,
+    mode: str,
+    stage: str,
+    next_stage: str | None,
+) -> None:
+    lines.extend(
+        [
+            "# Model Lab Idea Explorer Prompt",
+            f"> Mode: {mode}",
+            f"> Stage: {stage}"
+            + (f" (next recommended: {next_stage})" if next_stage else ""),
+            "",
+            "## Research Idea",
+            idea,
+            "",
+        ]
+    )
+
+
+def _append_model_system_contracts_section(
+    lines: list[str],
+    *,
+    model_families: list[str],
+    supported_preprocess: dict[str, object],
+    supported_training: dict[str, object],
+    supported_selection_metrics: list[str],
+    supported_feature_importance: dict[str, object],
+    mode: str,
+) -> None:
     lines.extend(
         [
             "## System Contracts",
@@ -1627,6 +1873,12 @@ def _build_prompt(
         ]
     )
 
+
+def _append_model_current_spec_section(
+    lines: list[str],
+    *,
+    current_spec: dict[str, object],
+) -> None:
     if current_spec.get("status") == "loaded":
         lines.extend(
             [
@@ -1660,6 +1912,13 @@ def _build_prompt(
     else:
         lines.append("- Spec context unavailable; keep assumptions explicit.")
 
+
+def _append_model_knowledge_cards_section(
+    lines: list[str],
+    *,
+    knowledge_matches: list[dict[str, object]],
+    handling_patterns: list[str],
+) -> None:
     lines.extend(["", "## Knowledge Context"])
     if knowledge_matches:
         for idx, item in enumerate(knowledge_matches[:5], start=1):
@@ -1671,6 +1930,16 @@ def _build_prompt(
     for pattern in handling_patterns[:4]:
         lines.append(f"- handling: {pattern}")
 
+
+def _append_model_experiment_session_memory_section(
+    lines: list[str],
+    *,
+    recent_failures: list[dict[str, object]],
+    validated_baselines: list[dict[str, object]],
+    session_memory_rows: list[dict[str, object]],
+    source_anchors: list[dict[str, object]],
+    spec_patch_hint: dict[str, object] | None,
+) -> None:
     lines.extend(["", "## Experiment Context"])
     if recent_failures:
         for idx, item in enumerate(recent_failures[:3], start=1):
@@ -1743,21 +2012,16 @@ def _build_prompt(
             ]
         )
 
+
+def _append_model_warnings_section(
+    lines: list[str],
+    *,
+    warnings: list[str],
+) -> None:
     if warnings:
         lines.extend(["", "## Warnings"])
         for warning in warnings:
             lines.append(f"- {warning}")
-
-    lines.extend(["", "## Task"])
-    if stage == MECHANISM_DISCOVERY:
-        _append_model_mechanism_discovery_task(lines, mode=mode)
-    elif stage == SIGNAL_MAPPING:
-        _append_model_signal_mapping_task(lines, mode=mode)
-    else:
-        _append_model_validation_kill_tests_task(lines, mode=mode)
-    _append_model_lint_self_check(lines, stage=stage, mode=mode)
-
-    return "\n".join(lines)
 
 
 def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> None:
