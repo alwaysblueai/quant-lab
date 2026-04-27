@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import math
+from collections.abc import Sequence
 from pathlib import Path
 
 from alpha_lab.experiment import ExperimentResult
@@ -15,6 +16,9 @@ def render_summary_markdown(
     metrics: dict[str, object],
     model_diagnostics: dict[str, object],
     output_dir: Path,
+    artifact_missing_value_notes: Sequence[object] | None = None,
+    cross_sectional_transform: str | None = None,
+    cross_sectional_transform_default_applied: bool | None = None,
 ) -> str:
     """Render a concise Chinese-first run summary."""
 
@@ -30,6 +34,11 @@ def render_summary_markdown(
         f"- 特征数: {len(spec.feature_columns)}",
         f"- 调仓频率: `{spec.rebalance_frequency}`",
         f"- 标签: `{spec.target.kind}` (horizon={spec.target.horizon})",
+        (
+            "- 截面变换: "
+            f"`{_fmt(cross_sectional_transform)}` "
+            f"(default_applied={_fmt(cross_sectional_transform_default_applied)})"
+        ),
         f"- 输出目录: `{output_dir}`",
         "",
         "## 核心结果",
@@ -51,6 +60,10 @@ def render_summary_markdown(
         f"| 平均打分资产数 | {_fmt(model_diagnostics.get('mean_score_assets'))} |",
         f"| Top Features | {top_features} |",
         "",
+        "## 缺失值说明",
+        "",
+        *_render_missing_value_note_lines(artifact_missing_value_notes),
+        "",
         "## 备注",
         "",
         "- 本文件自动生成，用于快速审阅模型端是否成功收敛为可评估的标准因子。",
@@ -66,6 +79,9 @@ def render_experiment_card_markdown(
     metrics: dict[str, object],
     model_diagnostics: dict[str, object],
     result: ExperimentResult,
+    artifact_missing_value_notes: Sequence[object] | None = None,
+    cross_sectional_transform: str | None = None,
+    cross_sectional_transform_default_applied: bool | None = None,
 ) -> str:
     """Render a vault-friendly experiment card for the model-factor route."""
 
@@ -101,6 +117,11 @@ def render_experiment_card_markdown(
         f"| Direction | `{spec.direction}` |",
         f"| Feature Count | {len(spec.feature_columns)} |",
         f"| Eval Dates | {eval_dates} |",
+        (
+            "| Cross-Section Transform | "
+            f"`{_fmt(cross_sectional_transform)}` "
+            f"(default_applied={_fmt(cross_sectional_transform_default_applied)}) |"
+        ),
         f"| Top Features | {top_features} |",
         "",
         "## 结果",
@@ -117,6 +138,10 @@ def render_experiment_card_markdown(
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
         f"| 组合层验证 | {_portfolio_validation_note(metrics)} |",
+        "",
+        "## 缺失值说明",
+        "",
+        *_render_missing_value_note_lines(artifact_missing_value_notes),
         "",
         "## 解释",
         "",
@@ -156,3 +181,23 @@ def _fmt_reason_list(value: object) -> str:
         tokens = [str(item).strip() for item in value if str(item).strip()]
         return ", ".join(tokens) if tokens else "N/A"
     return _fmt(value)
+
+
+def _render_missing_value_note_lines(notes: Sequence[object] | None) -> list[str]:
+    if not notes:
+        return ["- 本次导出未检测到需要额外解释的缺失值。"]
+    rendered: list[str] = []
+    for item in notes:
+        if isinstance(item, dict):
+            artifact = str(item.get("artifact") or "").strip() or "unknown_artifact"
+            reason = str(item.get("reason") or "").strip() or "缺失原因未提供。"
+            missing_count = item.get("missing_value_count")
+            count_text = _fmt(missing_count) if missing_count is not None else "N/A"
+            rendered.append(
+                f"- `{artifact}`: 缺失单元={count_text}；原因：{reason}"
+            )
+        else:
+            text = str(item).strip()
+            if text:
+                rendered.append(f"- {text}")
+    return rendered or ["- 本次导出未检测到需要额外解释的缺失值。"]

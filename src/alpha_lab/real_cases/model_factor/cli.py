@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import logging
 import sys
@@ -13,7 +14,7 @@ from alpha_lab.research_evaluation_config import (
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
 )
 
-from .pipeline import run_model_factor_case
+from .pipeline import ModelFactorCaseRunResult, run_model_factor_case
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,59 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite existing case_report.md when rendering is enabled.",
     )
+
+    batch_parser = subparsers.add_parser(
+        "run-batch",
+        help="Run multiple model-factor case specs in one Python process.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    batch_parser.add_argument(
+        "spec_patterns",
+        nargs="+",
+        help="Spec paths or glob patterns, e.g. configs/real_cases/model_factor/*.yaml.",
+    )
+    batch_parser.add_argument(
+        "--evaluation-profile",
+        default=DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name,
+        choices=sorted(AVAILABLE_RESEARCH_EVALUATION_PROFILES),
+        help=(
+            "Research evaluation profile controlling factor verdict standards, "
+            "campaign triage, Level 2 promotion gate thresholds, and Level 2 "
+            "portfolio-validation guardrails."
+        ),
+    )
+    batch_parser.add_argument(
+        "--output-root-dir",
+        default=None,
+        help=(
+            "Optional output root override. Each case writes to "
+            "<output-root-dir>/<case_name>."
+        ),
+    )
+    batch_parser.add_argument(
+        "--vault-root",
+        default=None,
+        help=(
+            "Optional quant-knowledge vault root path. Resolution priority: "
+            "CLI flag -> OBSIDIAN_VAULT_PATH env -> disabled."
+        ),
+    )
+    batch_parser.add_argument(
+        "--vault-export-mode",
+        default="versioned",
+        choices=["skip", "overwrite", "versioned"],
+        help="Vault export behavior when a vault root is available.",
+    )
+    batch_parser.add_argument(
+        "--render-report",
+        action="store_true",
+        help="Render case_report.md after each successful run.",
+    )
+    batch_parser.add_argument(
+        "--render-overwrite",
+        action="store_true",
+        help="Overwrite existing case_report.md when rendering is enabled.",
+    )
     return parser
 
 
@@ -85,12 +139,50 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "run-batch":
+        return _run_batch(args, parser)
+
     if args.command != "run":
         parser.error(f"unsupported command: {args.command!r}")
 
+    result = _run_one(args.spec_path, args, parser)
+    _print_single_success(result)
+    return 0
+
+
+def _run_batch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        spec_paths = _expand_spec_patterns(args.spec_patterns)
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        from alpha_lab.numba_kernels import warmup_numba_kernels
+
+        warmup_numba_kernels()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("numba warmup skipped: %s", exc)
+
+    results = []
+    for spec_path in spec_paths:
+        results.append(_run_one(spec_path, args, parser))
+
+    print("")
+    print("  Workflow : real-case-model-factor-batch")
+    print("  Status   : success")
+    print(f"  Cases    : {len(results)}")
+    for result in results:
+        print(f"  - {result.spec.name}: {result.output_dir}")
+    return 0
+
+
+def _run_one(
+    spec_path: str | Path,
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> ModelFactorCaseRunResult:
     try:
         result = run_model_factor_case(
-            Path(args.spec_path),
+            Path(spec_path),
             output_root_dir=args.output_root_dir,
             evaluation_profile=args.evaluation_profile,
             vault_root=args.vault_root,
@@ -105,7 +197,10 @@ def main(argv: list[str] | None = None) -> int:
         overwrite=bool(args.render_overwrite),
     )
     _update_run_manifest(result.artifact_paths["run_manifest"], render_meta)
+    return result
 
+
+def _print_single_success(result: ModelFactorCaseRunResult) -> None:
     print("")
     print("  Workflow : real-case-model-factor")
     print("  Status   : success")
@@ -150,7 +245,24 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Report Render Status: {manifest_payload.get('render_status')}")
     print(f"  Report Path         : {manifest_payload.get('rendered_report_path')}")
 
-    return 0
+
+
+def _expand_spec_patterns(patterns: list[str]) -> list[Path]:
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in patterns:
+        matches = [Path(item) for item in glob.glob(pattern)]
+        if not matches and Path(pattern).exists():
+            matches = [Path(pattern)]
+        if not matches:
+            raise ValueError(f"run-batch pattern matched no specs: {pattern}")
+        for match in sorted(matches):
+            resolved = match.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            paths.append(resolved)
+    return paths
 
 
 def _render_case_report(

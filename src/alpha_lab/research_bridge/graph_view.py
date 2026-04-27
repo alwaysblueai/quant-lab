@@ -238,6 +238,41 @@ class VaultGraph:
         }
         return sorted(matches)
 
+    def get_uses_data(self, name: str) -> list[str]:
+        """Return the data identifiers a card declares as inputs.
+
+        These are graph edges with ``type=uses_data`` and
+        ``target_kind=data_identifier`` — distinct from card-to-card
+        relations and not reachable via ``get_neighbors`` without
+        filtering by target_kind.
+        """
+        self._require_loaded()
+        matches = {
+            edge.target
+            for edge in self._edges
+            if edge.source == name
+            and edge.type == "uses_data"
+            and edge.target_kind == "data_identifier"
+        }
+        return sorted(matches)
+
+    def get_dependency_cards(self, name: str) -> list[str]:
+        """Return cards this card depends on (``depends_on`` edges only).
+
+        Restricted to ``target_kind=card`` so callers don't accidentally
+        receive data identifiers when ``depends_on`` is over-applied in
+        the source vault.
+        """
+        self._require_loaded()
+        matches = {
+            edge.target
+            for edge in self._edges
+            if edge.source == name
+            and edge.type == "depends_on"
+            and edge.target_kind == "card"
+        }
+        return sorted(matches)
+
     def find_similar(self, name: str) -> list[str]:
         self._require_loaded()
         matches = {

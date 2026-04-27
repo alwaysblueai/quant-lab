@@ -81,14 +81,34 @@ def build_backtest_summary_payload(
     group_returns_df: pd.DataFrame,
     rebalance_frequency: str,
     metrics_for_payload: Mapping[str, object],
+    label_horizon: int = 1,
 ) -> tuple[dict[str, object], list[str]]:
-    """Build canonical backtest summary fields from write-time group-returns data."""
+    """Build canonical backtest summary fields from write-time group-returns data.
 
+    ``label_horizon`` is the forward-return label horizon in trading days
+    (e.g., a 5-day forward return uses ``label_horizon=5``).  When labels
+    overlap (horizon > 1) the long-short series cannot be daily-compounded
+    without over-counting; both the statistics and the chart NAV are sampled
+    at ``max(rebalance_step, label_horizon)`` so windows are non-overlapping.
+    """
+
+    rebalance_step = _rebalance_step(rebalance_frequency)
+    safe_label_horizon = max(1, int(label_horizon)) if label_horizon else 1
+    effective_step = max(rebalance_step, safe_label_horizon)
     long_short_series = _long_short_series(group_returns_df)
-    stats = _return_stats(
+    stats_series = _sample_rebalance_series(
         long_short_series,
-        periods_per_year=_periods_per_year(rebalance_frequency),
+        step=effective_step,
     )
+    if effective_step <= 1:
+        effective_periods_per_year = _periods_per_year(rebalance_frequency)
+    else:
+        effective_periods_per_year = max(1, round(252 / effective_step))
+    stats = _return_stats(
+        stats_series,
+        periods_per_year=effective_periods_per_year,
+    )
+    nav_points = _nav_points(stats_series)
 
     summary: dict[str, object] = {
         "annualized_return": _safe_float(stats.get("annualized_return")),
@@ -123,9 +143,22 @@ def build_backtest_summary_payload(
         "rolling_drawdown": _safe_float(stats.get("rolling_drawdown")),
         "subperiod_analysis": _safe_text(stats.get("subperiod_analysis")) or "N/A",
         "regime_analysis": _safe_text(stats.get("regime_analysis")) or "N/A",
-        "nav_points": _rows_to_json(stats.get("nav_points")),
+        "nav_points": _rows_to_json(nav_points),
         "monthly_return_table": _rows_to_json(stats.get("monthly_returns")),
         "drawdown_table": _rows_to_json(stats.get("drawdown_table")),
+        "nav_series_policy": (
+            "non_overlapping_forward_return_path_for_chart"
+            if effective_step > 1
+            else "daily_available_forward_return_path_for_chart"
+        ),
+        "nav_point_interval": (
+            f"{effective_step}D_non_overlapping" if effective_step > 1 else "1D_available"
+        ),
+        "nav_rebalance_step": effective_step,
+        "label_horizon": safe_label_horizon,
+        "statistics_series_policy": "rebalance_sampled_non_overlapping_forward_returns",
+        "statistics_rebalance_step": effective_step,
+        "statistics_periods_per_year": effective_periods_per_year,
     }
 
     fallback_derived_fields = [
@@ -217,7 +250,7 @@ def _return_stats(series: pd.Series, periods_per_year: int) -> dict[str, object]
 
     rolling_drawdown = float(drawdown.iloc[-1])
 
-    monthly = clean.resample("ME").apply(lambda values: float((1.0 + values).prod() - 1.0))
+    monthly = (1.0 + clean).resample("ME").prod() - 1.0
     monthly_rows = [[idx.strftime("%Y-%m"), float(value)] for idx, value in monthly.items()]
 
     worst_drawdowns = drawdown.nsmallest(8)
@@ -262,6 +295,14 @@ def _return_stats(series: pd.Series, periods_per_year: int) -> dict[str, object]
     }
 
 
+def _nav_points(series: pd.Series) -> list[list[object]]:
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    if len(clean) < 2:
+        return []
+    nav = (1.0 + clean).cumprod()
+    return [[idx.strftime("%Y-%m-%d"), float(value)] for idx, value in nav.items()]
+
+
 def _annualized_from_series(series: pd.Series, periods_per_year: int) -> float | None:
     clean = pd.to_numeric(series, errors="coerce").dropna()
     if clean.empty:
@@ -280,6 +321,37 @@ def _periods_per_year(rebalance_frequency: str) -> int:
     if freq.startswith("M"):
         return 12
     return 252
+
+
+def _rebalance_step(rebalance_frequency: str) -> int:
+    freq = (rebalance_frequency or "").strip().upper()
+    if not freq:
+        return 1
+    try:
+        explicit = int(freq)
+    except ValueError:
+        explicit = 0
+    if explicit > 0:
+        return explicit
+    if freq in {"D", "DAILY"}:
+        return 1
+    if freq in {"W", "WEEKLY"}:
+        return 5
+    if freq in {"M", "MONTHLY"}:
+        return 21
+    if freq in {"Q", "QUARTERLY"}:
+        return 63
+    return 1
+
+
+def _sample_rebalance_series(series: pd.Series, *, step: int) -> pd.Series:
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    if clean.empty:
+        return clean
+    safe_step = max(1, int(step))
+    if safe_step == 1:
+        return clean
+    return clean.iloc[::safe_step]
 
 
 def _rows_to_json(value: object) -> list[list[object]]:

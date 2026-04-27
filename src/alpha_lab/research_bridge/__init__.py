@@ -5,6 +5,13 @@ from .embeddings import SearchResult, VaultEmbeddings, encode_text
 from .exploration import ExplorationMap, ExploredRegion, FailureKnowledgeRef, FrontierEntry
 from .graph_view import Edge, NodeAttrs, NoveltyReport, VaultGraph
 from .models import AlphaLabDefaults, ProjectConfig, ProjectStatus, WritebackPolicy
+from .output_lint import (
+    LintReport,
+    LintViolation,
+    describe_lint_contract,
+    extract_stage_sections,
+    lint_explore_response,
+)
 from .preflight import PreflightIssue, PreflightReport, render_preflight_report, run_preflight
 from .service import (
     ExploreIdeaCard,
@@ -21,6 +28,7 @@ from .service import (
     structure_candidates,
     summarize_run,
 )
+from .sessions import record_explore_response
 
 __all__ = [
     # Data classes / types
@@ -34,6 +42,8 @@ __all__ = [
     "ExploredRegion",
     "FailureKnowledgeRef",
     "FrontierEntry",
+    "LintReport",
+    "LintViolation",
     "NodeAttrs",
     "NoveltyReport",
     "PreflightIssue",
@@ -49,9 +59,13 @@ __all__ = [
     "WritebackPolicy",
     # Service-layer functions
     "apply_writeback",
+    "describe_lint_contract",
     "explore_idea",
+    "extract_stage_sections",
     "init_project",
+    "lint_explore_response",
     "normalize_fast_decision_log",
+    "record_explore_response",
     "refresh_project_pack",
     "scaffold_case",
     "start_round",

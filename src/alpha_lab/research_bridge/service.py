@@ -4,8 +4,7 @@ import datetime as dt
 import json
 import re
 from collections import Counter
-from csv import DictReader
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,13 +28,41 @@ from alpha_lab.research_bridge.models import (
     save_project_config,
     save_yaml_document,
 )
+from alpha_lab.research_bridge.output_lint import describe_lint_contract
 from alpha_lab.research_bridge.preflight import render_preflight_report, run_preflight
+from alpha_lab.research_bridge.scoring import (
+    ALPHA_MODE_WEIGHTS,
+    FORBIDDEN_FACTOR_LABELS,
+    MECHANISM_DISCOVERY,
+    SIGNAL_MAPPING,
+    SIGNAL_MAPPING_CONFOUND_CONTROLS,
+    VALIDATION_ALIAS_TARGETS,
+    VALIDATION_DATA_SANITY_CHECKS,
+    VALIDATION_IMPL_ROBUSTNESS_CHECKS,
+    VALIDATION_KILL_TESTS,
+    VALIDATION_KILL_VERDICT_RULES,
+    VALIDATION_SUBSAMPLE_STABILITY_CHECKS,
+    CardMetadata,
+    QueryAnchor,
+    ScoreComponents,
+    ScoreWeights,
+    aggregate_score,
+    derive_failure_keywords,
+    infer_available_data_from_frequency,
+    normalize_data_set,
+    normalize_workflow_stage,
+    recommend_next_stage,
+    score_card,
+)
 from alpha_lab.vault_export import ExportResult, export_to_vault, resolve_vault_root
 from alpha_lab.vault_export_graph_feedback import (
     GraphFeedbackResult,
     apply_graph_feedback,
     collect_graph_feedback_summary,
 )
+
+from . import loaders as bridge_loaders
+from . import sessions as bridge_sessions
 
 PROJECTS_DIRNAME = "55_projects"
 
@@ -163,6 +190,10 @@ class ExploreIdeaResult:
     related_cards: list[ExploreIdeaCard]
     constraint_report: dict[str, object]
     gpt_prompt: str
+    # Always-on retrieval observability (P0/P1): score components per
+    # candidate, dropped cards from hard filters, weights table for the
+    # active mode, and the inferred query anchor.
+    retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -171,6 +202,7 @@ class ExploreIdeaResult:
             "related_cards": [card.to_payload() for card in self.related_cards],
             "constraint_report": dict(self.constraint_report),
             "gpt_prompt": self.gpt_prompt,
+            "retrieval_diagnostics": dict(self.retrieval_diagnostics),
         }
 
 
@@ -599,9 +631,18 @@ def explore_idea(
     mode: str = "free",
     project_slug: str | None = None,
     top_k: int = 8,
+    available_data: frozenset[str] | list[str] | None = None,
+    stage: str | None = None,
+    workspace_root: str | Path | None = None,
+    persist_session: bool = False,
+    inject_recent_drift: bool = False,
+    parent_session_id: str | None = None,
+    drift_session_limit: int = 3,
+    upstream_session_limit: int = 20,
 ) -> ExploreIdeaResult:
     resolved_vault = _resolve_bridge_vault_root(vault_root)
     normalized_mode = _normalize_explore_mode(mode)
+    normalized_stage = normalize_workflow_stage(stage)
     normalized_idea = idea.strip()
     if not normalized_idea:
         raise ValueError("idea must be non-empty")
@@ -615,7 +656,7 @@ def explore_idea(
         idea=normalized_idea,
         embeddings=embeddings,
         index_rows=index_rows,
-        top_k=max(top_k * 2, 12),
+        top_k=max(top_k * 3, 18),
     )
 
     factor_matches = [match for match in semantic_matches if match.type == "factor"]
@@ -633,15 +674,72 @@ def explore_idea(
             label_getter=lambda name: _graph_node_mechanism(graph, name),
         )
 
+    available_data_explicit = available_data is not None
+    available_data_set = (
+        normalize_data_set(available_data) if available_data_explicit else None
+    )
+    inventory_source = "explicit" if available_data_explicit else "none"
+    if available_data_set is None and project is not None:
+        # Auto-derive a default inventory from the project's frequency tier.
+        # Daily projects must not silently pull HFT cards in via cosine
+        # similarity; the dependency hard filter handles that, so populating
+        # the inventory unlocks the filter.
+        inferred = infer_available_data_from_frequency(project.frequency)
+        if inferred is not None:
+            available_data_set = inferred
+            inventory_source = f"frequency:{project.frequency.strip().lower()}"
+    anchor = _derive_query_anchor(
+        project=project,
+        semantic_matches=semantic_matches,
+        graph=graph,
+    )
+    weights = ALPHA_MODE_WEIGHTS.get(
+        normalized_mode, ALPHA_MODE_WEIGHTS["free"]
+    )
+    failure_keywords: frozenset[str] = frozenset()
+    if exploration is not None:
+        failure_keywords = derive_failure_keywords(
+            {
+                "title": item.title,
+                "failure_class": item.failure_class,
+                "failure_statement": item.failure_statement,
+                "prevention_rule": item.prevention_rule,
+            }
+            for item in exploration.related_failures(
+                factor_family=suggested_family,
+                mechanism=suggested_mechanism,
+                text_query=normalized_idea,
+                max_items=8,
+            )
+        )
+    ranked, dropped_cards = _typed_rank_candidates(
+        semantic_matches=semantic_matches,
+        graph=graph,
+        anchor=anchor,
+        weights=weights,
+        available_data=available_data_set,
+        failure_keywords=failure_keywords,
+    )
+    ranked_matches: list[SearchResult] = [item.result for item in ranked]
+    score_components_by_name: dict[str, dict[str, float]] = {
+        item.result.name: {
+            **item.components.to_dict(),
+            "aggregate": item.aggregate,
+        }
+        for item in ranked
+    }
+
+    excluded_names = frozenset(item["name"] for item in dropped_cards if item.get("name"))
     related_cards = _build_explore_related_cards(
         vault_root=resolved_vault,
         idea=normalized_idea,
         graph=graph,
         embeddings=embeddings,
         project=project,
-        semantic_matches=semantic_matches,
+        semantic_matches=ranked_matches or semantic_matches,
         index_rows=index_rows,
         top_k=max(top_k, 1),
+        excluded_names=excluded_names,
     )
     if not suggested_family:
         suggested_family = _first_non_empty(card.factor_family for card in related_cards)
@@ -657,9 +755,68 @@ def explore_idea(
         suggested_family=suggested_family,
         suggested_mechanism=suggested_mechanism,
     )
+    prompt_context["score_components_by_name"] = score_components_by_name
     constraint_report: dict[str, object] = (
         prompt_context if normalized_mode == "constrained" else {}
     )
+    retrieval_diagnostics: dict[str, object] = {
+        "mode": normalized_mode,
+        "stage": normalized_stage,
+        "recommended_next_stage": recommend_next_stage(normalized_stage),
+        "score_components_by_name": score_components_by_name,
+        "dropped_cards": dropped_cards,
+        "score_weights": {
+            "semantic": weights.semantic,
+            "metadata": weights.metadata,
+            "mechanism": weights.mechanism,
+            "dependency": weights.dependency,
+            "failure": weights.failure,
+        },
+        "query_anchor": {
+            "domain": anchor.domain,
+            "market": anchor.market,
+            "mechanism": anchor.mechanism,
+            "factor_family": anchor.factor_family,
+        },
+        "available_data_provided": available_data_set is not None,
+        "available_data_source": inventory_source,
+    }
+
+    upstream_session_id: str | None = None
+    upstream_sections_injected = 0
+    should_resolve_upstream = parent_session_id is not None or (
+        inject_recent_drift
+        and bridge_sessions.previous_workflow_stage(normalized_stage) is not None
+    )
+    if should_resolve_upstream:
+        if workspace_root is None:
+            raise ValueError(
+                "upstream session chaining requires workspace_root to locate "
+                "alpha_lab_explorer/sessions/"
+            )
+        upstream_record = bridge_sessions.find_upstream_session(
+            workspace_root=workspace_root,
+            stage=normalized_stage,
+            parent_session_id=parent_session_id,
+            project_slug=project.slug if project is not None else None,
+            limit=max(int(upstream_session_limit), 0),
+        )
+        if upstream_record is not None:
+            upstream_header = bridge_sessions.render_upstream_artifact_header(
+                upstream_record,
+                current_stage=normalized_stage,
+            )
+            if upstream_header:
+                prompt_context["upstream_artifact_header"] = upstream_header
+                upstream_session_id = str(upstream_record.get("session_id") or "")
+                upstream_sections_injected = bridge_sessions.count_upstream_sections(
+                    upstream_record,
+                    current_stage=normalized_stage,
+                )
+
+    retrieval_diagnostics["parent_session_id"] = parent_session_id
+    retrieval_diagnostics["upstream_session_id"] = upstream_session_id
+    retrieval_diagnostics["upstream_sections_injected"] = upstream_sections_injected
 
     category = project.category if project is not None else "factor_recipe"
     gpt_prompt = _build_exploration_prompt(
@@ -670,13 +827,61 @@ def explore_idea(
         category=category,
         project=project,
         graph=graph,
+        stage=normalized_stage,
     )
+
+    drift_violations: list[dict[str, object]] = []
+    if inject_recent_drift:
+        if workspace_root is None:
+            raise ValueError(
+                "inject_recent_drift=True requires workspace_root to locate "
+                "alpha_lab_explorer/sessions/"
+            )
+        drift_violations = bridge_sessions.list_recent_violations(
+            workspace_root=workspace_root,
+            stage=normalized_stage,
+            limit=max(int(drift_session_limit), 0),
+        )
+        drift_header = bridge_sessions.render_drift_header(drift_violations)
+        if drift_header:
+            gpt_prompt = drift_header + "\n" + gpt_prompt
+
+    retrieval_diagnostics["drift_injected_count"] = len(drift_violations)
+
+    session_id: str | None = None
+    if persist_session:
+        if workspace_root is None:
+            raise ValueError(
+                "persist_session=True requires workspace_root to write "
+                "alpha_lab_explorer/sessions/"
+            )
+        # We persist a snapshot of what the caller is about to send to the
+        # LLM — including any injected drift header — so future audits can
+        # replay the exact prompt context.
+        snapshot_payload = {
+            "idea": normalized_idea,
+            "mode": normalized_mode,
+            "project_slug": project.slug if project is not None else "",
+            "related_cards": [card.to_payload() for card in related_cards],
+            "constraint_report": constraint_report,
+            "gpt_prompt": gpt_prompt,
+            "retrieval_diagnostics": retrieval_diagnostics,
+        }
+        start_result = bridge_sessions.start_explore_session(
+            payload=snapshot_payload,
+            workspace_root=workspace_root,
+            parent_session_id=parent_session_id or upstream_session_id,
+        )
+        session_id = start_result.session_id
+        retrieval_diagnostics["session_id"] = session_id
+
     return ExploreIdeaResult(
         idea=normalized_idea,
         mode=normalized_mode,
         related_cards=related_cards,
         constraint_report=constraint_report,
         gpt_prompt=gpt_prompt,
+        retrieval_diagnostics=retrieval_diagnostics,
     )
 
 
@@ -706,7 +911,7 @@ def _build_factor_recipe_payload(
             "recipe": {
                 "base": {
                     "method": base_method,
-                    "lookback": lookback,
+                    "window": lookback,
                     "skip_recent": skip_recent,
                 },
                 "preprocess": {
@@ -1857,39 +2062,15 @@ def _frontmatter_path(frontmatter: dict[str, Any], key: str) -> Path | None:
 
 
 def _load_vault_graph(vault_root: Path) -> VaultGraph | None:
-    graph_path = (vault_root / "90_computed" / "graph.json").resolve()
-    if not graph_path.exists():
-        return None
-    graph = VaultGraph(graph_path)
-    try:
-        graph.load()
-    except (OSError, ValueError):
-        return None
-    return graph
+    return bridge_loaders.load_vault_graph(vault_root)
 
 
 def _load_vault_embeddings(vault_root: Path) -> VaultEmbeddings | None:
-    embeddings_path = (vault_root / "90_computed" / "embeddings.npz").resolve()
-    if not embeddings_path.exists():
-        return None
-    embeddings = VaultEmbeddings(embeddings_path)
-    try:
-        embeddings.load()
-    except (OSError, ValueError):
-        return None
-    return embeddings
+    return bridge_loaders.load_vault_embeddings(vault_root)
 
 
 def _load_exploration_map(vault_root: Path) -> ExplorationMap | None:
-    path = (vault_root / "90_computed" / "exploration_map.json").resolve()
-    if not path.exists():
-        return None
-    exploration = ExplorationMap(path)
-    try:
-        exploration.load()
-    except (OSError, ValueError):
-        return None
-    return exploration
+    return bridge_loaders.load_exploration_map(vault_root)
 
 
 def _project_graph_labels(
@@ -2018,15 +2199,7 @@ def _load_project_optional(vault_root: Path, project_slug: str | None) -> Projec
 
 
 def _load_card_index_rows(vault_root: Path) -> list[dict[str, str]]:
-    index_path = vault_root / "90_moc" / "CARD-INDEX.tsv"
-    if not index_path.exists():
-        return []
-    rows: list[dict[str, str]] = []
-    with index_path.open("r", encoding="utf-8") as fh:
-        reader = DictReader(fh, delimiter="\t")
-        for row in reader:
-            rows.append({key: str(value or "").strip() for key, value in row.items()})
-    return rows
+    return bridge_loaders.load_card_index_rows(vault_root)
 
 
 def _search_explore_matches(
@@ -2036,56 +2209,139 @@ def _search_explore_matches(
     index_rows: list[dict[str, str]],
     top_k: int,
 ) -> list[SearchResult]:
-    if embeddings is not None:
-        results = embeddings.search(idea, top_k=max(top_k, 1))
-        if results:
-            return results
-    keywords = _idea_keywords(idea)
-    if not keywords:
-        return []
-    scored_rows: list[tuple[float, dict[str, str]]] = []
-    for row in index_rows:
-        haystack = " ".join(
-            [
-                row.get("path", ""),
-                row.get("type", ""),
-                row.get("name", ""),
-                row.get("domain", ""),
-                row.get("lifecycle", ""),
-                row.get("tags", ""),
-                row.get("parent_moc", ""),
-                row.get("summary", ""),
-            ]
-        ).lower()
-        score = float(sum(1 for keyword in keywords if keyword in haystack))
-        if score <= 0.0:
+    return bridge_loaders.search_explore_matches(
+        idea=idea,
+        embeddings=embeddings,
+        index_rows=index_rows,
+        top_k=top_k,
+    )
+
+
+def _build_card_metadata_from_graph(
+    *,
+    graph: VaultGraph | None,
+    name: str,
+    fallback_type: str = "",
+) -> CardMetadata:
+    """Pull structured metadata for ``name`` from the vault graph.
+
+    Falls back to a near-empty record when the graph is missing or the
+    node has not been ingested yet — callers must tolerate sparse data
+    (the scoring module already does).
+    """
+    if graph is None:
+        return CardMetadata(name=name, type=fallback_type)
+    node = graph.get_node(name)
+    if node is None:
+        return CardMetadata(name=name, type=fallback_type)
+    return CardMetadata(
+        name=name,
+        type=node.type or fallback_type,
+        domain=node.domain,
+        lifecycle=node.lifecycle,
+        market=node.market,
+        mechanism=node.mechanism,
+        factor_family=node.factor_family,
+        uses_data=normalize_data_set(graph.get_uses_data(name)),
+        depends_on=frozenset(graph.get_dependency_cards(name)),
+    )
+
+
+def _derive_query_anchor(
+    *,
+    project: ProjectConfig | None,
+    semantic_matches: list[SearchResult],
+    graph: VaultGraph | None,
+) -> QueryAnchor:
+    """Build a ``QueryAnchor`` from project hints + top semantic matches.
+
+    Project supplies ``market`` (the only persisted hint that is
+    consistently a category match for cards). ``mechanism`` and
+    ``factor_family`` are inferred from the strongest factor matches in
+    semantic-search order; ``domain`` from the same source.
+    """
+    market = ""
+    if project is not None:
+        market = (project.market or "").strip()
+
+    domain = ""
+    mechanism = ""
+    factor_family = ""
+    if graph is not None:
+        for match in semantic_matches[:5]:
+            node = graph.get_node(match.name)
+            if node is None:
+                continue
+            if not domain and node.domain:
+                domain = node.domain
+            if not mechanism and node.mechanism:
+                mechanism = node.mechanism
+            if not factor_family and node.factor_family:
+                factor_family = node.factor_family
+            if domain and mechanism and factor_family:
+                break
+    return QueryAnchor(
+        domain=domain,
+        market=market,
+        mechanism=mechanism,
+        factor_family=factor_family,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RankedCandidate:
+    result: SearchResult
+    metadata: CardMetadata
+    components: ScoreComponents
+    aggregate: float
+
+
+def _typed_rank_candidates(
+    *,
+    semantic_matches: list[SearchResult],
+    graph: VaultGraph | None,
+    anchor: QueryAnchor,
+    weights: ScoreWeights,
+    available_data: frozenset[str] | None,
+    failure_keywords: frozenset[str],
+) -> tuple[list[_RankedCandidate], list[dict[str, str]]]:
+    """Score and re-rank semantic candidates, with hard-filter dropouts.
+
+    Returns ``(ranked_kept, dropped)``. Each dropped record carries the
+    candidate name and a human-readable ``reason`` for observability.
+    """
+    ranked: list[_RankedCandidate] = []
+    dropped: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in semantic_matches:
+        name = match.name
+        if not name or name in seen:
             continue
-        scored_rows.append((score, row))
-    scored_rows.sort(key=lambda item: (-item[0], item[1].get("name", ""), item[1].get("path", "")))
-    return [
-        SearchResult(
-            name=row.get("name", ""),
-            score=score,
-            type=row.get("type", ""),
-            path=row.get("path", ""),
-            summary=row.get("summary", ""),
+        seen.add(name)
+        metadata = _build_card_metadata_from_graph(
+            graph=graph, name=name, fallback_type=match.type
         )
-        for score, row in scored_rows[: max(top_k, 1)]
-        if row.get("name") and row.get("path")
-    ]
-
-
-def _idea_keywords(text: str) -> set[str]:
-    keywords: set[str] = set()
-    for token in re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text):
-        normalized = token.lower().strip()
-        if len(normalized) <= 1:
+        components, kept, drop_reason = score_card(
+            anchor=anchor,
+            card=metadata,
+            semantic_score=match.score,
+            available_data=available_data,
+            failure_keywords=failure_keywords,
+        )
+        if not kept:
+            dropped.append({"name": name, "reason": drop_reason})
             continue
-        keywords.add(normalized)
-        if re.fullmatch(r"[\u4e00-\u9fff]+", normalized) and len(normalized) >= 4:
-            for idx in range(len(normalized) - 1):
-                keywords.add(normalized[idx : idx + 2])
-    return keywords
+        aggregate = aggregate_score(components, weights)
+        ranked.append(
+            _RankedCandidate(
+                result=match,
+                metadata=metadata,
+                components=components,
+                aggregate=aggregate,
+            )
+        )
+    ranked.sort(key=lambda item: (-item.aggregate, item.result.name))
+    return ranked, dropped
 
 
 def _build_explore_related_cards(
@@ -2098,6 +2354,7 @@ def _build_explore_related_cards(
     semantic_matches: list[SearchResult],
     index_rows: list[dict[str, str]],
     top_k: int,
+    excluded_names: frozenset[str] = frozenset(),
 ) -> list[ExploreIdeaCard]:
     del idea
     index_by_name = {row.get("name", ""): row for row in index_rows if row.get("name")}
@@ -2106,7 +2363,7 @@ def _build_explore_related_cards(
     match_by_name = {match.name: match for match in semantic_matches}
 
     def enqueue(name: str, reason: str) -> None:
-        if not name:
+        if not name or name in excluded_names:
             return
         reasons = reasons_by_name.setdefault(name, set())
         reasons.add(reason)
@@ -2349,48 +2606,15 @@ def _select_explore_frontier_matches(
 
 
 def _load_explore_graph(vault_root: Path) -> VaultGraph | None:
-    graph = _load_vault_graph(vault_root)
-    if graph is not None:
-        return graph
-    script_path = vault_root / "00_protocols" / "rebuild-graph.py"
-    if not script_path.exists():
-        return None
-    graph = VaultGraph.from_vault_root(vault_root)
-    try:
-        graph.build(vault_root=vault_root)
-    except Exception:
-        return None
-    return graph
+    return bridge_loaders.load_explore_graph(vault_root)
 
 
 def _load_explore_embeddings(vault_root: Path) -> VaultEmbeddings | None:
-    embeddings = _load_vault_embeddings(vault_root)
-    if embeddings is not None:
-        return embeddings
-    script_path = vault_root / "00_protocols" / "rebuild-embeddings.py"
-    if not script_path.exists():
-        return None
-    embeddings = VaultEmbeddings.from_vault_root(vault_root)
-    try:
-        embeddings.build(vault_root=vault_root)
-    except Exception:
-        return None
-    return embeddings
+    return bridge_loaders.load_explore_embeddings(vault_root)
 
 
 def _load_explore_exploration_map(vault_root: Path) -> ExplorationMap | None:
-    exploration = _load_exploration_map(vault_root)
-    if exploration is not None:
-        return exploration
-    script_path = vault_root / "00_protocols" / "rebuild-exploration-map.py"
-    if not script_path.exists():
-        return None
-    exploration = ExplorationMap.from_vault_root(vault_root)
-    try:
-        exploration.build(vault_root=vault_root)
-    except Exception:
-        return None
-    return exploration
+    return bridge_loaders.load_explore_exploration_map(vault_root)
 
 
 def _extract_simple_frontmatter(text: str) -> dict[str, str]:
@@ -2438,6 +2662,7 @@ def _build_exploration_prompt(
     category: str,
     project: ProjectConfig | None,
     graph: VaultGraph | None,
+    stage: str = MECHANISM_DISCOVERY,
 ) -> str:
     if category == "factor_recipe":
         return _build_factor_recipe_exploration_prompt(
@@ -2447,6 +2672,7 @@ def _build_exploration_prompt(
             constraint_report=constraint_report,
             project=project,
             graph=graph,
+            stage=stage,
         )
 
     profile = get_category_profile(category)
@@ -2533,12 +2759,35 @@ def _build_factor_recipe_exploration_prompt(
     constraint_report: dict[str, object],
     project: ProjectConfig | None,
     graph: VaultGraph | None,
+    stage: str = MECHANISM_DISCOVERY,
 ) -> str:
     context = _build_factor_recipe_prompt_context(
         cards=cards,
         constraint_report=constraint_report,
         graph=graph,
     )
+    # signal_mapping and validation_kill_tests are stage stubs for now —
+    # they emit a clear warning header on top of a mechanism_discovery-style
+    # body so the caller still gets usable structure while the dedicated
+    # templates are in flight.
+    if stage == SIGNAL_MAPPING:
+        return _build_factor_recipe_signal_mapping_prompt(
+            idea=idea,
+            mode=mode,
+            project=project,
+            context=context,
+        )
+    if stage == VALIDATION_KILL_TESTS:
+        return _build_factor_recipe_validation_kill_tests_prompt(
+            idea=idea,
+            mode=mode,
+            project=project,
+            context=context,
+        )
+    # Default stage: mechanism_discovery — the existing prompt builders are
+    # now interpreted as the strictness levels of mechanism_discovery; they
+    # carry the new concept-level prohibitions (no premature labels, no
+    # assumed return direction, no story-merging).
     if mode == "start":
         return _build_factor_recipe_start_prompt(
             idea=idea,
@@ -2596,6 +2845,12 @@ def _build_factor_recipe_prompt_context(
         "failure_refs": failure_refs,
         "family_counts": family_counts,
         "allowed_data_nodes": allowed_data_nodes,
+        "score_components_by_name": _object_to_dict(
+            constraint_report.get("score_components_by_name")
+        ),
+        "upstream_artifact_header": str(
+            constraint_report.get("upstream_artifact_header") or ""
+        ).strip(),
     }
 
 
@@ -2615,12 +2870,35 @@ def _build_factor_recipe_prompt_header(
     return lines
 
 
+def _append_lint_self_check(lines: list[str], *, stage: str, mode: str) -> None:
+    rules = describe_lint_contract(stage, mode=mode)
+    if not rules:
+        return
+    lines.extend(["", "## 输出自检（系统会用 lint 校验你的输出）"])
+    for rule in rules:
+        lines.append(f"- {rule}")
+
+
+def _format_prompt_score_components(raw: object) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    keys = ("semantic", "metadata", "mechanism", "dependency", "failure", "aggregate")
+    pieces: list[str] = []
+    for key in keys:
+        value = raw.get(key)
+        if not isinstance(value, (int, float)):
+            continue
+        pieces.append(f"{key}={float(value):.2f}")
+    return " | ".join(pieces)
+
+
 def _append_factor_recipe_context(
     lines: list[str],
     *,
     context: dict[str, object],
     include_soft_graph: bool = False,
     include_hard_graph: bool = False,
+    mode: str = "free",
 ) -> None:
     cards_raw = context.get("cards")
     cards = (
@@ -2636,6 +2914,18 @@ def _append_factor_recipe_context(
     crowding_warning = str(context.get("crowding_warning") or "").strip()
     validated_peers = _object_to_str_list(context.get("validated_peers"))
     allowed_data_nodes = _object_to_str_list(context.get("allowed_data_nodes"))
+    score_components_by_name = _object_to_dict(
+        context.get("score_components_by_name")
+    )
+    upstream_artifact_header = str(
+        context.get("upstream_artifact_header") or ""
+    ).strip()
+    score_components_by_name = _object_to_dict(
+        context.get("score_components_by_name")
+    )
+
+    if upstream_artifact_header:
+        lines.extend(["", upstream_artifact_header])
 
     lines.extend(["", "## 上下文约束", "", "知识库："])
     if not cards:
@@ -2652,6 +2942,25 @@ def _append_factor_recipe_context(
             meta.append(f"因子族={card.factor_family}")
         meta_text = f" ({'; '.join(meta)})" if meta else ""
         lines.append(f"- {card.name}{meta_text}: {card.summary}")
+        score_line = _format_prompt_score_components(
+            score_components_by_name.get(card.name)
+        )
+        if score_line:
+            lines.append(f"  - retrieval score: {score_line}")
+    if cards and score_components_by_name:
+        lines.extend(
+            [
+                "",
+                "检索分量说明：semantic=文本相似，metadata=frontmatter 兼容，"
+                "mechanism=机制接近，dependency=数据依赖覆盖，"
+                "failure=与失败路径的距离/规避信号，aggregate=当前模式加权总分。",
+            ]
+        )
+        if mode == "constrained":
+            lines.append(
+                "constrained 模式下，引用某张卡片时必须说明你主要依赖哪个检索分量，"
+                "不要只因为卡片排在前面就引用。"
+            )
 
     lines.extend(["", "历史失败："])
     if failure_refs:
@@ -2712,6 +3021,57 @@ def _append_factor_recipe_context(
             lines.append(f"- {operator_name}")
 
 
+def _format_forbidden_labels_lines() -> list[str]:
+    """Render FORBIDDEN_FACTOR_LABELS as wrapped bullet rows for prompts."""
+    chunk = 6
+    rows: list[str] = []
+    items = list(FORBIDDEN_FACTOR_LABELS)
+    for start in range(0, len(items), chunk):
+        rows.append(" / ".join(items[start : start + chunk]))
+    return rows
+
+
+def _append_mechanism_discovery_concept_constraints(
+    lines: list[str], *, strict: bool = False
+) -> None:
+    """Inject the concept-level prohibitions for mechanism_discovery.
+
+    These rules push back on the LLM's tendency to collapse a fresh idea
+    into an existing label (reversal / momentum / liquidity / ...) before
+    the mechanism has actually been examined. They live alongside the
+    existing structural rules — not in place of them.
+    """
+    forbidden_rows = _format_forbidden_labels_lines()
+    lines.extend(
+        [
+            "",
+            "## 概念禁用约束（mechanism_discovery 阶段）",
+            "1. 禁止用以下既有标签为机制命名（命名等于提前归类，会塌缩假设空间）：",
+        ]
+    )
+    for row in forbidden_rows:
+        lines.append(f"   - {row}")
+    lines.extend(
+        [
+            "2. 禁止预设收益方向。"
+            "做多 / 做空 / long the / short the / buy the / sell the 之类预设性表述不允许出现。",
+            "3. 禁止把多个机制压成同一个故事——必须保留 ≥ 2 个在方向或范围上互斥的候选。",
+            "4. 必须显式说明：与最相近的已有标签相比，本机制的"
+            "**差异**是什么（不能只写相似点）。",
+        ]
+    )
+    if strict:
+        lines.extend(
+            [
+                "5. 候选机制 ≤ 3 个，且每个候选必须挂一个证据锚点：要么 cite 一张相关卡片，"
+                "要么显式声明一个外部领域类比并标注迁移成本。",
+                "6. 自检步骤（强制执行）：对每个候选回答"
+                "“如果只用 1 个上面禁用标签描述它，能不能描述完整？”——"
+                "答案为是的候选必须删除。",
+            ]
+        )
+
+
 def _build_factor_recipe_start_prompt(
     *,
     idea: str,
@@ -2745,7 +3105,10 @@ def _build_factor_recipe_start_prompt(
             "4. 不允许给出最终 ranking、推荐或 single best idea。",
         ]
     )
-    _append_factor_recipe_context(lines, context=context, include_soft_graph=True)
+    _append_mechanism_discovery_concept_constraints(lines, strict=False)
+    _append_factor_recipe_context(
+        lines, context=context, include_soft_graph=True, mode="start"
+    )
     lines.extend(
         [
             "",
@@ -2785,6 +3148,7 @@ def _build_factor_recipe_start_prompt(
             "请输出结构清晰但“未完全收敛”的研究起点，目标是支持后续深入讨论，而不是直接给出最终答案。",
         ]
     )
+    _append_lint_self_check(lines, stage=MECHANISM_DISCOVERY, mode="start")
     return "\n".join(lines)
 
 
@@ -2816,7 +3180,10 @@ def _build_factor_recipe_structured_prompt(
             "3. 如果两个候选本质上只是参数化变体，只保留一个。",
         ]
     )
-    _append_factor_recipe_context(lines, context=context, include_soft_graph=True)
+    _append_mechanism_discovery_concept_constraints(lines, strict=False)
+    _append_factor_recipe_context(
+        lines, context=context, include_soft_graph=True, mode="free"
+    )
     lines.extend(
         [
             "",
@@ -2849,6 +3216,7 @@ def _build_factor_recipe_structured_prompt(
             "不要做最终选择，不要 ranking，不要收敛到单一结论。",
         ]
     )
+    _append_lint_self_check(lines, stage=MECHANISM_DISCOVERY, mode="free")
     return "\n".join(lines)
 
 
@@ -2893,7 +3261,10 @@ def _build_factor_recipe_constrained_prompt(
             "5. 少而精。Step 1 最多提出 5 个候选机制，Step 3 最多保留 2 个最终假设。",
         ]
     )
-    _append_factor_recipe_context(lines, context=context, include_hard_graph=True)
+    _append_mechanism_discovery_concept_constraints(lines, strict=True)
+    _append_factor_recipe_context(
+        lines, context=context, include_hard_graph=True, mode="constrained"
+    )
     lines.extend(
         [
             "",
@@ -3022,6 +3393,376 @@ def _build_factor_recipe_constrained_prompt(
         lines.extend(["", "## 新颖性警示"])
         for item in novelty_warnings:
             lines.append(f"- {item}")
+    _append_lint_self_check(lines, stage=MECHANISM_DISCOVERY, mode="constrained")
+    return "\n".join(lines)
+
+
+def _build_factor_recipe_signal_mapping_prompt(
+    *,
+    idea: str,
+    mode: str,
+    project: ProjectConfig | None,
+    context: dict[str, object],
+) -> str:
+    """Real prompt builder for ``signal_mapping`` stage.
+
+    The middle stage of the workflow audits *computability*: it forces
+    the LLM to translate each mechanism candidate into a minimum viable
+    set of observable implications and required data fields, and to
+    explain which mechanism the *current* implementation actually
+    captures. It must not propose new mechanisms (that's
+    mechanism_discovery) and must not pick a final version (that's
+    validation_kill_tests).
+
+    Like validation, it does NOT inject the mechanism_discovery
+    concept-level prohibitions — by this stage the candidates already
+    exist and need to be made testable, not re-stripped.
+
+    ``mode``:
+      * ``start`` / ``free`` — open computability audit; 2-3 testable
+        signal versions with no final pick.
+      * ``constrained`` — strict variant: each observable implication
+        must cite a knowledge anchor; current implementation must carry
+        a binary alias-tag against the five confound families; output
+        is constrained to exactly 2 or 3 versions.
+    """
+    strict = mode == "constrained"
+    mode_label = (
+        "Signal Mapping · Strict" if strict else "Signal Mapping · Open"
+    )
+    lines = _build_factor_recipe_prompt_header(
+        title="# AlphaLab Signal Mapping Prompt",
+        mode_label=mode_label,
+        project=project,
+    )
+    lines.extend(
+        [
+            "",
+            "## 阶段声明",
+            "你不是在生成新机制（mechanism_discovery 已完成），"
+            "也不是在做最终淘汰（validation_kill_tests 才做）。",
+            "你的任务是 **mechanism → 信号的可计算性审计**：",
+            "把每个候选机制翻译成最少必要信号组件，"
+            "并明确**当前实现**到底在捕捉哪个机制、漏掉了哪些。",
+            "",
+            "## 候选机制 / 当前想法",
+            idea,
+        ]
+    )
+    _append_factor_recipe_context(
+        lines, context=context, include_soft_graph=True, mode=mode
+    )
+    lines.extend(
+        [
+            "",
+            "## Mechanism → Implication → Data 三段映射（必填）",
+            "对每个机制候选，必须三段式翻译，缺一段视为该机制未通过本阶段：",
+            "",
+            "### 模板",
+            "- **机制声明**：agent behavior + structure constraint（一句话定位）",
+            "- **可观测推论**（observable implication）：",
+            "  - implication 1：…",
+            "  - implication 2：…（每条必须是可在数据上验证的现象，不是理论命题）",
+            "- **所需数据**（required_data）：每条字段标注两个 tag——",
+            "  - 频率：`daily sufficient` 或 `intraday required`",
+            "  - 角色：`necessary` / `decorative` / `confound control`",
+            "- **变量论证**：对每个 `necessary` 字段，回答"
+            "“删掉它机制还能成立吗？”——若能成立，应降级为 decorative。",
+        ]
+    )
+    if strict:
+        lines.extend(
+            [
+                "",
+                "（strict 模式硬要求：每条 observable implication 必须 cite "
+                "至少一张知识库卡片 [Kx] 或一个标准 baseline；"
+                "未 cite 的 implication 视为未论证、应在 strict 模式下删除。）",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 当前实现的解释（必填）",
+            "把"
+            "“当前实现 = 上面的研究主题”"
+            "作为既有事实，回答：",
+            "1. 当前实现**捕捉了哪一个或哪几个机制**？给出明确对应。",
+            "2. 当前实现**漏掉了哪些机制**？（机制声明里能想到但当前实现没体现的）",
+            "3. 各机制能否仅靠 **daily sufficient** 数据完成？哪些机制要 "
+            "**intraday required** 才能区分？",
+            "4. 如果某机制只在 intraday 才能区分而当前是 daily 实现，"
+            "这条机制在本案中应被显式标记为"
+            "“目前不可分辨”，不允许伪装成当前实现的一部分。",
+        ]
+    )
+
+    lines.extend(
+        [
+            "",
+            "## Confound 控制清单（必填）",
+            "下列五项 confound 必须**逐项**说明在每个候选信号版本里如何处理——",
+            "在 `{包含 / 残差化 / 显式控制 / 不控制（带风险声明）}` 中选一个，"
+            "并给出一句论据：",
+            "",
+        ]
+    )
+    for label, detail in SIGNAL_MAPPING_CONFOUND_CONTROLS:
+        lines.append(f"- `{label}`（{detail}）：")
+
+    lines.extend(
+        [
+            "",
+            "## 可测试信号版本（最多 3 个，禁止做最终选择）",
+            "在以上映射的基础上，输出 2-3 个**可测试信号版本**，每个版本：",
+            "- 实现描述：用最少必要变量构造一个可计算的初步信号",
+            "- 它对应哪个机制（或机制组合）",
+            "- 它在 confound 清单中**显式控制**了哪几项、**没控制**哪几项",
+            "- 残余假设：在这个版本下你必须假设什么才相信它有信号",
+            "",
+            "**禁止**做最终选择 / ranking / "
+            "“我推荐版本 N”——选择留给 validation_kill_tests 阶段。",
+        ]
+    )
+    if strict:
+        lines.extend(
+            [
+                "",
+                "## strict 额外要求",
+                "1. 输出版本数 ∈ {2, 3}，不允许只给 1 个。",
+                "2. 当前实现必须被打 **binary alias 标签**："
+                "在 `reversal / total volatility` 两项中，"
+                "至少回答"
+                "“当前实现是否仅是它的换壳？”，"
+                "答 yes / no / 暂不可判 三选一。",
+                "3. 任何标记为 `necessary` 的字段如果没有变量论证，"
+                "视为论证缺失，必须删除或降级。",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 输出格式（严格遵守）",
+            "[Mechanism Mapping]",
+            "### 机制 1",
+            "- 声明：…",
+            "- implications：",
+            "  - …",
+            "- required_data：",
+            "  - 字段 X | 频率：daily sufficient / intraday required | "
+            "角色：necessary / decorative / confound control",
+            "- 变量论证：…",
+            "",
+            "### 机制 2",
+            "（同上）",
+            "",
+            "[当前实现解释]",
+            "- 捕捉的机制：…",
+            "- 遗漏的机制：…",
+            "- daily / intraday 区分：…",
+            "",
+            "[Confound 控制]",
+        ]
+    )
+    for label, _ in SIGNAL_MAPPING_CONFOUND_CONTROLS:
+        lines.append(
+            f"- {label}: <包含 / 残差化 / 显式控制 / 不控制> | 论据：…"
+        )
+
+    lines.extend(
+        [
+            "",
+            "[可测试信号版本]",
+            "- v1：实现 + 对应机制 + 控制项 + 残余假设",
+            "- v2：…",
+            "- v3：…（可选）",
+        ]
+    )
+    _append_lint_self_check(lines, stage=SIGNAL_MAPPING, mode=mode)
+    return "\n".join(lines)
+
+
+def _build_factor_recipe_validation_kill_tests_prompt(
+    *,
+    idea: str,
+    mode: str,
+    project: ProjectConfig | None,
+    context: dict[str, object],
+) -> str:
+    """Real prompt builder for ``validation_kill_tests`` stage.
+
+    The forbidden-label vocabulary from mechanism_discovery returns here
+    as **audit targets** — the LLM must explicitly answer, for each
+    canonical alias family, whether the candidate is just a re-skin of
+    that family. We deliberately do NOT inject the concept-level
+    prohibitions because in this stage those labels are the targets, not
+    forbidden words.
+
+    ``mode``:
+      * ``start`` / ``free`` — full audit checklist; verdict is
+        narrative ("hold / iterate / kill") rather than mechanical.
+      * ``constrained`` — strict variant: every alias bucket needs a
+        binary verdict + at least one knowledge anchor or external
+        baseline cite; final kill verdict is binary; auditor must
+        enumerate which kill rule binds.
+    """
+    strict = mode == "constrained"
+    mode_label = (
+        "Validation & Kill Tests · Strict"
+        if strict
+        else "Validation & Kill Tests · Open"
+    )
+    lines = _build_factor_recipe_prompt_header(
+        title="# AlphaLab Validation & Kill Tests Prompt",
+        mode_label=mode_label,
+        project=project,
+    )
+    lines.extend(
+        [
+            "",
+            "## 阶段声明",
+            "你不是在生成假设、不是在拆机制、不是在写公式。",
+            "你的任务是 **try to KILL this factor**：找出最有可能让它失效或解释它的现象，",
+            "对每一项做出明确判定。任何"
+            "“看起来不错”、“值得进一步研究”这类回避结论都视为无效审计。",
+            "",
+            "## 被审计对象",
+            idea,
+        ]
+    )
+    _append_factor_recipe_context(
+        lines, context=context, include_soft_graph=False, mode=mode
+    )
+    lines.extend(
+        [
+            "",
+            "## Alias / 换壳审计（必填）",
+            "对以下每个已建立标签，必须明确回答：",
+            "“**这个因子能否仅用 X 来解释？**” 并给出"
+            "{显著重叠 / 部分重叠 / 不重叠} 中的一个判定，附简短论据。",
+            "",
+        ]
+    )
+    for label, detail in VALIDATION_ALIAS_TARGETS:
+        lines.append(f"- `{label}`（{detail}）：")
+    if strict:
+        lines.extend(
+            [
+                "",
+                "（strict 模式硬要求：每条 alias 判定必须 cite 至少一张知识库卡片 [Kx] "
+                "或一个标准 baseline——例如 Jegadeesh-Titman / Amihud / Ang et al.——"
+                "禁止仅凭直觉打"
+                "“不重叠”。）",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 暴露分解（Exposure Decomposition）",
+            "若依次对其做下列中性化，残差 IC 是否仍显著？",
+            "- 行业中性化（industry-neutral）",
+            "- 市值中性化（size-neutral）",
+            "- 流动性中性化（liquidity / turnover-neutral）",
+            "- 波动率中性化（idio-vol-neutral）",
+            "- 上述四项联合中性化",
+            "请用三档判定：{残差仍显著 / 仅在部分中性化下保留 / 中性化后失效}。",
+            "若任何一项中性化让残差 IC 降至 < 0.5 × 原始 IC，说明被审 alias 在伪装；",
+            "明确写出："
+            "残差 IC 上限 ≈ ?，作为净 alpha 的最乐观估计（不是真实估计）。",
+        ]
+    )
+
+    for title, body in (
+        VALIDATION_DATA_SANITY_CHECKS,
+        VALIDATION_IMPL_ROBUSTNESS_CHECKS,
+        VALIDATION_SUBSAMPLE_STABILITY_CHECKS,
+    ):
+        lines.extend(["", f"## {title}", body])
+
+    lines.extend(
+        [
+            "",
+            "## 死亡条件（Kill Verdict Rules）",
+            VALIDATION_KILL_VERDICT_RULES,
+        ]
+    )
+
+    if strict:
+        lines.extend(
+            [
+                "",
+                "## 强制结论",
+                "1. 必须输出 **二值最终判定**："
+                "{KILL / HOLD-FOR-AUDIT}，不允许"
+                "“看情况”、“需要更多数据”这类回避表达。",
+                "2. 若判 HOLD-FOR-AUDIT，必须列出"
+                "**3-5 个 follow-up 实证检查**，每条具体到实验设计。",
+                "3. 若判 KILL，必须明确指出"
+                "**哪条死亡条件被触发**，并写明触发证据。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "## 结论",
+                "请输出三类之一：HOLD / ITERATE / KILL，并给出主要理由。"
+                "不要简单写"
+                "“需要更多数据”——若需要数据，请列出"
+                "**具体下一步实验**而不是停在结论模糊。",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 输出格式（严格遵守）",
+            "[Alias / 换壳审计]",
+        ]
+    )
+    for label, _ in VALIDATION_ALIAS_TARGETS:
+        lines.append(f"- {label}: <显著重叠 / 部分重叠 / 不重叠> | 论据：…")
+
+    lines.extend(
+        [
+            "",
+            "[暴露分解]",
+            "- 行业中性化后：…",
+            "- 市值中性化后：…",
+            "- 流动性中性化后：…",
+            "- 波动率中性化后：…",
+            "- 联合中性化后：…",
+            "- 残差 IC 上限估计：…",
+            "",
+            "[数据健全性]",
+            "- 极端日期：…",
+            "- 涨跌停：…",
+            "- 停牌 / 复牌：…",
+            "- ST：…",
+            "- 复权：…",
+            "- IPO / 退市窗：…",
+            "",
+            "[实现稳健性]",
+            "- skip_recent 扫描：…",
+            "- 窗口长度 ±50%：…",
+            "- horizon 扫描：…",
+            "- 横截面预处理：…",
+            "",
+            "[子样本稳定性]",
+            "- 分年份：…",
+            "- regime（牛/熊/震荡）：…",
+            "- 行业桶：…",
+            "- 市值桶：…",
+            "",
+            "[最终判定]",
+            "- 触发的死亡条件（若有）：…",
+            "- 判定：<KILL / HOLD / ITERATE>",
+            "- 下一步实证步骤：…",
+        ]
+    )
+    _append_lint_self_check(lines, stage=VALIDATION_KILL_TESTS, mode=mode)
     return "\n".join(lines)
 
 

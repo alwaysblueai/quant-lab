@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
-from alpha_lab.model_factor import FeaturePreprocessConfig, ModelSpec, TrainingSpec
+from alpha_lab.model_factor import (
+    FeatureImportanceConfig,
+    FeaturePreprocessConfig,
+    ModelSelectionSpec,
+    ModelSpec,
+    TrainingSpec,
+)
 from alpha_lab.real_cases.common_spec import (
     FactorDirection,
     NeutralizationSpec,
@@ -21,6 +28,83 @@ from alpha_lab.real_cases.common_spec import (
     resolve_required_path,
 )
 
+FeatureAvailabilityMode = Literal["required_timestamp", "safety_lag"]
+
+_FUNDAMENTAL_FEATURE_HINT_TOKENS: frozenset[str] = frozenset(
+    {
+        "roe",
+        "roa",
+        "eps",
+        "bp",
+        "pb",
+        "pe",
+        "ps",
+        "pcf",
+        "book",
+        "dividend",
+        "yield",
+        "margin",
+        "profit",
+        "revenue",
+        "cash",
+        "flow",
+    }
+)
+
+
+def infer_fundamental_feature_columns(feature_columns: tuple[str, ...]) -> tuple[str, ...]:
+    """Heuristic detector for likely fundamentals-based feature names."""
+
+    matched: list[str] = []
+    for column in feature_columns:
+        name = str(column).strip()
+        if not name:
+            continue
+        lower = name.lower()
+        tokens = [token for token in re.split(r"[^a-z0-9]+", lower) if token]
+        token_set = set(tokens)
+        if token_set & _FUNDAMENTAL_FEATURE_HINT_TOKENS:
+            matched.append(name)
+            continue
+        if lower.startswith(("roe", "roa", "eps", "bp", "pb", "pe", "ps", "pcf")):
+            matched.append(name)
+    return tuple(matched)
+
+
+@dataclass(frozen=True)
+class FeatureAvailabilitySpec:
+    """Point-in-time contract for feature availability."""
+
+    mode: FeatureAvailabilityMode = "required_timestamp"
+    column: str | None = None
+    safety_lag_days: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"required_timestamp", "safety_lag"}:
+            raise ValueError(
+                "feature_availability.mode must be one of "
+                "['required_timestamp', 'safety_lag']"
+            )
+        if self.column is not None and not self.column.strip():
+            raise ValueError("feature_availability.column must be non-empty when provided")
+        if self.mode == "required_timestamp":
+            if self.safety_lag_days not in {None, 0}:
+                raise ValueError(
+                    "feature_availability.safety_lag_days must be omitted when "
+                    "feature_availability.mode='required_timestamp'"
+                )
+            return
+        if self.column is not None:
+            raise ValueError(
+                "feature_availability.column is not allowed when "
+                "feature_availability.mode='safety_lag'"
+            )
+        if self.safety_lag_days is None or self.safety_lag_days <= 0:
+            raise ValueError(
+                "feature_availability.safety_lag_days must be > 0 when "
+                "feature_availability.mode='safety_lag'"
+            )
+
 
 @dataclass(frozen=True)
 class ModelFactorCaseSpec:
@@ -34,8 +118,11 @@ class ModelFactorCaseSpec:
     universe: UniverseSpec
     target: TargetSpec
     direction: FactorDirection
+    feature_availability: FeatureAvailabilitySpec
     feature_preprocess: FeaturePreprocessConfig
+    feature_importance: FeatureImportanceConfig
     model: ModelSpec
+    model_selection: ModelSelectionSpec
     training: TrainingSpec
     neutralization: NeutralizationSpec
     rebalance_frequency: str
@@ -96,13 +183,26 @@ def model_factor_case_spec_from_mapping(data: Mapping[str, object]) -> ModelFact
 
     universe = UniverseSpec(**mapping_kwargs(data.get("universe", {}), field_name="universe"))
     target = TargetSpec(**mapping_kwargs(data.get("target", {}), field_name="target"))
+    feature_availability = FeatureAvailabilitySpec(
+        **mapping_kwargs(
+            data.get("feature_availability", {}),
+            field_name="feature_availability",
+        )
+    )
     feature_preprocess = FeaturePreprocessConfig(
         **mapping_kwargs(
             data.get("feature_preprocess", {}),
             field_name="feature_preprocess",
         )
     )
+    feature_importance = FeatureImportanceConfig(
+        **mapping_kwargs(
+            data.get("feature_importance", {}),
+            field_name="feature_importance",
+        )
+    )
     model = ModelSpec(**mapping_kwargs(data.get("model", {}), field_name="model"))
+    model_selection = _parse_model_selection_spec(data.get("model_selection", {}))
     training = TrainingSpec(**mapping_kwargs(data.get("training", {}), field_name="training"))
     neutralization = NeutralizationSpec(
         **mapping_kwargs(data.get("neutralization", {}), field_name="neutralization")
@@ -125,8 +225,11 @@ def model_factor_case_spec_from_mapping(data: Mapping[str, object]) -> ModelFact
         universe=universe,
         target=target,
         direction=parse_long_short_direction(data.get("direction", "long")),
+        feature_availability=feature_availability,
         feature_preprocess=feature_preprocess,
+        feature_importance=feature_importance,
         model=model,
+        model_selection=model_selection,
         training=training,
         neutralization=neutralization,
         rebalance_frequency=rebalance_frequency,
@@ -173,6 +276,11 @@ def spec_to_dict(spec: ModelFactorCaseSpec) -> dict[str, object]:
 
     payload = cast(dict[str, object], asdict(spec))
     payload["feature_columns"] = list(spec.feature_columns)
+    model_selection = cast(dict[str, object], payload.get("model_selection", {}))
+    model_selection["candidates"] = [
+        asdict(candidate) for candidate in spec.model_selection.candidates
+    ]
+    payload["model_selection"] = model_selection
     return payload
 
 
@@ -202,3 +310,26 @@ def _parse_feature_columns(value: object) -> tuple[str, ...]:
             raise ValueError("feature_columns must contain non-empty strings")
         out.append(item.strip())
     return tuple(out)
+
+
+def _parse_model_selection_spec(value: object) -> ModelSelectionSpec:
+    mapping = mapping_kwargs(value, field_name="model_selection")
+    raw_candidates = mapping.pop("candidates", [])
+    if not isinstance(raw_candidates, list):
+        raise ValueError("model_selection.candidates must be a list when provided")
+    candidates: list[ModelSpec] = []
+    for idx, raw in enumerate(raw_candidates):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"model_selection.candidates[{idx}] must be an object")
+        candidates.append(
+            ModelSpec(
+                **mapping_kwargs(
+                    raw,
+                    field_name=f"model_selection.candidates[{idx}]",
+                )
+            )
+        )
+    return ModelSelectionSpec(
+        candidates=tuple(candidates),
+        **mapping,
+    )

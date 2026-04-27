@@ -32,7 +32,11 @@ def check_no_future_dates_in_input(
             remediation="Provide the date column used for time-bound validation.",
         )
 
-    dates = pd.to_datetime(frame[date_col], errors="coerce")
+    raw_dates = frame[date_col]
+    if pd.api.types.is_datetime64_any_dtype(raw_dates):
+        dates = raw_dates
+    else:
+        dates = pd.to_datetime(raw_dates, errors="coerce")
     if dates.isna().any():
         return IntegrityCheckResult(
             check_name="check_no_future_dates_in_input",
@@ -45,6 +49,18 @@ def check_no_future_dates_in_input(
         )
 
     cutoff = pd.Timestamp(max_allowed_date)
+    max_observed_date = pd.Timestamp(dates.max())
+    if max_observed_date <= cutoff:
+        return IntegrityCheckResult(
+            check_name="check_no_future_dates_in_input",
+            status="pass",
+            severity="info",
+            object_name=object_name,
+            module_name="research_integrity.leakage_checks",
+            message="no future-dated rows found",
+            metrics={"rows_checked": int(len(frame))},
+        )
+
     future_mask = dates > cutoff
     n_future = int(future_mask.sum())
 
@@ -546,23 +562,28 @@ def check_cross_section_transform_scope(
             remediation="Deduplicate transform output per date/asset before downstream merges.",
         )
 
-    raw_keys = set(
-        zip(
-            raw_dates.to_numpy(),
-            raw_df[asset_col].astype(str).to_numpy(),
-            strict=False,
+    raw_pairs_df = (
+        pd.DataFrame(
+            {
+                date_col: raw_dates.to_numpy(),
+                asset_col: raw_df[asset_col].astype(str).to_numpy(),
+            }
         )
+        .drop_duplicates()
+        .reset_index(drop=True)
     )
-    out_keys = set(
-        zip(
-            transformed_dates.to_numpy(),
-            transformed_df[asset_col].astype(str).to_numpy(),
-            strict=False,
-        )
-    )
+    out_pairs_df = transformed_keys
+    raw_pairs_count = int(len(raw_pairs_df))
+    out_pairs_count = int(len(out_pairs_df))
 
-    outside_scope = out_keys - raw_keys
-    if outside_scope:
+    merged_scope = out_pairs_df.merge(
+        raw_pairs_df,
+        on=[date_col, asset_col],
+        how="left",
+        indicator=True,
+    )
+    outside_count = int((merged_scope["_merge"] == "left_only").sum())
+    if outside_count > 0:
         return IntegrityCheckResult(
             check_name="check_cross_section_transform_scope",
             status="fail",
@@ -570,7 +591,7 @@ def check_cross_section_transform_scope(
             object_name=object_name,
             module_name="research_integrity.leakage_checks",
             message=(
-                f"transform output contains {len(outside_scope)} (date, asset) pairs absent "
+                f"transform output contains {outside_count} (date, asset) pairs absent "
                 "from raw input"
             ),
             remediation=(
@@ -578,13 +599,13 @@ def check_cross_section_transform_scope(
                 "date/asset pairs."
             ),
             metrics={
-                "outside_scope_pairs": len(outside_scope),
-                "raw_pairs": len(raw_keys),
-                "output_pairs": len(out_keys),
+                "outside_scope_pairs": outside_count,
+                "raw_pairs": raw_pairs_count,
+                "output_pairs": out_pairs_count,
             },
         )
 
-    if len(out_keys) < len(raw_keys):
+    if out_pairs_count < raw_pairs_count:
         return IntegrityCheckResult(
             check_name="check_cross_section_transform_scope",
             status="warn",
@@ -594,8 +615,8 @@ def check_cross_section_transform_scope(
             message="transform output drops part of raw cross-sectional universe",
             remediation="Confirm drops are intentional (e.g., coverage gate) and documented.",
             metrics={
-                "raw_pairs": len(raw_keys),
-                "output_pairs": len(out_keys),
+                "raw_pairs": raw_pairs_count,
+                "output_pairs": out_pairs_count,
             },
         )
 
@@ -607,8 +628,8 @@ def check_cross_section_transform_scope(
         module_name="research_integrity.leakage_checks",
         message="cross-sectional transform scope check passed",
         metrics={
-            "raw_pairs": len(raw_keys),
-            "output_pairs": len(out_keys),
+            "raw_pairs": raw_pairs_count,
+            "output_pairs": out_pairs_count,
         },
     )
 

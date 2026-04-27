@@ -33,12 +33,17 @@ class TargetSpec:
 
     kind: TargetKind = "forward_return"
     horizon: int = 5
+    winsorize_zscore: float | None = None
 
     def __post_init__(self) -> None:
         if self.kind != "forward_return":
             raise AlphaLabConfigError("target.kind currently supports only 'forward_return'")
         if self.horizon <= 0:
             raise AlphaLabConfigError("target.horizon must be > 0")
+        if self.winsorize_zscore is not None and self.winsorize_zscore <= 0:
+            raise AlphaLabConfigError(
+                "target.winsorize_zscore must be > 0 when provided (e.g. 3.0)"
+            )
 
 
 @dataclass(frozen=True)

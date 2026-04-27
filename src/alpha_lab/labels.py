@@ -2,14 +2,59 @@ from __future__ import annotations
 
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
+from alpha_lab.sorted_panel import ensure_sorted
 
 _REQUIRED_COLS = {"date", "asset", "close"}
 
 ExecutionPriceMode = Literal["close", "next_open", "vwap"]
+
+
+class LabelCache:
+    """Reuse normalized price state across repeated forward-return horizons."""
+
+    def __init__(
+        self,
+        prices: pd.DataFrame,
+        *,
+        execution_price_mode: ExecutionPriceMode = "close",
+    ) -> None:
+        self._mode = _normalize_execution_price_mode(execution_price_mode)
+        self._prices = _prepare_forward_return_prices(prices, mode=self._mode)
+        self._cache: dict[int, pd.DataFrame] = {}
+
+    def forward_return(self, horizon: int) -> pd.DataFrame:
+        horizon_int = int(horizon)
+        if horizon_int not in self._cache:
+            self._cache[horizon_int] = _forward_return_from_prepared(
+                self._prices,
+                horizon=horizon_int,
+                mode=self._mode,
+            )
+        return self._cache[horizon_int].copy()
+
+    def forward_returns(self, horizons: tuple[int, ...] | list[int]) -> dict[int, pd.DataFrame]:
+        return {int(horizon): self.forward_return(int(horizon)) for horizon in horizons}
+
+    def forward_returns_wide(
+        self,
+        horizons: tuple[int, ...] | list[int],
+    ) -> dict[int, np.ndarray]:
+        import numpy as np
+
+        out: dict[int, np.ndarray] = {}
+        for horizon in horizons:
+            labels = self.forward_return(int(horizon))
+            if labels.empty:
+                out[int(horizon)] = np.empty((0, 0), dtype=float)
+                continue
+            wide = labels.pivot(index="date", columns="asset", values="value").sort_index()
+            out[int(horizon)] = wide.to_numpy(dtype=float, copy=True)
+        return out
 
 
 def forward_return(
@@ -66,15 +111,31 @@ def forward_return(
     missing = _REQUIRED_COLS - set(df.columns)
     if missing:
         raise AlphaLabDataError(f"Input DataFrame is missing required columns: {missing}")
-
     if horizon <= 0:
         raise AlphaLabConfigError("'horizon' must be a positive integer")
 
+    mode = _normalize_execution_price_mode(execution_price_mode)
+    prepared = _prepare_forward_return_prices(df, mode=mode)
+    return _forward_return_from_prepared(prepared, horizon=int(horizon), mode=mode)
+
+
+def _normalize_execution_price_mode(execution_price_mode: str) -> ExecutionPriceMode:
     mode = execution_price_mode.strip().lower()
     if mode not in ("close", "next_open", "vwap"):
         raise AlphaLabConfigError(
             f"execution_price_mode must be 'close', 'next_open', or 'vwap'; got {mode!r}"
         )
+    return mode  # type: ignore[return-value]
+
+
+def _prepare_forward_return_prices(
+    df: pd.DataFrame,
+    *,
+    mode: ExecutionPriceMode,
+) -> pd.DataFrame:
+    missing = _REQUIRED_COLS - set(df.columns)
+    if missing:
+        raise AlphaLabDataError(f"Input DataFrame is missing required columns: {missing}")
 
     if mode == "next_open" and "open" not in df.columns:
         raise AlphaLabDataError(
@@ -99,8 +160,19 @@ def forward_return(
 
     df_copy = df.copy()
     df_copy["date"] = pd.to_datetime(df_copy["date"])
-    df_copy = df_copy.sort_values(["asset", "date"]).reset_index(drop=True)
+    return ensure_sorted(df_copy, by=("asset", "date"))
 
+
+def _forward_return_from_prepared(
+    df_copy: pd.DataFrame,
+    *,
+    horizon: int,
+    mode: ExecutionPriceMode,
+) -> pd.DataFrame:
+    if horizon <= 0:
+        raise AlphaLabConfigError("'horizon' must be a positive integer")
+    if df_copy.empty:
+        return pd.DataFrame(columns=FACTOR_OUTPUT_COLUMNS)
     close = df_copy["close"].where(df_copy["close"] > 0)
     grouped = close.groupby(df_copy["asset"], sort=False)
     exit_price = grouped.shift(-horizon)
