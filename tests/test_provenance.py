@@ -1,11 +1,18 @@
 """Tests for ExperimentProvenance, diagnostics fields, and no-op parameter warnings."""
+
 from __future__ import annotations
+
+import subprocess
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from alpha_lab.experiment import ExperimentProvenance, run_factor_experiment
+from alpha_lab.experiment import (
+    ExperimentProvenance,
+    _clear_git_provenance_cache,
+    run_factor_experiment,
+)
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.strategy import StrategySpec
 from alpha_lab.walk_forward import run_walk_forward_experiment
@@ -71,6 +78,44 @@ def test_provenance_git_commit_is_string_or_none() -> None:
     result = run_factor_experiment(_PRICES, _momentum_fn)
     gc = result.provenance.git_commit
     assert gc is None or isinstance(gc, str)
+
+
+def test_git_provenance_subprocesses_are_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_git_provenance_cache()
+    calls: list[tuple[str, ...]] = []
+
+    def _fake_run(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool = False,
+        timeout: int,
+        cwd: str,
+    ) -> subprocess.CompletedProcess[str]:
+        del capture_output, text, timeout, cwd
+        calls.append(tuple(args))
+        if args[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
+        if args[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args, 1, stdout="")
+        raise AssertionError(f"unexpected git command: {args}")
+
+    monkeypatch.setattr("alpha_lab.experiment.subprocess.run", _fake_run)
+
+    first = run_factor_experiment(_PRICES, _momentum_fn)
+    second = run_factor_experiment(_PRICES, _momentum_fn)
+
+    assert first.provenance.git_commit == "abc123"
+    assert second.provenance.git_commit == "abc123"
+    assert first.provenance.git_dirty is True
+    assert second.provenance.git_dirty is True
+    assert calls == [
+        ("git", "rev-parse", "--short", "HEAD"),
+        ("git", "diff", "--quiet", "HEAD"),
+    ]
+    _clear_git_provenance_cache()
 
 
 def test_provenance_portfolio_cost_rate_none_when_not_supplied() -> None:

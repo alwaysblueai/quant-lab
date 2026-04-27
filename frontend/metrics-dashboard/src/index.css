@@ -1,0 +1,216 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ *
+ *  CSS variable mirror of the Tailwind token palette.
+ *
+ *  Charts, third-party widgets and inline SVGs consume these via
+ *  var(--color-...) so there is exactly one source of truth for
+ *  hex values — if the palette changes in tailwind.config, it
+ *  propagates here without per-file edits.
+ * ------------------------------------------------------------------ */
+:root {
+  --color-paper:         #f5f4ed;
+  --color-paper-soft:    #faf9f5;
+  --color-paper-white:   #ffffff;
+  --color-paper-deep:    #ede8db;
+  --color-sand:          #e8e6dc;
+  --color-surface-dark:  #30302e;
+
+  --color-ink:           #141413;
+  --color-ink-strong:    #3d3d3a;
+  --color-ink-body:      #4d4c48;
+  --color-ink-muted:     #5e5d59;
+  --color-ink-faint:     #87867f;
+  --color-ink-silver:    #b0aea5;
+
+  --color-rule-cream:    #f0eee6;
+  --color-rule:          #d9d5ca;
+  --color-rule-soft:     #e7e3d6;
+  --color-rule-hover:    #d1cfc5;
+  --color-rule-active:   #c2c0b6;
+
+  --color-accent:        #c96442;
+  --color-accent-coral:  #d97757;
+  --color-accent-soft:   #fce6d6;
+  --color-accent-dark:   #a84f35;
+
+  --color-error:         #b53333;
+  --color-focus:         #3898ec;
+
+  /* Font stacks — mirrored so inline styles (e.g. Recharts tooltips)
+     can reference the same typography system. */
+  --font-sans:  "MiSans", "PingFang SC", "Microsoft YaHei UI", Arial,
+                system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Source Serif 4", "Source Serif Pro", "Tiempos Text",
+                Georgia, "Times New Roman", Times,
+                "LXGW WenKai", "LXGW WenKai Screen",
+                "Noto Serif SC", "Songti SC", serif;
+  --font-mono:  "JetBrains Mono", SFMono-Regular, Menlo, Monaco, Consolas,
+                "Courier New", monospace;
+}
+
+@layer base {
+  html {
+    font-feature-settings: "ss01", "cv11";
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    background: var(--color-paper);
+    color: var(--color-ink);
+  }
+
+  /* Editorial headings: serif, medium weight, slightly open optical axis.
+     oldstyle figures (onum) give "2026" a book-page feel — scoped to
+     headings so financial tables keep lining figures. */
+  h1, h2, h3 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-optical-sizing: auto;
+    font-feature-settings: "kern", "liga", "onum";
+  }
+  h4, h5, h6 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+  }
+
+  .tnum { font-variant-numeric: tabular-nums lining-nums; }
+
+  ::selection {
+    background: var(--color-paper-deep);
+    color: var(--color-ink);
+  }
+
+  /* Inputs — warm, rounded, focus ring is the only cold accent */
+  input, textarea, select {
+    background: var(--color-paper-soft);
+    color: var(--color-ink);
+    border: 1px solid var(--color-rule-cream);
+    border-radius: 12px;
+    padding: 0.5rem 0.75rem;
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px rgba(56, 152, 236, 0.20);
+  }
+}
+
+@layer components {
+
+  /* ----- Editorial primitives ----- */
+
+  .rule-bottom { @apply border-b border-rule-cream; }
+
+  .kicker {
+    @apply text-kicker uppercase tracking-[0.14em] text-ink-faint font-medium;
+  }
+
+  /* Financial tables / metrics: force lining + tabular so columns align
+     and the heading-level oldstyle figures never bleed into data. */
+  .num {
+    @apply font-mono tabular-nums;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  .input-error { @apply border-error; }
+  .error-msg   { @apply text-error text-caption mt-1; }
+
+  /* ----- Surface primitives ----- */
+
+  /* Default card: ivory on parchment, cream 1px border, whisper-light
+     float. The visual weight comes from bg contrast, not from shadow. */
+  .surface-card {
+    @apply bg-paper-soft border border-rule-cream rounded-sm;
+  }
+  .surface-panel {
+    @apply bg-paper-soft rounded-sm shadow-whisper;
+  }
+  .surface-elevated {
+    @apply bg-paper-soft rounded-md shadow-elevated;
+  }
+  .surface-dark {
+    background: var(--color-surface-dark);
+    color: var(--color-ink-silver);
+    border-radius: 8px;
+  }
+
+  /* ----- Button system ----- */
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-md px-4 py-2.5 text-body-sm font-medium
+           transition-all duration-150 select-none
+           min-h-[40px] whitespace-nowrap;
+    /* ensure generous touch target on mobile without exploding desktop UI */
+  }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: theme("boxShadow.focus");
+  }
+  .btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* Primary — brand terracotta. The only button that carries colour weight. */
+  .btn-primary {
+    @apply btn text-paper-soft;
+    background: var(--color-accent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-accent-dark);
+  }
+  .btn-primary:active:not(:disabled) {
+    background: var(--color-accent-dark);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Secondary — warm sand, the default neutral action */
+  .btn-secondary {
+    @apply btn bg-sand text-ink-body;
+    box-shadow: inset 0 0 0 1px var(--color-rule-hover);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    @apply bg-paper-deep;
+    box-shadow: inset 0 0 0 1px var(--color-rule-active);
+  }
+  .btn-secondary:active:not(:disabled) {
+    box-shadow: inset 0 0 0 1.5px var(--color-rule-active);
+  }
+
+  /* White — high-contrast button for ivory surfaces */
+  .btn-white {
+    @apply btn bg-paper-white text-ink;
+    box-shadow: inset 0 0 0 1px var(--color-rule-cream);
+  }
+  .btn-white:hover:not(:disabled) {
+    box-shadow: inset 0 0 0 1px var(--color-rule-hover);
+  }
+
+  /* Dark — used on the rare dark surface */
+  .btn-dark {
+    @apply btn rounded-md;
+    background: var(--color-surface-dark);
+    color: var(--color-paper-soft);
+  }
+  .btn-dark:hover:not(:disabled) {
+    background: var(--color-ink);
+  }
+
+  /* Ghost — text-button for tertiary actions inside cards */
+  .btn-ghost {
+    @apply btn bg-transparent text-ink-body;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    @apply bg-paper-deep;
+  }
+}

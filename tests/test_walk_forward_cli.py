@@ -26,15 +26,24 @@ def test_walk_forward_cli_writes_aggregate_and_fold_csvs(tmp_path: Path) -> None
     out_dir = tmp_path / "out"
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "reversal",
-            "--reversal-window", "5",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--train-size", "30",
-            "--test-size", "10",
-            "--step", "10",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "reversal",
+            "--reversal-window",
+            "5",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--train-size",
+            "30",
+            "--test-size",
+            "10",
+            "--step",
+            "10",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     assert rc == 0
@@ -47,16 +56,26 @@ def test_walk_forward_cli_writes_obsidian_note(tmp_path: Path) -> None:
     note_path = tmp_path / "wf_note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "low_volatility",
-            "--low-volatility-window", "20",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--train-size", "30",
-            "--test-size", "10",
-            "--step", "10",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(note_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "low_volatility",
+            "--low-volatility-window",
+            "20",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--train-size",
+            "30",
+            "--test-size",
+            "10",
+            "--step",
+            "10",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(note_path),
         ]
     )
     assert note_path.exists()

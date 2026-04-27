@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import math
-
+import numpy as np
 import pandas as pd
+
+from alpha_lab.exceptions import AlphaLabDataError
 
 _QUANTILE_TURNOVER_COLUMNS: tuple[str, ...] = ("date", "factor", "quantile", "turnover")
 _LONG_SHORT_TURNOVER_COLUMNS: tuple[str, ...] = ("date", "factor", "long_short_turnover")
@@ -59,45 +60,50 @@ def quantile_turnover(assignments: pd.DataFrame) -> pd.DataFrame:
 
     dupes = assignments.duplicated(subset=["date", "asset"])
     if dupes.any():
-        raise ValueError(
+        raise AlphaLabDataError(
             "assignments contains duplicate (date, asset) rows; "
             "each asset must appear at most once per date"
         )
 
     df = assignments.copy()
     df["date"] = pd.to_datetime(df["date"])
-
-    dates = sorted(df["date"].unique())
-    rows: list[dict[str, object]] = []
-    prev_buckets: dict[int, frozenset[str]] = {}
-
-    for date in dates:
-        day_df = df[df["date"] == date]
-        curr_buckets: dict[int, frozenset[str]] = {
-            int(q): frozenset(g["asset"])
-            for q, g in day_df.groupby("quantile")
-        }
-
-        for q in sorted(curr_buckets):
-            curr_members = curr_buckets[q]
-            n_curr = len(curr_members)
-            if n_curr == 0 or not prev_buckets:
-                turn: float = float("nan")
-            else:
-                prev_members = prev_buckets.get(q, frozenset())
-                entering = curr_members - prev_members
-                turn = len(entering) / n_curr
-
-            rows.append(
-                {"date": date, "factor": factor_name, "quantile": q, "turnover": turn}
-            )
-
-        prev_buckets = curr_buckets
-
-    if not rows:
+    df["quantile"] = pd.to_numeric(df["quantile"], errors="coerce")
+    df = df.dropna(subset=["quantile"])
+    if df.empty:
         return pd.DataFrame(columns=list(_QUANTILE_TURNOVER_COLUMNS))
-    return pd.DataFrame(rows, columns=list(_QUANTILE_TURNOVER_COLUMNS)).reset_index(
-        drop=True
+    df["quantile"] = df["quantile"].astype(int)
+
+    dates = pd.Index(sorted(df["date"].unique()))
+    date_to_idx = pd.Series(np.arange(len(dates), dtype=int), index=dates)
+    df["_t"] = date_to_idx.reindex(df["date"]).to_numpy(dtype=int)
+
+    members = df[["_t", "quantile", "asset"]].copy()
+    prev_members = members.copy()
+    prev_members["_t"] = prev_members["_t"] + 1
+    prev_members["_in_prev"] = 1
+
+    aligned = members.merge(
+        prev_members,
+        on=["_t", "quantile", "asset"],
+        how="left",
+        validate="one_to_one",
+    )
+    aligned["_in_prev"] = aligned["_in_prev"].fillna(0).astype(int)
+
+    agg = (
+        aligned.groupby(["_t", "quantile"], sort=True)
+        .agg(n_curr=("asset", "size"), n_overlap=("_in_prev", "sum"))
+        .reset_index()
+    )
+    agg["turnover"] = 1.0 - (agg["n_overlap"] / agg["n_curr"])
+    agg.loc[agg["_t"] == 0, "turnover"] = np.nan
+    agg["date"] = dates.to_numpy()[agg["_t"].to_numpy(dtype=int)]
+    agg["factor"] = factor_name
+
+    return (
+        agg[["date", "factor", "quantile", "turnover"]]
+        .sort_values(["date", "quantile"], kind="mergesort")
+        .reset_index(drop=True)
     )
 
 
@@ -131,24 +137,36 @@ def long_short_turnover(quantile_turnover_df: pd.DataFrame) -> pd.DataFrame:
 
     missing = set(_QUANTILE_TURNOVER_COLUMNS) - set(quantile_turnover_df.columns)
     if missing:
-        raise ValueError(f"Missing columns in quantile_turnover_df: {missing}")
+        raise AlphaLabDataError(f"Missing columns in quantile_turnover_df: {missing}")
 
-    def _ls_turn(group: pd.DataFrame) -> float:
-        q_min = int(group["quantile"].min())
-        q_max = int(group["quantile"].max())
-        if q_min == q_max:
-            return float("nan")
-        bot = float(group.loc[group["quantile"] == q_min, "turnover"].iloc[0])
-        top = float(group.loc[group["quantile"] == q_max, "turnover"].iloc[0])
-        if math.isnan(bot) or math.isnan(top):
-            return float("nan")
-        return (bot + top) / 2.0
+    per_bucket = (
+        quantile_turnover_df.groupby(["date", "factor", "quantile"], sort=True, as_index=False)[
+            "turnover"
+        ]
+        .mean()
+        .sort_values(["date", "factor", "quantile"], kind="mergesort")
+    )
+
+    grouped = per_bucket.groupby(["date", "factor"], sort=True, group_keys=False)
+    first_rows = (
+        grouped.head(1)
+        .set_index(["date", "factor"])[["quantile", "turnover"]]
+        .rename(columns={"quantile": "q_min", "turnover": "bot"})
+    )
+    last_rows = (
+        grouped.tail(1)
+        .set_index(["date", "factor"])[["quantile", "turnover"]]
+        .rename(columns={"quantile": "q_max", "turnover": "top"})
+    )
+    n_q = per_bucket.groupby(["date", "factor"], sort=True)["quantile"].nunique()
+    agg = first_rows.join(last_rows).join(n_q.rename("n_q"))
+    ls_turn = (agg["bot"] + agg["top"]) / 2.0
+    ls_turn.loc[(agg["n_q"] < 2) | agg["bot"].isna() | agg["top"].isna()] = np.nan
 
     result = (
-        quantile_turnover_df.groupby(["date", "factor"], sort=True)
-        .apply(_ls_turn, include_groups=False)
+        ls_turn.rename("long_short_turnover")
         .reset_index()
-        .rename(columns={0: "long_short_turnover"})
+        .sort_values(["date", "factor"], kind="mergesort")
     )
     return result[list(_LONG_SHORT_TURNOVER_COLUMNS)].reset_index(drop=True)
 
@@ -162,13 +180,11 @@ def _check_assignment_columns(df: pd.DataFrame) -> None:
     required = {"date", "asset", "factor", "quantile"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"assignments is missing required columns: {missing}")
+        raise AlphaLabDataError(f"assignments is missing required columns: {missing}")
 
 
 def _single_name(series: pd.Series, table_name: str) -> str:  # type: ignore[type-arg]
     names = pd.unique(series)
     if len(names) != 1:
-        raise ValueError(
-            f"{table_name} must contain exactly one factor name, got {names!r}"
-        )
+        raise AlphaLabDataError(f"{table_name} must contain exactly one factor name, got {names!r}")
     return str(names[0])

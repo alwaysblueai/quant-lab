@@ -1,0 +1,3512 @@
+{
+  "artifact_hint_path_base": "output_root_dir",
+  "artifact_hint_path_mode": "relative",
+  "campaign_config_path": null,
+  "campaign_level_summary": {
+    "compact_comparison_summary": {
+      "artifact_pointer_hints": [
+        "campaign_profile_comparison.md",
+        "campaign_profile_comparison.json",
+        "campaign_profile_case_matrix.csv"
+      ],
+      "minimum_support_thresholds": {
+        "minimum_cases_per_transition_label": 2,
+        "minimum_cases_per_transition_label_for_reason_shift": 2,
+        "minimum_cases_with_reasons_per_transition_label": 2,
+        "minimum_cases_with_transition_label": 3,
+        "minimum_observed_cases_per_profile_pair": 3,
+        "minimum_reason_bucket_count_for_dominance": 2,
+        "minimum_reason_bucket_count_for_shift": 2,
+        "minimum_transition_labels_with_reason_evidence_per_profile_pair": 2
+      },
+      "most_profile_sensitive_cases": [
+        {
+          "artifact_pointer_hints": [
+            "case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json",
+            "case_short_window_sensitive [exploratory_screening] runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+          ],
+          "case_name": "case_short_window_sensitive",
+          "changed_fields": [
+            "portfolio_validation_recommendation",
+            "promotion_decision"
+          ],
+          "n_changed_fields": 2,
+          "profile_sensitivity": "profile_sensitive",
+          "representative_case_names": [
+            "case_short_window_sensitive"
+          ],
+          "supporting_case_names": [
+            "case_short_window_sensitive"
+          ],
+          "transition_delta_label": "transition_weakened_under_stricter_profile",
+          "transition_profile_path": "`exploratory_screening`=`Weakened at portfolio level` -> `default_research`=`Inconclusive transition`"
+        },
+        {
+          "artifact_pointer_hints": [
+            "case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json",
+            "case_stable_promoted [exploratory_screening] runs/exploratory_screening/case_stable_promoted/metrics.json"
+          ],
+          "case_name": "case_stable_promoted",
+          "changed_fields": [
+            "portfolio_validation_recommendation",
+            "promotion_decision"
+          ],
+          "n_changed_fields": 2,
+          "profile_sensitivity": "profile_sensitive",
+          "representative_case_names": [
+            "case_stable_promoted"
+          ],
+          "supporting_case_names": [
+            "case_stable_promoted"
+          ],
+          "transition_delta_label": "transition_weakened_under_stricter_profile",
+          "transition_profile_path": "`exploratory_screening`=`Weakened at portfolio level` -> `default_research`=`Inconclusive transition`"
+        },
+        {
+          "artifact_pointer_hints": [
+            "case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json",
+            "case_triage_sensitive [exploratory_screening] runs/exploratory_screening/case_triage_sensitive/metrics.json"
+          ],
+          "case_name": "case_triage_sensitive",
+          "changed_fields": [
+            "campaign_triage",
+            "portfolio_validation_recommendation"
+          ],
+          "n_changed_fields": 2,
+          "profile_sensitivity": "profile_sensitive",
+          "representative_case_names": [
+            "case_triage_sensitive"
+          ],
+          "supporting_case_names": [
+            "case_triage_sensitive"
+          ],
+          "transition_delta_label": "transition_stable",
+          "transition_profile_path": "`exploratory_screening`=`Inconclusive transition` -> `default_research`=`Inconclusive transition`"
+        }
+      ],
+      "stricter_profile_impact": {
+        "aggregate": {
+          "confidence_note": "tentative due to low support",
+          "dominant_reduction_mode": "promotion",
+          "is_sparse": false,
+          "minimum_required_support": 3,
+          "minimum_support_met": true,
+          "minimum_support_thresholds": {
+            "minimum_observed_cases": 3
+          },
+          "n_cases_with_observed_transition_labels": 3,
+          "n_profile_pairs": 1,
+          "promotion_reduction_count": 2,
+          "robustness_reduction_count": 0,
+          "support_count": 3,
+          "support_level": "tentative",
+          "support_note": "tentative due to low support"
+        },
+        "profile_pairs": [
+          {
+            "confidence_note": "tentative due to low support",
+            "dominant_reduction_mode": "promotion",
+            "from_profile": "exploratory_screening",
+            "is_sparse": false,
+            "minimum_required_support": 3,
+            "minimum_support_met": true,
+            "minimum_support_thresholds": {
+              "minimum_observed_cases": 3
+            },
+            "n_cases_with_observed_transition_labels": 3,
+            "promotion_reduction_count": 2,
+            "robustness_reduction_count": 0,
+            "support_count": 3,
+            "support_level": "tentative",
+            "support_note": "tentative due to low support",
+            "to_profile": "default_research"
+          }
+        ]
+      },
+      "strongest_profile_pair_shifts": [
+        {
+          "artifact_pointer_hints": [
+            "case_stable_promoted: exploratory_screening=runs/exploratory_screening/case_stable_promoted/metrics.json; default_research=runs/default_research/case_stable_promoted/metrics.json",
+            "case_short_window_sensitive: exploratory_screening=runs/exploratory_screening/case_short_window_sensitive/metrics.json; default_research=runs/default_research/case_short_window_sensitive/metrics.json",
+            "case_triage_sensitive: exploratory_screening=runs/exploratory_screening/case_triage_sensitive/metrics.json; default_research=runs/default_research/case_triage_sensitive/metrics.json",
+            "runs/exploratory_screening/case_stable_promoted/metrics.json"
+          ],
+          "changed_count": 2,
+          "changed_proportion": 0.6666666666666666,
+          "confidence_note": "reason shift observed, but only in a small number of cases",
+          "from_profile": "exploratory_screening",
+          "is_sparse": false,
+          "minimum_support_met": true,
+          "n_cases_with_observed_transition_labels": 3,
+          "n_transition_labels_with_observed_reasons": 2,
+          "profile_pair": "exploratory_screening -> default_research",
+          "reason_shifted_labels": 0,
+          "reason_support_level": "tentative",
+          "reason_support_note": "reason shift observed, but only in a small number of cases",
+          "representative_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "support_level": "tentative",
+          "support_note": "reason shift observed, but only in a small number of cases",
+          "supporting_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "tentative_reason_shifted_labels": 2,
+          "to_profile": "default_research",
+          "top_shift_flows": [
+            {
+              "count": 2,
+              "from_label": "Weakened at portfolio level",
+              "proportion_of_observed": 0.6666666666666666,
+              "representative_case_names": [
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "to_label": "Inconclusive transition"
+            }
+          ],
+          "transition_support_level": "tentative",
+          "transition_support_note": "tentative due to low support"
+        }
+      ],
+      "summary_lines": [
+        "Transition stability: 1/3 stable (33.3%), sensitive=2; representative=case_triage_sensitive; pointers=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json; case_triage_sensitive [exploratory_screening] runs/exploratory_screening/case_triage_sensitive/metrics.json; support=tentative due to low support.",
+        "Most profile-sensitive cases: case_short_window_sensitive (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json); case_stable_promoted (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json); case_triage_sensitive (changed_fields=2, delta=transition_stable, pointer=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json).",
+        "Strongest profile-pair shift: exploratory_screening -> default_research changed=2/3 (66.7%), reason_shifted_labels=0/2, top_flows=Weakened at portfolio level -> Inconclusive transition (2, cases=case_stable_promoted,case_short_window_sensitive), representative_cases=case_stable_promoted,case_short_window_sensitive,case_triage_sensitive; support=reason shift observed, but only in a small number of cases.",
+        "Stricter profile impact: promotion (promotion_reduction=2, robustness_reduction=0, adjacent_pairs=1); support=tentative due to low support."
+      ],
+      "transition_stability": {
+        "artifact_pointer_hints": [
+          "case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json",
+          "case_triage_sensitive [exploratory_screening] runs/exploratory_screening/case_triage_sensitive/metrics.json"
+        ],
+        "confidence_note": "tentative due to low support",
+        "is_sparse": false,
+        "minimum_required_support": 3,
+        "minimum_support_met": true,
+        "n_cases": 3,
+        "n_transition_sensitive_cases": 2,
+        "n_transition_stable_cases": 1,
+        "representative_case_names": [
+          "case_triage_sensitive"
+        ],
+        "representative_transition_stable_cases": [
+          "case_triage_sensitive"
+        ],
+        "stable_case_share": 0.3333333333333333,
+        "support_count": 3,
+        "support_level": "tentative",
+        "support_note": "tentative due to low support",
+        "supporting_case_names": [
+          "case_stable_promoted",
+          "case_short_window_sensitive",
+          "case_triage_sensitive"
+        ]
+      },
+      "weakened_fragile_reason_hotspots": {
+        "artifact_pointer_hints": [],
+        "confidence_note": "sparse transition evidence",
+        "is_sparse": true,
+        "minimum_required_support": 2,
+        "minimum_support_met": false,
+        "minimum_support_thresholds": {
+          "minimum_reason_bucket_count_for_hotspot": 2
+        },
+        "n_fragile_cases": 0,
+        "n_weakened_cases": 0,
+        "profile_name": "default_research",
+        "support_count": 0,
+        "support_level": "sparse",
+        "support_note": "sparse transition evidence",
+        "supporting_case_names": [],
+        "top_reasons": []
+      }
+    },
+    "consistently_strong": [],
+    "highly_profile_sensitive": [],
+    "level12_transition_distribution_by_profile": {
+      "default_research": {
+        "artifact_pointers_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "runs/default_research/case_stable_promoted/metrics.json",
+            "runs/default_research/case_short_window_sensitive/metrics.json"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "confidence_note": "tentative due to low support",
+        "counts_by_transition_label": {
+          "Confirmed at portfolio level": 0,
+          "Fragile after promotion": 0,
+          "Improved at portfolio level": 0,
+          "Inconclusive transition": 3,
+          "Weakened at portfolio level": 0
+        },
+        "interpretation": "Most common transition outcome is `Inconclusive transition` (3/3 cases).",
+        "is_sparse": false,
+        "minimum_required_support": 3,
+        "minimum_support_met": true,
+        "minimum_support_thresholds": {
+          "minimum_cases_per_transition_label": 2,
+          "minimum_cases_with_reasons_per_transition_label": 2,
+          "minimum_cases_with_transition_label": 3,
+          "minimum_reason_bucket_count_for_dominance": 2
+        },
+        "n_cases": 3,
+        "n_cases_missing_transition_label": 0,
+        "n_cases_with_transition_label": 3,
+        "proportions_by_transition_label": {
+          "Confirmed at portfolio level": 0.0,
+          "Fragile after promotion": 0.0,
+          "Improved at portfolio level": 0.0,
+          "Inconclusive transition": 1.0,
+          "Weakened at portfolio level": 0.0
+        },
+        "reason_rollup_by_transition_label": {
+          "Confirmed at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Fragile after promotion": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Improved at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Inconclusive transition": {
+            "artifact_pointer_hints": [
+              "runs/default_research/case_stable_promoted/metrics.json",
+              "runs/default_research/case_short_window_sensitive/metrics.json",
+              "runs/default_research/case_triage_sensitive/metrics.json"
+            ],
+            "confidence_note": "tentative due to low support",
+            "dominant_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by sharp IC decay under 1-day execution lag",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              }
+            ],
+            "is_sparse": false,
+            "minimum_required_support": 2,
+            "minimum_support_met": true,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 3,
+            "n_cases_with_label": 3,
+            "n_reasons_collapsed_by_normalization": 2,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 8,
+            "n_unique_reasons_observed": 6,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "representative_reasons": [
+              "blocked by sharp IC decay under 1-day execution lag",
+              "campaign triage: Fragile / monitor",
+              "portfolio recommendation: Not evaluated (not promoted)"
+            ],
+            "support_count": 3,
+            "support_level": "tentative",
+            "support_note": "tentative due to low support",
+            "supporting_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive",
+              "case_triage_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by sharp IC decay under 1-day execution lag",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              }
+            ]
+          },
+          "Weakened at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          }
+        },
+        "representative_case_names_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "representative_cases_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "support_count": 3,
+        "support_level": "tentative",
+        "support_note": "tentative due to low support"
+      },
+      "exploratory_screening": {
+        "artifact_pointers_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+          ],
+          "Weakened at portfolio level": [
+            "runs/exploratory_screening/case_stable_promoted/metrics.json",
+            "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+          ]
+        },
+        "confidence_note": "tentative due to low support",
+        "counts_by_transition_label": {
+          "Confirmed at portfolio level": 0,
+          "Fragile after promotion": 0,
+          "Improved at portfolio level": 0,
+          "Inconclusive transition": 1,
+          "Weakened at portfolio level": 2
+        },
+        "interpretation": "Most common transition outcome is `Weakened at portfolio level` (2/3 cases).",
+        "is_sparse": false,
+        "minimum_required_support": 3,
+        "minimum_support_met": true,
+        "minimum_support_thresholds": {
+          "minimum_cases_per_transition_label": 2,
+          "minimum_cases_with_reasons_per_transition_label": 2,
+          "minimum_cases_with_transition_label": 3,
+          "minimum_reason_bucket_count_for_dominance": 2
+        },
+        "n_cases": 3,
+        "n_cases_missing_transition_label": 0,
+        "n_cases_with_transition_label": 3,
+        "proportions_by_transition_label": {
+          "Confirmed at portfolio level": 0.0,
+          "Fragile after promotion": 0.0,
+          "Improved at portfolio level": 0.0,
+          "Inconclusive transition": 0.3333333333333333,
+          "Weakened at portfolio level": 0.6666666666666666
+        },
+        "reason_rollup_by_transition_label": {
+          "Confirmed at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Fragile after promotion": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Improved at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Inconclusive transition": {
+            "artifact_pointer_hints": [
+              "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+            ],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 1,
+            "n_cases_with_label": 1,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 3,
+            "n_unique_raw_reasons_observed": 4,
+            "n_unique_reasons_observed": 4,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_triage_sensitive"
+            ],
+            "representative_reasons": [
+              "blocked by unstable rolling evidence",
+              "campaign triage: Strong Level 1 candidate",
+              "factor verdict is not yet strong"
+            ],
+            "support_count": 1,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [
+              "case_triage_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by unstable rolling evidence",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Strong Level 1 candidate",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "factor verdict is not yet strong",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              }
+            ]
+          },
+          "Weakened at portfolio level": {
+            "artifact_pointer_hints": [
+              "runs/exploratory_screening/case_stable_promoted/metrics.json",
+              "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+            ],
+            "confidence_note": "tentative due to low support",
+            "dominant_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Promote to Level 2",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "robust across subperiods",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              }
+            ],
+            "is_sparse": false,
+            "minimum_required_support": 2,
+            "minimum_support_met": true,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 2,
+            "n_cases_with_label": 2,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 4,
+            "n_unique_reasons_observed": 4,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "representative_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Promote to Level 2",
+              "robust across subperiods"
+            ],
+            "support_count": 2,
+            "support_level": "tentative",
+            "support_note": "tentative due to low support",
+            "supporting_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Promote to Level 2",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "robust across subperiods",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              }
+            ]
+          }
+        },
+        "representative_case_names_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_triage_sensitive"
+          ],
+          "Weakened at portfolio level": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ]
+        },
+        "representative_cases_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_triage_sensitive"
+          ],
+          "Weakened at portfolio level": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ]
+        },
+        "support_count": 3,
+        "support_level": "tentative",
+        "support_note": "tentative due to low support"
+      }
+    },
+    "level12_transition_profile_delta_matrix": {
+      "pair_mode": "adjacent",
+      "profile_pair_scope": "adjacent_profiles",
+      "profile_pairs": [
+        {
+          "artifact_pointer_hints": [
+            "case_stable_promoted: exploratory_screening=runs/exploratory_screening/case_stable_promoted/metrics.json; default_research=runs/default_research/case_stable_promoted/metrics.json",
+            "case_short_window_sensitive: exploratory_screening=runs/exploratory_screening/case_short_window_sensitive/metrics.json; default_research=runs/default_research/case_short_window_sensitive/metrics.json",
+            "case_triage_sensitive: exploratory_screening=runs/exploratory_screening/case_triage_sensitive/metrics.json; default_research=runs/default_research/case_triage_sensitive/metrics.json"
+          ],
+          "changed_count": 2,
+          "changed_proportion": 0.6666666666666666,
+          "confidence_note": "tentative due to low support",
+          "counts_by_from_to_label": {
+            "Confirmed at portfolio level": {
+              "Confirmed at portfolio level": 0,
+              "Fragile after promotion": 0,
+              "Improved at portfolio level": 0,
+              "Inconclusive transition": 0,
+              "Weakened at portfolio level": 0
+            },
+            "Fragile after promotion": {
+              "Confirmed at portfolio level": 0,
+              "Fragile after promotion": 0,
+              "Improved at portfolio level": 0,
+              "Inconclusive transition": 0,
+              "Weakened at portfolio level": 0
+            },
+            "Improved at portfolio level": {
+              "Confirmed at portfolio level": 0,
+              "Fragile after promotion": 0,
+              "Improved at portfolio level": 0,
+              "Inconclusive transition": 0,
+              "Weakened at portfolio level": 0
+            },
+            "Inconclusive transition": {
+              "Confirmed at portfolio level": 0,
+              "Fragile after promotion": 0,
+              "Improved at portfolio level": 0,
+              "Inconclusive transition": 1,
+              "Weakened at portfolio level": 0
+            },
+            "Weakened at portfolio level": {
+              "Confirmed at portfolio level": 0,
+              "Fragile after promotion": 0,
+              "Improved at portfolio level": 0,
+              "Inconclusive transition": 2,
+              "Weakened at portfolio level": 0
+            }
+          },
+          "from_profile": "exploratory_screening",
+          "is_sparse": false,
+          "minimum_required_support": 3,
+          "minimum_support_met": true,
+          "minimum_support_thresholds": {
+            "minimum_observed_cases": 3
+          },
+          "n_cases_compared": 3,
+          "n_cases_missing_transition_labels": 0,
+          "n_cases_with_observed_transition_labels": 3,
+          "profile_pair": "exploratory_screening -> default_research",
+          "proportions_by_from_to_label": {
+            "Confirmed at portfolio level": {
+              "Confirmed at portfolio level": 0.0,
+              "Fragile after promotion": 0.0,
+              "Improved at portfolio level": 0.0,
+              "Inconclusive transition": 0.0,
+              "Weakened at portfolio level": 0.0
+            },
+            "Fragile after promotion": {
+              "Confirmed at portfolio level": 0.0,
+              "Fragile after promotion": 0.0,
+              "Improved at portfolio level": 0.0,
+              "Inconclusive transition": 0.0,
+              "Weakened at portfolio level": 0.0
+            },
+            "Improved at portfolio level": {
+              "Confirmed at portfolio level": 0.0,
+              "Fragile after promotion": 0.0,
+              "Improved at portfolio level": 0.0,
+              "Inconclusive transition": 0.0,
+              "Weakened at portfolio level": 0.0
+            },
+            "Inconclusive transition": {
+              "Confirmed at portfolio level": 0.0,
+              "Fragile after promotion": 0.0,
+              "Improved at portfolio level": 0.0,
+              "Inconclusive transition": 0.3333333333333333,
+              "Weakened at portfolio level": 0.0
+            },
+            "Weakened at portfolio level": {
+              "Confirmed at portfolio level": 0.0,
+              "Fragile after promotion": 0.0,
+              "Improved at portfolio level": 0.0,
+              "Inconclusive transition": 0.6666666666666666,
+              "Weakened at portfolio level": 0.0
+            }
+          },
+          "representative_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "representative_case_names_by_from_to_label": {
+            "Confirmed at portfolio level": {
+              "Confirmed at portfolio level": [],
+              "Fragile after promotion": [],
+              "Improved at portfolio level": [],
+              "Inconclusive transition": [],
+              "Weakened at portfolio level": []
+            },
+            "Fragile after promotion": {
+              "Confirmed at portfolio level": [],
+              "Fragile after promotion": [],
+              "Improved at portfolio level": [],
+              "Inconclusive transition": [],
+              "Weakened at portfolio level": []
+            },
+            "Improved at portfolio level": {
+              "Confirmed at portfolio level": [],
+              "Fragile after promotion": [],
+              "Improved at portfolio level": [],
+              "Inconclusive transition": [],
+              "Weakened at portfolio level": []
+            },
+            "Inconclusive transition": {
+              "Confirmed at portfolio level": [],
+              "Fragile after promotion": [],
+              "Improved at portfolio level": [],
+              "Inconclusive transition": [
+                "case_triage_sensitive"
+              ],
+              "Weakened at portfolio level": []
+            },
+            "Weakened at portfolio level": {
+              "Confirmed at portfolio level": [],
+              "Fragile after promotion": [],
+              "Improved at portfolio level": [],
+              "Inconclusive transition": [
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "Weakened at portfolio level": []
+            }
+          },
+          "stable_count": 1,
+          "stable_proportion": 0.3333333333333333,
+          "support_count": 3,
+          "support_level": "tentative",
+          "support_note": "tentative due to low support",
+          "supporting_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "to_profile": "default_research"
+        }
+      ]
+    },
+    "level12_transition_reason_profile_delta_matrix": {
+      "pair_mode": "adjacent",
+      "profile_pair_scope": "adjacent_profiles",
+      "profile_pairs": [
+        {
+          "artifact_pointer_hints": [
+            "runs/exploratory_screening/case_stable_promoted/metrics.json",
+            "runs/exploratory_screening/case_short_window_sensitive/metrics.json",
+            "runs/exploratory_screening/case_triage_sensitive/metrics.json",
+            "runs/default_research/case_stable_promoted/metrics.json",
+            "runs/default_research/case_short_window_sensitive/metrics.json",
+            "runs/default_research/case_triage_sensitive/metrics.json"
+          ],
+          "confidence_note": "reason shift observed, but only in a small number of cases",
+          "from_profile": "exploratory_screening",
+          "is_sparse": false,
+          "minimum_required_support": 2,
+          "minimum_support_met": true,
+          "minimum_support_thresholds": {
+            "minimum_cases_per_transition_label_for_shift": 2,
+            "minimum_observed_transition_labels_with_reason_evidence": 2,
+            "minimum_reason_bucket_count_for_shift": 2
+          },
+          "n_transition_labels_reason_stable": 0,
+          "n_transition_labels_with_observed_reasons": 2,
+          "n_transition_labels_with_reason_shift": 0,
+          "n_transition_labels_with_tentative_reason_shift": 2,
+          "profile_pair": "exploratory_screening -> default_research",
+          "reason_bucket_delta_counts": {
+            "added": 3,
+            "decreased": 0,
+            "increased": 0,
+            "removed": 3,
+            "stable": 0
+          },
+          "reason_delta_by_transition_label": {
+            "Confirmed at portfolio level": {
+              "artifact_pointer_hints": [],
+              "confidence_note": "reason shift observed, but only in a small number of cases",
+              "from_profile_dominant_reasons": [],
+              "from_profile_n_cases_with_label": 0,
+              "is_reason_shift_tentative": false,
+              "is_reason_shifted": false,
+              "is_sparse": true,
+              "minimum_required_support": 2,
+              "minimum_support_met": false,
+              "minimum_support_thresholds": {
+                "minimum_cases_per_profile_for_shift": 2,
+                "minimum_reason_bucket_count_for_shift": 2
+              },
+              "profile_pair": "exploratory_screening -> default_research",
+              "reason_bucket_deltas": {
+                "added": [],
+                "decreased": [],
+                "increased": [],
+                "removed": [],
+                "stable": []
+              },
+              "representative_case_names": [],
+              "support_count": 0,
+              "support_level": "sparse",
+              "support_note": "reason shift observed, but only in a small number of cases",
+              "supporting_case_names": [],
+              "to_profile_dominant_reasons": [],
+              "to_profile_n_cases_with_label": 0
+            },
+            "Fragile after promotion": {
+              "artifact_pointer_hints": [],
+              "confidence_note": "reason shift observed, but only in a small number of cases",
+              "from_profile_dominant_reasons": [],
+              "from_profile_n_cases_with_label": 0,
+              "is_reason_shift_tentative": false,
+              "is_reason_shifted": false,
+              "is_sparse": true,
+              "minimum_required_support": 2,
+              "minimum_support_met": false,
+              "minimum_support_thresholds": {
+                "minimum_cases_per_profile_for_shift": 2,
+                "minimum_reason_bucket_count_for_shift": 2
+              },
+              "profile_pair": "exploratory_screening -> default_research",
+              "reason_bucket_deltas": {
+                "added": [],
+                "decreased": [],
+                "increased": [],
+                "removed": [],
+                "stable": []
+              },
+              "representative_case_names": [],
+              "support_count": 0,
+              "support_level": "sparse",
+              "support_note": "reason shift observed, but only in a small number of cases",
+              "supporting_case_names": [],
+              "to_profile_dominant_reasons": [],
+              "to_profile_n_cases_with_label": 0
+            },
+            "Improved at portfolio level": {
+              "artifact_pointer_hints": [],
+              "confidence_note": "reason shift observed, but only in a small number of cases",
+              "from_profile_dominant_reasons": [],
+              "from_profile_n_cases_with_label": 0,
+              "is_reason_shift_tentative": false,
+              "is_reason_shifted": false,
+              "is_sparse": true,
+              "minimum_required_support": 2,
+              "minimum_support_met": false,
+              "minimum_support_thresholds": {
+                "minimum_cases_per_profile_for_shift": 2,
+                "minimum_reason_bucket_count_for_shift": 2
+              },
+              "profile_pair": "exploratory_screening -> default_research",
+              "reason_bucket_deltas": {
+                "added": [],
+                "decreased": [],
+                "increased": [],
+                "removed": [],
+                "stable": []
+              },
+              "representative_case_names": [],
+              "support_count": 0,
+              "support_level": "sparse",
+              "support_note": "reason shift observed, but only in a small number of cases",
+              "supporting_case_names": [],
+              "to_profile_dominant_reasons": [],
+              "to_profile_n_cases_with_label": 0
+            },
+            "Inconclusive transition": {
+              "artifact_pointer_hints": [
+                "runs/exploratory_screening/case_triage_sensitive/metrics.json",
+                "runs/default_research/case_stable_promoted/metrics.json",
+                "runs/default_research/case_short_window_sensitive/metrics.json",
+                "runs/default_research/case_triage_sensitive/metrics.json"
+              ],
+              "confidence_note": "reason shift observed, but only in a small number of cases",
+              "from_profile_dominant_reasons": [],
+              "from_profile_n_cases_with_label": 1,
+              "is_reason_shift_tentative": true,
+              "is_reason_shifted": false,
+              "is_sparse": true,
+              "minimum_required_support": 2,
+              "minimum_support_met": false,
+              "minimum_support_thresholds": {
+                "minimum_cases_per_profile_for_shift": 2,
+                "minimum_reason_bucket_count_for_shift": 2
+              },
+              "profile_pair": "exploratory_screening -> default_research",
+              "reason_bucket_deltas": {
+                "added": [
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/default_research/case_stable_promoted/metrics.json",
+                      "runs/default_research/case_short_window_sensitive/metrics.json",
+                      "runs/default_research/case_triage_sensitive/metrics.json"
+                    ],
+                    "delta_count": 3,
+                    "delta_proportion_of_label_cases": 1.0,
+                    "from_count": 0,
+                    "from_n_cases_with_label": 1,
+                    "from_proportion_of_label_cases": 0.0,
+                    "from_supporting_case_names": [],
+                    "reason": "blocked by sharp IC decay under 1-day execution lag",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ],
+                    "to_count": 3,
+                    "to_n_cases_with_label": 3,
+                    "to_proportion_of_label_cases": 1.0,
+                    "to_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ]
+                  },
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/default_research/case_stable_promoted/metrics.json",
+                      "runs/default_research/case_short_window_sensitive/metrics.json",
+                      "runs/default_research/case_triage_sensitive/metrics.json"
+                    ],
+                    "delta_count": 3,
+                    "delta_proportion_of_label_cases": 1.0,
+                    "from_count": 0,
+                    "from_n_cases_with_label": 1,
+                    "from_proportion_of_label_cases": 0.0,
+                    "from_supporting_case_names": [],
+                    "reason": "campaign triage: Fragile / monitor",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ],
+                    "to_count": 3,
+                    "to_n_cases_with_label": 3,
+                    "to_proportion_of_label_cases": 1.0,
+                    "to_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ]
+                  },
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/default_research/case_stable_promoted/metrics.json",
+                      "runs/default_research/case_short_window_sensitive/metrics.json",
+                      "runs/default_research/case_triage_sensitive/metrics.json"
+                    ],
+                    "delta_count": 3,
+                    "delta_proportion_of_label_cases": 1.0,
+                    "from_count": 0,
+                    "from_n_cases_with_label": 1,
+                    "from_proportion_of_label_cases": 0.0,
+                    "from_supporting_case_names": [],
+                    "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ],
+                    "to_count": 3,
+                    "to_n_cases_with_label": 3,
+                    "to_proportion_of_label_cases": 1.0,
+                    "to_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ]
+                  }
+                ],
+                "decreased": [],
+                "increased": [],
+                "removed": [],
+                "stable": []
+              },
+              "representative_case_names": [
+                "case_triage_sensitive",
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "support_count": 1,
+              "support_level": "sparse",
+              "support_note": "reason shift observed, but only in a small number of cases",
+              "supporting_case_names": [
+                "case_triage_sensitive",
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "to_profile_dominant_reasons": [
+                {
+                  "artifact_pointer_hints": [
+                    "runs/default_research/case_stable_promoted/metrics.json",
+                    "runs/default_research/case_short_window_sensitive/metrics.json",
+                    "runs/default_research/case_triage_sensitive/metrics.json"
+                  ],
+                  "count": 3,
+                  "n_cases_with_label": 3,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "blocked by sharp IC decay under 1-day execution lag",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive",
+                    "case_triage_sensitive"
+                  ]
+                },
+                {
+                  "artifact_pointer_hints": [
+                    "runs/default_research/case_stable_promoted/metrics.json",
+                    "runs/default_research/case_short_window_sensitive/metrics.json",
+                    "runs/default_research/case_triage_sensitive/metrics.json"
+                  ],
+                  "count": 3,
+                  "n_cases_with_label": 3,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "campaign triage: Fragile / monitor",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive",
+                    "case_triage_sensitive"
+                  ]
+                },
+                {
+                  "artifact_pointer_hints": [
+                    "runs/default_research/case_stable_promoted/metrics.json",
+                    "runs/default_research/case_short_window_sensitive/metrics.json",
+                    "runs/default_research/case_triage_sensitive/metrics.json"
+                  ],
+                  "count": 3,
+                  "n_cases_with_label": 3,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive",
+                    "case_triage_sensitive"
+                  ]
+                }
+              ],
+              "to_profile_n_cases_with_label": 3
+            },
+            "Weakened at portfolio level": {
+              "artifact_pointer_hints": [
+                "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+              ],
+              "confidence_note": "reason shift observed, but only in a small number of cases",
+              "from_profile_dominant_reasons": [
+                {
+                  "artifact_pointer_hints": [
+                    "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                    "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                  ],
+                  "count": 2,
+                  "n_cases_with_label": 2,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "campaign triage: Fragile / monitor",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive"
+                  ]
+                },
+                {
+                  "artifact_pointer_hints": [
+                    "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                    "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                  ],
+                  "count": 2,
+                  "n_cases_with_label": 2,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "promotion decision: Promote to Level 2",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive"
+                  ]
+                },
+                {
+                  "artifact_pointer_hints": [
+                    "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                    "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                  ],
+                  "count": 2,
+                  "n_cases_with_label": 2,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "robust across subperiods",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive"
+                  ]
+                }
+              ],
+              "from_profile_n_cases_with_label": 2,
+              "is_reason_shift_tentative": true,
+              "is_reason_shifted": false,
+              "is_sparse": true,
+              "minimum_required_support": 2,
+              "minimum_support_met": false,
+              "minimum_support_thresholds": {
+                "minimum_cases_per_profile_for_shift": 2,
+                "minimum_reason_bucket_count_for_shift": 2
+              },
+              "profile_pair": "exploratory_screening -> default_research",
+              "reason_bucket_deltas": {
+                "added": [],
+                "decreased": [],
+                "increased": [],
+                "removed": [
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                      "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                    ],
+                    "delta_count": -2,
+                    "delta_proportion_of_label_cases": -1.0,
+                    "from_count": 2,
+                    "from_n_cases_with_label": 2,
+                    "from_proportion_of_label_cases": 1.0,
+                    "from_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "reason": "campaign triage: Fragile / monitor",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "to_count": 0,
+                    "to_n_cases_with_label": 0,
+                    "to_proportion_of_label_cases": 0.0,
+                    "to_supporting_case_names": []
+                  },
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                      "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                    ],
+                    "delta_count": -2,
+                    "delta_proportion_of_label_cases": -1.0,
+                    "from_count": 2,
+                    "from_n_cases_with_label": 2,
+                    "from_proportion_of_label_cases": 1.0,
+                    "from_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "reason": "promotion decision: Promote to Level 2",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "to_count": 0,
+                    "to_n_cases_with_label": 0,
+                    "to_proportion_of_label_cases": 0.0,
+                    "to_supporting_case_names": []
+                  },
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                      "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                    ],
+                    "delta_count": -2,
+                    "delta_proportion_of_label_cases": -1.0,
+                    "from_count": 2,
+                    "from_n_cases_with_label": 2,
+                    "from_proportion_of_label_cases": 1.0,
+                    "from_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "reason": "robust across subperiods",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive"
+                    ],
+                    "to_count": 0,
+                    "to_n_cases_with_label": 0,
+                    "to_proportion_of_label_cases": 0.0,
+                    "to_supporting_case_names": []
+                  }
+                ],
+                "stable": []
+              },
+              "representative_case_names": [
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "support_count": 0,
+              "support_level": "sparse",
+              "support_note": "reason shift observed, but only in a small number of cases",
+              "supporting_case_names": [
+                "case_stable_promoted",
+                "case_short_window_sensitive"
+              ],
+              "to_profile_dominant_reasons": [],
+              "to_profile_n_cases_with_label": 0
+            }
+          },
+          "representative_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "representative_case_names_by_transition_label": {
+            "Inconclusive transition": [
+              "case_triage_sensitive",
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "Weakened at portfolio level": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ]
+          },
+          "support_count": 2,
+          "support_level": "tentative",
+          "support_note": "reason shift observed, but only in a small number of cases",
+          "supporting_case_names": [
+            "case_stable_promoted",
+            "case_short_window_sensitive",
+            "case_triage_sensitive"
+          ],
+          "to_profile": "default_research"
+        }
+      ]
+    },
+    "pair_mode": "adjacent",
+    "profile_sensitive_cases": [
+      "case_stable_promoted",
+      "case_short_window_sensitive",
+      "case_triage_sensitive"
+    ],
+    "promoted_only_under_looser_profiles": [
+      "case_stable_promoted",
+      "case_short_window_sensitive"
+    ],
+    "stable_cases": [],
+    "support_thresholds": {
+      "minimum_cases_per_transition_label": 2,
+      "minimum_cases_per_transition_label_for_reason_shift": 2,
+      "minimum_cases_with_reasons_per_transition_label": 2,
+      "minimum_cases_with_transition_label": 3,
+      "minimum_observed_cases_per_profile_pair": 3,
+      "minimum_reason_bucket_count_for_dominance": 2,
+      "minimum_reason_bucket_count_for_shift": 2,
+      "minimum_transition_labels_with_reason_evidence_per_profile_pair": 2
+    },
+    "transition_delta_label_counts": {
+      "transition_improved_under_profile_change": 0,
+      "transition_mixed_or_nonmonotonic": 0,
+      "transition_stable": 1,
+      "transition_weakened_under_stricter_profile": 2
+    },
+    "transition_sensitive_cases": [
+      "case_stable_promoted",
+      "case_short_window_sensitive"
+    ],
+    "transition_stable_cases": [
+      "case_triage_sensitive"
+    ]
+  },
+  "case_comparison": [
+    {
+      "case_description": "High-signal neutralized case engineered to remain stable and promoted across profiles.",
+      "case_name": "case_stable_promoted",
+      "changed_fields": [
+        "portfolio_validation_recommendation",
+        "promotion_decision"
+      ],
+      "field_differences": {
+        "portfolio_validation_recommendation": {
+          "default_research": "Not evaluated (not promoted)",
+          "exploratory_screening": "N/A"
+        },
+        "promotion_decision": {
+          "default_research": "Blocked from Level 2",
+          "exploratory_screening": "Promote to Level 2"
+        }
+      },
+      "is_profile_sensitive": true,
+      "level12_transition_profile_delta": {
+        "delta_label": "transition_weakened_under_stricter_profile",
+        "profile_pair_directions": [
+          {
+            "direction": "weakened",
+            "from_label": "Weakened at portfolio level",
+            "from_profile": "exploratory_screening",
+            "to_label": "Inconclusive transition",
+            "to_profile": "default_research"
+          }
+        ],
+        "profile_transition_labels": {
+          "default_research": "Inconclusive transition",
+          "exploratory_screening": "Weakened at portfolio level"
+        }
+      },
+      "profile_sensitivity": "profile_sensitive",
+      "profiles": {
+        "default_research": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/summary.md"
+          },
+          "campaign_triage": "Fragile / monitor",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: factor verdict is not yet strong",
+            "fragility: blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "rebalance cadence is slower than IC decay",
+              "single-case verdict indicates fragility",
+              "IC decays sharply after 1-day execution lag",
+              "strong raw and neutralized evidence",
+              "stable across rolling windows"
+            ],
+            "factor_verdict_reasons": [
+              "signal survives neutralization well",
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "rebalance cadence may be too slow for IC decay",
+              "IC decays sharply after 1-day execution lag",
+              "IC and RankIC validity is high"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Blocked from Level 2",
+              "portfolio recommendation: Not evaluated (not promoted)",
+              "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+              "promotion reason: factor verdict is not yet strong",
+              "fragility: blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "portfolio_validation_major_risks": [
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_blockers": [
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_reasons": [
+              "blocked by sharp IC decay under 1-day execution lag",
+              "factor verdict is not yet strong",
+              "uncertainty remains supportive",
+              "robust across subperiods",
+              "stable across rolling windows",
+              "coverage and validity are sufficient"
+            ]
+          },
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "promotion_decision": "Blocked from Level 2",
+          "status": "success"
+        },
+        "exploratory_screening": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/summary.md"
+          },
+          "campaign_triage": "Fragile / monitor",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Weakened at portfolio level",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Promote to Level 2",
+            "promotion reason: uncertainty remains supportive",
+            "promotion reason: robust across subperiods"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "rebalance cadence is slower than IC decay",
+              "single-case verdict indicates fragility",
+              "stable across rolling windows",
+              "confidence intervals remain supportive",
+              "coverage and validity are sufficient"
+            ],
+            "factor_verdict_reasons": [
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "rebalance cadence may be too slow for IC decay",
+              "IC and RankIC validity is high",
+              "long-short spread is positive with positive IR",
+              "robust across subperiods"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Promote to Level 2",
+              "promotion reason: uncertainty remains supportive",
+              "promotion reason: robust across subperiods"
+            ],
+            "portfolio_validation_major_risks": [],
+            "promotion_blockers": [],
+            "promotion_reasons": [
+              "uncertainty remains supportive",
+              "robust across subperiods",
+              "stable across rolling windows",
+              "coverage and validity are sufficient",
+              "turnover efficiency is acceptable",
+              "robust evidence survives neutralization"
+            ]
+          },
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "promotion_decision": "Promote to Level 2",
+          "status": "success"
+        }
+      }
+    },
+    {
+      "case_description": "Short evaluation window case that changes Level 1 verdict and promotion behavior across profiles.",
+      "case_name": "case_short_window_sensitive",
+      "changed_fields": [
+        "portfolio_validation_recommendation",
+        "promotion_decision"
+      ],
+      "field_differences": {
+        "portfolio_validation_recommendation": {
+          "default_research": "Not evaluated (not promoted)",
+          "exploratory_screening": "N/A"
+        },
+        "promotion_decision": {
+          "default_research": "Blocked from Level 2",
+          "exploratory_screening": "Promote to Level 2"
+        }
+      },
+      "is_profile_sensitive": true,
+      "level12_transition_profile_delta": {
+        "delta_label": "transition_weakened_under_stricter_profile",
+        "profile_pair_directions": [
+          {
+            "direction": "weakened",
+            "from_label": "Weakened at portfolio level",
+            "from_profile": "exploratory_screening",
+            "to_label": "Inconclusive transition",
+            "to_profile": "default_research"
+          }
+        ],
+        "profile_transition_labels": {
+          "default_research": "Inconclusive transition",
+          "exploratory_screening": "Weakened at portfolio level"
+        }
+      },
+      "profile_sensitivity": "profile_sensitive",
+      "profiles": {
+        "default_research": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/summary.md"
+          },
+          "campaign_triage": "Fragile / monitor",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: factor verdict is not yet strong",
+            "fragility: blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "rebalance cadence is slower than IC decay",
+              "single-case verdict indicates fragility",
+              "IC decays sharply after 1-day execution lag",
+              "stable across rolling windows",
+              "confidence intervals remain supportive"
+            ],
+            "factor_verdict_reasons": [
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "evaluation window is short and may be noisy",
+              "rebalance cadence may be too slow for IC decay",
+              "instability flags triggered: short_eval_window",
+              "IC decays sharply after 1-day execution lag"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Blocked from Level 2",
+              "portfolio recommendation: Not evaluated (not promoted)",
+              "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+              "promotion reason: factor verdict is not yet strong",
+              "fragility: blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "portfolio_validation_major_risks": [
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_blockers": [
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_reasons": [
+              "blocked by sharp IC decay under 1-day execution lag",
+              "factor verdict is not yet strong",
+              "neutralization evidence is unavailable",
+              "uncertainty remains supportive",
+              "robust across subperiods",
+              "stable across rolling windows"
+            ]
+          },
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "promotion_decision": "Blocked from Level 2",
+          "status": "success"
+        },
+        "exploratory_screening": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/summary.md"
+          },
+          "campaign_triage": "Fragile / monitor",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Weakened at portfolio level",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Promote to Level 2",
+            "promotion reason: uncertainty remains supportive",
+            "promotion reason: robust across subperiods"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "rebalance cadence is slower than IC decay",
+              "single-case verdict indicates fragility",
+              "stable across rolling windows",
+              "confidence intervals remain supportive",
+              "coverage and validity are sufficient"
+            ],
+            "factor_verdict_reasons": [
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "rebalance cadence may be too slow for IC decay",
+              "IC and RankIC validity is high",
+              "long-short spread is positive with positive IR",
+              "robust across subperiods"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Promote to Level 2",
+              "promotion reason: uncertainty remains supportive",
+              "promotion reason: robust across subperiods"
+            ],
+            "portfolio_validation_major_risks": [],
+            "promotion_blockers": [],
+            "promotion_reasons": [
+              "uncertainty remains supportive",
+              "robust across subperiods",
+              "stable across rolling windows",
+              "coverage and validity are sufficient",
+              "turnover efficiency is acceptable",
+              "robust evidence survives neutralization"
+            ]
+          },
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "promotion_decision": "Promote to Level 2",
+          "status": "success"
+        }
+      }
+    },
+    {
+      "case_description": "Borderline case with profile-dependent campaign triage and portfolio validation recommendation.",
+      "case_name": "case_triage_sensitive",
+      "changed_fields": [
+        "campaign_triage",
+        "portfolio_validation_recommendation"
+      ],
+      "field_differences": {
+        "campaign_triage": {
+          "default_research": "Fragile / monitor",
+          "exploratory_screening": "Strong Level 1 candidate"
+        },
+        "portfolio_validation_recommendation": {
+          "default_research": "Not evaluated (not promoted)",
+          "exploratory_screening": "N/A"
+        }
+      },
+      "is_profile_sensitive": true,
+      "level12_transition_profile_delta": {
+        "delta_label": "transition_stable",
+        "profile_pair_directions": [
+          {
+            "direction": "stable",
+            "from_label": "Inconclusive transition",
+            "from_profile": "exploratory_screening",
+            "to_label": "Inconclusive transition",
+            "to_profile": "default_research"
+          }
+        ],
+        "profile_transition_labels": {
+          "default_research": "Inconclusive transition",
+          "exploratory_screening": "Inconclusive transition"
+        }
+      },
+      "profile_sensitivity": "profile_sensitive",
+      "profiles": {
+        "default_research": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/summary.md"
+          },
+          "campaign_triage": "Fragile / monitor",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by unstable rolling evidence",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "fragility: blocked by unstable rolling evidence"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "fragile across rolling windows",
+              "single-case verdict indicates fragility",
+              "IC decays sharply after 1-day execution lag",
+              "confidence intervals remain supportive",
+              "coverage and validity are sufficient"
+            ],
+            "factor_verdict_reasons": [
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "signal weakens materially in some periods",
+              "confidence interval overlaps zero: long-short",
+              "apparent edge is weak relative to estimation noise",
+              "IC decays sharply after 1-day execution lag"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Blocked from Level 2",
+              "portfolio recommendation: Not evaluated (not promoted)",
+              "promotion reason: blocked by unstable rolling evidence",
+              "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+              "fragility: blocked by unstable rolling evidence"
+            ],
+            "portfolio_validation_major_risks": [
+              "blocked by unstable rolling evidence",
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_blockers": [
+              "blocked by unstable rolling evidence",
+              "blocked by sharp IC decay under 1-day execution lag"
+            ],
+            "promotion_reasons": [
+              "blocked by unstable rolling evidence",
+              "blocked by sharp IC decay under 1-day execution lag",
+              "factor verdict is not yet strong",
+              "neutralization evidence is unavailable",
+              "uncertainty remains supportive",
+              "robust across subperiods"
+            ]
+          },
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "promotion_decision": "Blocked from Level 2",
+          "status": "success"
+        },
+        "exploratory_screening": {
+          "artifact_paths": {
+            "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/backtest_result.json",
+            "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/experiment_card.md",
+            "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/factor_definition.json",
+            "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/metrics.json",
+            "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive",
+            "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/portfolio_recipe.json",
+            "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/run_manifest.json",
+            "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/signal_validation.json",
+            "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/summary.md"
+          },
+          "campaign_triage": "Strong Level 1 candidate",
+          "factor_verdict": "Promising but fragile",
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Strong Level 1 candidate",
+            "promotion decision: Blocked from Level 2",
+            "promotion reason: blocked by unstable rolling evidence",
+            "promotion reason: factor verdict is not yet strong"
+          ],
+          "major_reasons": {
+            "campaign_triage_reasons": [
+              "confidence intervals remain supportive",
+              "coverage and validity are sufficient",
+              "turnover efficiency is acceptable",
+              "rebalance cadence matches IC decay profile",
+              "long-short tail risk is controlled"
+            ],
+            "factor_verdict_reasons": [
+              "positive IC and RankIC means",
+              "IC and RankIC signs are consistently positive",
+              "signal weakens materially in some periods",
+              "confidence interval overlaps zero: long-short",
+              "IC and RankIC validity is high",
+              "long-short spread is positive with positive IR"
+            ],
+            "level12_transition_reasons": [
+              "campaign triage: Strong Level 1 candidate",
+              "promotion decision: Blocked from Level 2",
+              "promotion reason: blocked by unstable rolling evidence",
+              "promotion reason: factor verdict is not yet strong"
+            ],
+            "portfolio_validation_major_risks": [],
+            "promotion_blockers": [
+              "blocked by unstable rolling evidence"
+            ],
+            "promotion_reasons": [
+              "blocked by unstable rolling evidence",
+              "factor verdict is not yet strong",
+              "campaign triage is favorable but promotion gate remains unmet",
+              "uncertainty remains supportive",
+              "robust across subperiods",
+              "coverage and validity are sufficient"
+            ]
+          },
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "promotion_decision": "Blocked from Level 2",
+          "status": "success"
+        }
+      }
+    }
+  ],
+  "case_evidence_index": {
+    "case_short_window_sensitive": {
+      "artifact_pointer_hints_by_profile": {
+        "default_research": [
+          "runs/default_research/case_short_window_sensitive/metrics.json",
+          "runs/default_research/case_short_window_sensitive/summary.md"
+        ],
+        "exploratory_screening": [
+          "runs/exploratory_screening/case_short_window_sensitive/metrics.json",
+          "runs/exploratory_screening/case_short_window_sensitive/summary.md"
+        ]
+      },
+      "campaign_triage_by_profile": {
+        "default_research": "Fragile / monitor",
+        "exploratory_screening": "Fragile / monitor"
+      },
+      "changed_fields": [
+        "portfolio_validation_recommendation",
+        "promotion_decision"
+      ],
+      "factor_verdict_by_profile": {
+        "default_research": "Promising but fragile",
+        "exploratory_screening": "Promising but fragile"
+      },
+      "key_reason_hints_by_profile": {
+        "default_research": [
+          "campaign triage: Fragile / monitor",
+          "promotion decision: Blocked from Level 2",
+          "portfolio recommendation: Not evaluated (not promoted)"
+        ],
+        "exploratory_screening": [
+          "campaign triage: Fragile / monitor",
+          "promotion decision: Promote to Level 2",
+          "promotion reason: uncertainty remains supportive"
+        ]
+      },
+      "level12_transition_label_by_profile": {
+        "default_research": "Inconclusive transition",
+        "exploratory_screening": "Weakened at portfolio level"
+      },
+      "portfolio_robustness_by_profile": {
+        "default_research": "Not evaluated (not promoted)",
+        "exploratory_screening": "N/A"
+      },
+      "profile_delta_label": "transition_weakened_under_stricter_profile",
+      "profile_sensitivity": "profile_sensitive",
+      "profiles_observed": [
+        "exploratory_screening",
+        "default_research"
+      ],
+      "promotion_decision_by_profile": {
+        "default_research": "Blocked from Level 2",
+        "exploratory_screening": "Promote to Level 2"
+      }
+    },
+    "case_stable_promoted": {
+      "artifact_pointer_hints_by_profile": {
+        "default_research": [
+          "runs/default_research/case_stable_promoted/metrics.json",
+          "runs/default_research/case_stable_promoted/summary.md"
+        ],
+        "exploratory_screening": [
+          "runs/exploratory_screening/case_stable_promoted/metrics.json",
+          "runs/exploratory_screening/case_stable_promoted/summary.md"
+        ]
+      },
+      "campaign_triage_by_profile": {
+        "default_research": "Fragile / monitor",
+        "exploratory_screening": "Fragile / monitor"
+      },
+      "changed_fields": [
+        "portfolio_validation_recommendation",
+        "promotion_decision"
+      ],
+      "factor_verdict_by_profile": {
+        "default_research": "Promising but fragile",
+        "exploratory_screening": "Promising but fragile"
+      },
+      "key_reason_hints_by_profile": {
+        "default_research": [
+          "campaign triage: Fragile / monitor",
+          "promotion decision: Blocked from Level 2",
+          "portfolio recommendation: Not evaluated (not promoted)"
+        ],
+        "exploratory_screening": [
+          "campaign triage: Fragile / monitor",
+          "promotion decision: Promote to Level 2",
+          "promotion reason: uncertainty remains supportive"
+        ]
+      },
+      "level12_transition_label_by_profile": {
+        "default_research": "Inconclusive transition",
+        "exploratory_screening": "Weakened at portfolio level"
+      },
+      "portfolio_robustness_by_profile": {
+        "default_research": "Not evaluated (not promoted)",
+        "exploratory_screening": "N/A"
+      },
+      "profile_delta_label": "transition_weakened_under_stricter_profile",
+      "profile_sensitivity": "profile_sensitive",
+      "profiles_observed": [
+        "exploratory_screening",
+        "default_research"
+      ],
+      "promotion_decision_by_profile": {
+        "default_research": "Blocked from Level 2",
+        "exploratory_screening": "Promote to Level 2"
+      }
+    },
+    "case_triage_sensitive": {
+      "artifact_pointer_hints_by_profile": {
+        "default_research": [
+          "runs/default_research/case_triage_sensitive/metrics.json",
+          "runs/default_research/case_triage_sensitive/summary.md"
+        ],
+        "exploratory_screening": [
+          "runs/exploratory_screening/case_triage_sensitive/metrics.json",
+          "runs/exploratory_screening/case_triage_sensitive/summary.md"
+        ]
+      },
+      "campaign_triage_by_profile": {
+        "default_research": "Fragile / monitor",
+        "exploratory_screening": "Strong Level 1 candidate"
+      },
+      "changed_fields": [
+        "campaign_triage",
+        "portfolio_validation_recommendation"
+      ],
+      "factor_verdict_by_profile": {
+        "default_research": "Promising but fragile",
+        "exploratory_screening": "Promising but fragile"
+      },
+      "key_reason_hints_by_profile": {
+        "default_research": [
+          "campaign triage: Fragile / monitor",
+          "promotion decision: Blocked from Level 2",
+          "portfolio recommendation: Not evaluated (not promoted)"
+        ],
+        "exploratory_screening": [
+          "campaign triage: Strong Level 1 candidate",
+          "promotion decision: Blocked from Level 2",
+          "promotion reason: blocked by unstable rolling evidence"
+        ]
+      },
+      "level12_transition_label_by_profile": {
+        "default_research": "Inconclusive transition",
+        "exploratory_screening": "Inconclusive transition"
+      },
+      "portfolio_robustness_by_profile": {
+        "default_research": "Not evaluated (not promoted)",
+        "exploratory_screening": "N/A"
+      },
+      "profile_delta_label": "transition_stable",
+      "profile_sensitivity": "profile_sensitive",
+      "profiles_observed": [
+        "exploratory_screening",
+        "default_research"
+      ],
+      "promotion_decision_by_profile": {
+        "default_research": "Blocked from Level 2",
+        "exploratory_screening": "Blocked from Level 2"
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_description": "High-signal neutralized case engineered to remain stable and promoted across profiles.",
+      "case_name": "case_stable_promoted",
+      "spec_path": "<OUTPUT_ROOT>/cases/case_stable_promoted/single_factor_case.json"
+    },
+    {
+      "case_description": "Short evaluation window case that changes Level 1 verdict and promotion behavior across profiles.",
+      "case_name": "case_short_window_sensitive",
+      "spec_path": "<OUTPUT_ROOT>/cases/case_short_window_sensitive/single_factor_case.json"
+    },
+    {
+      "case_description": "Borderline case with profile-dependent campaign triage and portfolio validation recommendation.",
+      "case_name": "case_triage_sensitive",
+      "spec_path": "<OUTPUT_ROOT>/cases/case_triage_sensitive/single_factor_case.json"
+    }
+  ],
+  "default_profile": "default_research",
+  "field_change_index": {
+    "campaign_triage": [
+      "case_triage_sensitive"
+    ],
+    "factor_verdict": [],
+    "portfolio_validation_recommendation": [
+      "case_stable_promoted",
+      "case_short_window_sensitive",
+      "case_triage_sensitive"
+    ],
+    "promotion_decision": [
+      "case_stable_promoted",
+      "case_short_window_sensitive"
+    ]
+  },
+  "generated_at_utc": "<SCRUBBED_TIMESTAMP>",
+  "output_root_dir": "<OUTPUT_ROOT>",
+  "pair_mode": "adjacent",
+  "profile_runs": [
+    {
+      "campaign_artifacts": {
+        "campaign_index": null,
+        "campaign_manifest": null,
+        "campaign_report": null,
+        "campaign_results": null,
+        "campaign_summary": null
+      },
+      "campaign_output_dir": null,
+      "case_rows": [
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/backtest_result.json",
+          "campaign_triage": "Fragile / monitor",
+          "campaign_triage_reasons": [
+            "rebalance cadence is slower than IC decay",
+            "single-case verdict indicates fragility",
+            "stable across rolling windows",
+            "confidence intervals remain supportive",
+            "coverage and validity are sufficient"
+          ],
+          "case_name": "case_stable_promoted",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "rebalance cadence may be too slow for IC decay",
+            "IC and RankIC validity is high",
+            "long-short spread is positive with positive IR",
+            "robust across subperiods"
+          ],
+          "level12_transition_label": "Weakened at portfolio level",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Promote to Level 2",
+            "promotion reason: uncertainty remains supportive",
+            "promotion reason: robust across subperiods"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [],
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "profile_name": "exploratory_screening",
+          "promotion_blockers": [],
+          "promotion_decision": "Promote to Level 2",
+          "promotion_reasons": [
+            "uncertainty remains supportive",
+            "robust across subperiods",
+            "stable across rolling windows",
+            "coverage and validity are sufficient",
+            "turnover efficiency is acceptable",
+            "robust evidence survives neutralization"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_stable_promoted/summary.md"
+        },
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/backtest_result.json",
+          "campaign_triage": "Fragile / monitor",
+          "campaign_triage_reasons": [
+            "rebalance cadence is slower than IC decay",
+            "single-case verdict indicates fragility",
+            "stable across rolling windows",
+            "confidence intervals remain supportive",
+            "coverage and validity are sufficient"
+          ],
+          "case_name": "case_short_window_sensitive",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "rebalance cadence may be too slow for IC decay",
+            "IC and RankIC validity is high",
+            "long-short spread is positive with positive IR",
+            "robust across subperiods"
+          ],
+          "level12_transition_label": "Weakened at portfolio level",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Promote to Level 2",
+            "promotion reason: uncertainty remains supportive",
+            "promotion reason: robust across subperiods"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [],
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "profile_name": "exploratory_screening",
+          "promotion_blockers": [],
+          "promotion_decision": "Promote to Level 2",
+          "promotion_reasons": [
+            "uncertainty remains supportive",
+            "robust across subperiods",
+            "stable across rolling windows",
+            "coverage and validity are sufficient",
+            "turnover efficiency is acceptable",
+            "robust evidence survives neutralization"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_short_window_sensitive/summary.md"
+        },
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/backtest_result.json",
+          "campaign_triage": "Strong Level 1 candidate",
+          "campaign_triage_reasons": [
+            "confidence intervals remain supportive",
+            "coverage and validity are sufficient",
+            "turnover efficiency is acceptable",
+            "rebalance cadence matches IC decay profile",
+            "long-short tail risk is controlled"
+          ],
+          "case_name": "case_triage_sensitive",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "signal weakens materially in some periods",
+            "confidence interval overlaps zero: long-short",
+            "IC and RankIC validity is high",
+            "long-short spread is positive with positive IR"
+          ],
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Strong Level 1 candidate",
+            "promotion decision: Blocked from Level 2",
+            "promotion reason: blocked by unstable rolling evidence",
+            "promotion reason: factor verdict is not yet strong"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [],
+          "portfolio_validation_recommendation": "N/A",
+          "portfolio_validation_status": "N/A",
+          "profile_name": "exploratory_screening",
+          "promotion_blockers": [
+            "blocked by unstable rolling evidence"
+          ],
+          "promotion_decision": "Blocked from Level 2",
+          "promotion_reasons": [
+            "blocked by unstable rolling evidence",
+            "factor verdict is not yet strong",
+            "campaign triage is favorable but promotion gate remains unmet",
+            "uncertainty remains supportive",
+            "robust across subperiods",
+            "coverage and validity are sufficient"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/summary.md"
+        }
+      ],
+      "level12_transition_distribution": {
+        "artifact_pointers_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+          ],
+          "Weakened at portfolio level": [
+            "runs/exploratory_screening/case_stable_promoted/metrics.json",
+            "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+          ]
+        },
+        "confidence_note": "tentative due to low support",
+        "counts_by_transition_label": {
+          "Confirmed at portfolio level": 0,
+          "Fragile after promotion": 0,
+          "Improved at portfolio level": 0,
+          "Inconclusive transition": 1,
+          "Weakened at portfolio level": 2
+        },
+        "interpretation": "Most common transition outcome is `Weakened at portfolio level` (2/3 cases).",
+        "is_sparse": false,
+        "minimum_required_support": 3,
+        "minimum_support_met": true,
+        "minimum_support_thresholds": {
+          "minimum_cases_per_transition_label": 2,
+          "minimum_cases_with_reasons_per_transition_label": 2,
+          "minimum_cases_with_transition_label": 3,
+          "minimum_reason_bucket_count_for_dominance": 2
+        },
+        "n_cases": 3,
+        "n_cases_missing_transition_label": 0,
+        "n_cases_with_transition_label": 3,
+        "proportions_by_transition_label": {
+          "Confirmed at portfolio level": 0.0,
+          "Fragile after promotion": 0.0,
+          "Improved at portfolio level": 0.0,
+          "Inconclusive transition": 0.3333333333333333,
+          "Weakened at portfolio level": 0.6666666666666666
+        },
+        "reason_rollup_by_transition_label": {
+          "Confirmed at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Fragile after promotion": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Improved at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Inconclusive transition": {
+            "artifact_pointer_hints": [
+              "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+            ],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 1,
+            "n_cases_with_label": 1,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 3,
+            "n_unique_raw_reasons_observed": 4,
+            "n_unique_reasons_observed": 4,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_triage_sensitive"
+            ],
+            "representative_reasons": [
+              "blocked by unstable rolling evidence",
+              "campaign triage: Strong Level 1 candidate",
+              "factor verdict is not yet strong"
+            ],
+            "support_count": 1,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [
+              "case_triage_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by unstable rolling evidence",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Strong Level 1 candidate",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 1,
+                "is_sparse": true,
+                "minimum_support_met": false,
+                "proportion_of_label_cases": 1.0,
+                "reason": "factor verdict is not yet strong",
+                "support_level": "sparse",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_triage_sensitive"
+                ]
+              }
+            ]
+          },
+          "Weakened at portfolio level": {
+            "artifact_pointer_hints": [
+              "runs/exploratory_screening/case_stable_promoted/metrics.json",
+              "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+            ],
+            "confidence_note": "tentative due to low support",
+            "dominant_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Promote to Level 2",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "robust across subperiods",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              }
+            ],
+            "is_sparse": false,
+            "minimum_required_support": 2,
+            "minimum_support_met": true,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 2,
+            "n_cases_with_label": 2,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 4,
+            "n_unique_reasons_observed": 4,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "representative_reasons": [
+              "campaign triage: Fragile / monitor",
+              "promotion decision: Promote to Level 2",
+              "robust across subperiods"
+            ],
+            "support_count": 2,
+            "support_level": "tentative",
+            "support_note": "tentative due to low support",
+            "supporting_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Promote to Level 2",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/exploratory_screening/case_stable_promoted/metrics.json",
+                  "runs/exploratory_screening/case_short_window_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 2,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "robust across subperiods",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive"
+                ]
+              }
+            ]
+          }
+        },
+        "representative_case_names_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_triage_sensitive"
+          ],
+          "Weakened at portfolio level": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ]
+        },
+        "representative_cases_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_triage_sensitive"
+          ],
+          "Weakened at portfolio level": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ]
+        },
+        "support_count": 3,
+        "support_level": "tentative",
+        "support_note": "tentative due to low support"
+      },
+      "profile_name": "exploratory_screening",
+      "ranked_case_order": [
+        "case_short_window_sensitive",
+        "case_stable_promoted",
+        "case_triage_sensitive"
+      ]
+    },
+    {
+      "campaign_artifacts": {
+        "campaign_index": null,
+        "campaign_manifest": null,
+        "campaign_report": null,
+        "campaign_results": null,
+        "campaign_summary": null
+      },
+      "campaign_output_dir": null,
+      "case_rows": [
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/backtest_result.json",
+          "campaign_triage": "Fragile / monitor",
+          "campaign_triage_reasons": [
+            "rebalance cadence is slower than IC decay",
+            "single-case verdict indicates fragility",
+            "IC decays sharply after 1-day execution lag",
+            "strong raw and neutralized evidence",
+            "stable across rolling windows"
+          ],
+          "case_name": "case_stable_promoted",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "signal survives neutralization well",
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "rebalance cadence may be too slow for IC decay",
+            "IC decays sharply after 1-day execution lag",
+            "IC and RankIC validity is high"
+          ],
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: factor verdict is not yet strong",
+            "fragility: blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "profile_name": "default_research",
+          "promotion_blockers": [
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "promotion_decision": "Blocked from Level 2",
+          "promotion_reasons": [
+            "blocked by sharp IC decay under 1-day execution lag",
+            "factor verdict is not yet strong",
+            "uncertainty remains supportive",
+            "robust across subperiods",
+            "stable across rolling windows",
+            "coverage and validity are sufficient"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_stable_promoted/summary.md"
+        },
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/backtest_result.json",
+          "campaign_triage": "Fragile / monitor",
+          "campaign_triage_reasons": [
+            "rebalance cadence is slower than IC decay",
+            "single-case verdict indicates fragility",
+            "IC decays sharply after 1-day execution lag",
+            "stable across rolling windows",
+            "confidence intervals remain supportive"
+          ],
+          "case_name": "case_short_window_sensitive",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "evaluation window is short and may be noisy",
+            "rebalance cadence may be too slow for IC decay",
+            "instability flags triggered: short_eval_window",
+            "IC decays sharply after 1-day execution lag"
+          ],
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: factor verdict is not yet strong",
+            "fragility: blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "profile_name": "default_research",
+          "promotion_blockers": [
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "promotion_decision": "Blocked from Level 2",
+          "promotion_reasons": [
+            "blocked by sharp IC decay under 1-day execution lag",
+            "factor verdict is not yet strong",
+            "neutralization evidence is unavailable",
+            "uncertainty remains supportive",
+            "robust across subperiods",
+            "stable across rolling windows"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_short_window_sensitive/summary.md"
+        },
+        {
+          "backtest_result_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/backtest_result.json",
+          "campaign_triage": "Fragile / monitor",
+          "campaign_triage_reasons": [
+            "fragile across rolling windows",
+            "single-case verdict indicates fragility",
+            "IC decays sharply after 1-day execution lag",
+            "confidence intervals remain supportive",
+            "coverage and validity are sufficient"
+          ],
+          "case_name": "case_triage_sensitive",
+          "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/experiment_card.md",
+          "factor_definition_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/factor_definition.json",
+          "factor_verdict": "Promising but fragile",
+          "factor_verdict_reasons": [
+            "positive IC and RankIC means",
+            "IC and RankIC signs are consistently positive",
+            "signal weakens materially in some periods",
+            "confidence interval overlaps zero: long-short",
+            "apparent edge is weak relative to estimation noise",
+            "IC decays sharply after 1-day execution lag"
+          ],
+          "level12_transition_label": "Inconclusive transition",
+          "level12_transition_reasons": [
+            "campaign triage: Fragile / monitor",
+            "promotion decision: Blocked from Level 2",
+            "portfolio recommendation: Not evaluated (not promoted)",
+            "promotion reason: blocked by unstable rolling evidence",
+            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "fragility: blocked by unstable rolling evidence"
+          ],
+          "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/metrics.json",
+          "output_dir": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive",
+          "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/portfolio_recipe.json",
+          "portfolio_validation_major_risks": [
+            "blocked by unstable rolling evidence",
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "portfolio_validation_recommendation": "Not evaluated (not promoted)",
+          "portfolio_validation_status": "skipped_not_promoted",
+          "profile_name": "default_research",
+          "promotion_blockers": [
+            "blocked by unstable rolling evidence",
+            "blocked by sharp IC decay under 1-day execution lag"
+          ],
+          "promotion_decision": "Blocked from Level 2",
+          "promotion_reasons": [
+            "blocked by unstable rolling evidence",
+            "blocked by sharp IC decay under 1-day execution lag",
+            "factor verdict is not yet strong",
+            "neutralization evidence is unavailable",
+            "uncertainty remains supportive",
+            "robust across subperiods"
+          ],
+          "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/run_manifest.json",
+          "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/signal_validation.json",
+          "status": "success",
+          "summary_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/summary.md"
+        }
+      ],
+      "level12_transition_distribution": {
+        "artifact_pointers_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "runs/default_research/case_stable_promoted/metrics.json",
+            "runs/default_research/case_short_window_sensitive/metrics.json"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "confidence_note": "tentative due to low support",
+        "counts_by_transition_label": {
+          "Confirmed at portfolio level": 0,
+          "Fragile after promotion": 0,
+          "Improved at portfolio level": 0,
+          "Inconclusive transition": 3,
+          "Weakened at portfolio level": 0
+        },
+        "interpretation": "Most common transition outcome is `Inconclusive transition` (3/3 cases).",
+        "is_sparse": false,
+        "minimum_required_support": 3,
+        "minimum_support_met": true,
+        "minimum_support_thresholds": {
+          "minimum_cases_per_transition_label": 2,
+          "minimum_cases_with_reasons_per_transition_label": 2,
+          "minimum_cases_with_transition_label": 3,
+          "minimum_reason_bucket_count_for_dominance": 2
+        },
+        "n_cases": 3,
+        "n_cases_missing_transition_label": 0,
+        "n_cases_with_transition_label": 3,
+        "proportions_by_transition_label": {
+          "Confirmed at portfolio level": 0.0,
+          "Fragile after promotion": 0.0,
+          "Improved at portfolio level": 0.0,
+          "Inconclusive transition": 1.0,
+          "Weakened at portfolio level": 0.0
+        },
+        "reason_rollup_by_transition_label": {
+          "Confirmed at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Fragile after promotion": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Improved at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          },
+          "Inconclusive transition": {
+            "artifact_pointer_hints": [
+              "runs/default_research/case_stable_promoted/metrics.json",
+              "runs/default_research/case_short_window_sensitive/metrics.json",
+              "runs/default_research/case_triage_sensitive/metrics.json"
+            ],
+            "confidence_note": "tentative due to low support",
+            "dominant_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by sharp IC decay under 1-day execution lag",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              }
+            ],
+            "is_sparse": false,
+            "minimum_required_support": 2,
+            "minimum_support_met": true,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 3,
+            "n_cases_with_label": 3,
+            "n_reasons_collapsed_by_normalization": 2,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 8,
+            "n_unique_reasons_observed": 6,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive"
+            ],
+            "representative_reasons": [
+              "blocked by sharp IC decay under 1-day execution lag",
+              "campaign triage: Fragile / monitor",
+              "portfolio recommendation: Not evaluated (not promoted)"
+            ],
+            "support_count": 3,
+            "support_level": "tentative",
+            "support_note": "tentative due to low support",
+            "supporting_case_names": [
+              "case_stable_promoted",
+              "case_short_window_sensitive",
+              "case_triage_sensitive"
+            ],
+            "top_reasons": [
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "blocked by sharp IC decay under 1-day execution lag",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "campaign triage: Fragile / monitor",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              }
+            ]
+          },
+          "Weakened at portfolio level": {
+            "artifact_pointer_hints": [],
+            "confidence_note": "sparse transition evidence",
+            "dominant_reasons": [],
+            "is_sparse": true,
+            "minimum_required_support": 2,
+            "minimum_support_met": false,
+            "minimum_support_thresholds": {
+              "minimum_cases_with_any_reason": 2,
+              "minimum_cases_with_label": 2,
+              "minimum_reason_bucket_count_for_dominance": 2
+            },
+            "n_cases_with_any_reason": 0,
+            "n_cases_with_label": 0,
+            "n_reasons_collapsed_by_normalization": 0,
+            "n_top_reasons_below_minimum_support": 0,
+            "n_unique_raw_reasons_observed": 0,
+            "n_unique_reasons_observed": 0,
+            "reason_normalization": {
+              "applies_to_rollup_only": true,
+              "method": "explicit_rule_v1",
+              "raw_reasons_preserved_at_case_level": true
+            },
+            "representative_case_names": [],
+            "representative_reasons": [],
+            "support_count": 0,
+            "support_level": "sparse",
+            "support_note": "sparse transition evidence",
+            "supporting_case_names": [],
+            "top_reasons": []
+          }
+        },
+        "representative_case_names_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "representative_cases_by_transition_label": {
+          "Confirmed at portfolio level": [],
+          "Fragile after promotion": [],
+          "Improved at portfolio level": [],
+          "Inconclusive transition": [
+            "case_stable_promoted",
+            "case_short_window_sensitive"
+          ],
+          "Weakened at portfolio level": []
+        },
+        "support_count": 3,
+        "support_level": "tentative",
+        "support_note": "tentative due to low support"
+      },
+      "profile_name": "default_research",
+      "ranked_case_order": [
+        "case_short_window_sensitive",
+        "case_stable_promoted",
+        "case_triage_sensitive"
+      ]
+    }
+  ],
+  "profiles": [
+    "exploratory_screening",
+    "default_research"
+  ],
+  "schema_version": "1.0.0",
+  "source": "example",
+  "workflow_name": "campaign_profile_comparison"
+}

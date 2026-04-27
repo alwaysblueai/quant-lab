@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+
 _COST_ADJUSTED_COLUMNS: tuple[str, ...] = (
     "date",
     "factor",
@@ -60,9 +62,9 @@ def apply_linear_cost(
         If ``returns`` and ``turnover`` do not share the same index.
     """
     if cost_rate < 0:
-        raise ValueError(f"cost_rate must be >= 0, got {cost_rate}")
+        raise AlphaLabConfigError(f"cost_rate must be >= 0, got {cost_rate}")
     if not returns.index.equals(turnover.index):
-        raise ValueError(
+        raise AlphaLabDataError(
             "returns and turnover must share the same index; "
             f"got lengths {len(returns)} and {len(turnover)} with non-matching indices"
         )
@@ -112,7 +114,7 @@ def cost_adjusted_long_short(
         If ``cost_rate < 0``.
     """
     if cost_rate < 0:
-        raise ValueError(f"cost_rate must be >= 0, got {cost_rate}")
+        raise AlphaLabConfigError(f"cost_rate must be >= 0, got {cost_rate}")
 
     if long_short_df.empty or long_short_turnover_df.empty:
         return pd.DataFrame(columns=list(_COST_ADJUSTED_COLUMNS))
@@ -130,3 +132,30 @@ def cost_adjusted_long_short(
         merged["long_short_return"], merged["turnover"], cost_rate=cost_rate
     )
     return merged[list(_COST_ADJUSTED_COLUMNS)].reset_index(drop=True)
+
+
+def apply_short_borrow_cost(
+    returns: pd.Series,  # type: ignore[type-arg]
+    short_weights: pd.Series,  # type: ignore[type-arg]
+    annual_rate: float = 0.08,
+) -> pd.Series:  # type: ignore[type-arg]
+    """Apply daily short-borrow financing costs to a return series.
+
+    **Rate convention — note the asymmetry with** :func:`apply_linear_cost`:
+    this function takes an **annualized** rate and divides by ``252``
+    internally (daily convention). :func:`apply_linear_cost` takes a
+    **per-period** ``cost_rate`` and applies it directly. Callers mixing the
+    two must ensure the return-series cadence matches each function's
+    assumption.
+    """
+    if annual_rate < 0:
+        raise AlphaLabConfigError(f"annual_rate must be >= 0, got {annual_rate}")
+    if not returns.index.equals(short_weights.index):
+        raise AlphaLabDataError(
+            "returns and short_weights must share the same index; "
+            "pass aligned time series before borrow-cost adjustment"
+        )
+
+    short_leg = (-pd.to_numeric(short_weights, errors="coerce").clip(upper=0.0)).fillna(0.0)
+    daily_cost = short_leg * float(annual_rate) / 252.0
+    return returns - daily_cost

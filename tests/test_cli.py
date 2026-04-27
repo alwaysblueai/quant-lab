@@ -40,11 +40,16 @@ def test_cli_basic_run_returns_zero(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert rc == 0
@@ -55,11 +60,16 @@ def test_cli_basic_run_writes_summary_csv(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     csvs = list(out_dir.glob("*.csv"))
@@ -71,11 +81,16 @@ def test_cli_summary_csv_has_expected_columns(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -89,12 +104,18 @@ def test_cli_summary_csv_filename_uses_experiment_name(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
-            "--experiment-name", "my_test_run",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
+            "--experiment-name",
+            "my_test_run",
         ]
     )
     assert (out_dir / "my_test_run_summary.csv").exists()
@@ -105,11 +126,16 @@ def test_cli_default_experiment_name_derived_from_args(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "3",
-            "--quantiles", "4",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "3",
+            "--quantiles",
+            "4",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     assert (out_dir / "momentum_h3_q4_summary.csv").exists()
@@ -121,11 +147,16 @@ def test_cli_creates_output_dir_if_missing(tmp_path: Path) -> None:
     assert not out_dir.exists()
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     assert out_dir.exists()
@@ -140,11 +171,16 @@ def test_cli_stdout_contains_factor_name(tmp_path: Path, capsys: pytest.CaptureF
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     captured = capsys.readouterr()
@@ -155,11 +191,16 @@ def test_cli_stdout_contains_mean_ic(tmp_path: Path, capsys: pytest.CaptureFixtu
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     captured = capsys.readouterr()
@@ -173,11 +214,16 @@ def test_cli_stdout_contains_summary_csv_path(
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     captured = capsys.readouterr()
@@ -193,28 +239,36 @@ def test_cli_missing_input_file_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(tmp_path / "nonexistent.csv"),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(tmp_path / "nonexistent.csv"),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
 
 def test_cli_missing_required_columns_exits(tmp_path: Path) -> None:
     bad_csv = tmp_path / "bad.csv"
-    pd.DataFrame([{"date": "2024-01-01", "ticker": "A", "price": 100}]).to_csv(
-        bad_csv, index=False
-    )
+    pd.DataFrame([{"date": "2024-01-01", "ticker": "A", "price": 100}]).to_csv(bad_csv, index=False)
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(bad_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(bad_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -225,11 +279,16 @@ def test_cli_missing_close_column_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(bad_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(bad_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -237,17 +296,22 @@ def test_cli_missing_close_column_exits(tmp_path: Path) -> None:
 def test_cli_unparseable_dates_exit(tmp_path: Path) -> None:
     """A CSV with unparseable date values must fail clearly before the pipeline runs."""
     bad_csv = tmp_path / "bad_dates.csv"
-    pd.DataFrame(
-        [{"date": "not-a-date", "asset": "A", "close": 100.0}]
-    ).to_csv(bad_csv, index=False)
+    pd.DataFrame([{"date": "not-a-date", "asset": "A", "close": 100.0}]).to_csv(
+        bad_csv, index=False
+    )
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(bad_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(bad_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -262,11 +326,16 @@ def test_cli_unknown_factor_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "not_a_real_factor",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "not_a_real_factor",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -275,12 +344,18 @@ def test_cli_reversal_run_succeeds(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "reversal",
-            "--reversal-window", "5",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "reversal",
+            "--reversal-window",
+            "5",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert rc == 0
@@ -290,12 +365,18 @@ def test_cli_low_volatility_run_succeeds(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "low_volatility",
-            "--low-volatility-window", "20",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "low_volatility",
+            "--low-volatility-window",
+            "20",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert rc == 0
@@ -311,11 +392,16 @@ def test_cli_label_horizon_zero_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "0",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "0",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -325,11 +411,16 @@ def test_cli_label_horizon_negative_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "-1",
-                "--quantiles", "5",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "-1",
+                "--quantiles",
+                "5",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -339,11 +430,16 @@ def test_cli_quantiles_one_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "1",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "1",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -353,12 +449,18 @@ def test_cli_negative_cost_rate_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--cost-rate", "-0.001",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--cost-rate",
+                "-0.001",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -368,12 +470,18 @@ def test_cli_train_end_without_test_start_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--train-end", "2024-01-15",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--train-end",
+                "2024-01-15",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -383,25 +491,34 @@ def test_cli_test_start_without_train_end_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--test-start", "2024-01-20",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--test-start",
+                "2024-01-20",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
 
-@pytest.mark.parametrize("unsafe_name", [
-    "../../etc/passwd",
-    "../escape",
-    "/absolute/path",
-    "name/with/slash",
-    "name\\backslash",
-    "..",
-    ".",
-])
+@pytest.mark.parametrize(
+    "unsafe_name",
+    [
+        "../../etc/passwd",
+        "../escape",
+        "/absolute/path",
+        "name/with/slash",
+        "name\\backslash",
+        "..",
+        ".",
+    ],
+)
 def test_cli_unsafe_experiment_name_exits(tmp_path: Path, unsafe_name: str) -> None:
     """An --experiment-name containing path separators or .. must be rejected
     before any file is written, preventing directory traversal attacks."""
@@ -410,12 +527,18 @@ def test_cli_unsafe_experiment_name_exits(tmp_path: Path, unsafe_name: str) -> N
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--experiment-name", unsafe_name,
-                "--output-dir", str(out_dir),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--experiment-name",
+                unsafe_name,
+                "--output-dir",
+                str(out_dir),
             ]
         )
     # Output directory must remain empty — no file was written
@@ -432,13 +555,20 @@ def test_cli_split_run_succeeds(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv", n_days=40)
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--train-end", "2024-01-31",
-            "--test-start", "2024-02-01",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--train-end",
+            "2024-01-31",
+            "--test-start",
+            "2024-02-01",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert rc == 0
@@ -454,12 +584,18 @@ def test_cli_cost_rate_writes_adjusted_column(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--cost-rate", "0.001",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--cost-rate",
+            "0.001",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -476,11 +612,16 @@ def test_cli_no_cost_rate_gives_nan_adjusted_return(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out_dir),
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -498,12 +639,18 @@ def test_cli_obsidian_markdown_written(tmp_path: Path) -> None:
     md_path = tmp_path / "notes" / "experiment.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     assert md_path.exists()
@@ -514,13 +661,20 @@ def test_cli_obsidian_markdown_content(tmp_path: Path) -> None:
     md_path = tmp_path / "experiment.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "my_obsidian_test",
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "my_obsidian_test",
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -534,12 +688,18 @@ def test_cli_obsidian_creates_parent_dirs(tmp_path: Path) -> None:
     assert not md_path.parent.exists()
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     assert md_path.exists()
@@ -549,11 +709,16 @@ def test_cli_no_obsidian_flag_does_not_write_md(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert not list(tmp_path.glob("**/*.md"))
@@ -574,12 +739,18 @@ def test_cli_append_registry_writes_entry(tmp_path: Path, monkeypatch: pytest.Mo
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "reg_test",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "reg_test",
             "--append-registry",
         ]
     )
@@ -588,9 +759,7 @@ def test_cli_append_registry_writes_entry(tmp_path: Path, monkeypatch: pytest.Mo
     assert df["experiment_name"].iloc[0] == "reg_test"
 
 
-def test_cli_registry_stores_obsidian_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_registry_stores_obsidian_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When both --obsidian-markdown-path and --append-registry are used,
     the registry entry must record the Obsidian note path."""
     registry_path = tmp_path / "registry.csv"
@@ -601,13 +770,20 @@ def test_cli_registry_stores_obsidian_path(
     md_path = tmp_path / "notes" / "exp.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "obsidian_reg_test",
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "obsidian_reg_test",
+            "--obsidian-markdown-path",
+            str(md_path),
             "--append-registry",
         ]
     )
@@ -628,12 +804,18 @@ def test_cli_registry_obsidian_path_empty_when_no_markdown(
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "no_md_test",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "no_md_test",
             "--append-registry",
         ]
     )
@@ -652,11 +834,16 @@ def test_cli_no_append_registry_does_not_create_file(
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert not registry_path.exists()
@@ -671,12 +858,18 @@ def test_cli_custom_momentum_window_succeeds(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv", n_days=40)
     rc = main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--momentum-window", "10",
-            "--output-dir", str(tmp_path / "out"),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--momentum-window",
+            "10",
+            "--output-dir",
+            str(tmp_path / "out"),
         ]
     )
     assert rc == 0
@@ -687,12 +880,18 @@ def test_cli_momentum_window_zero_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         main(
             [
-                "--input-path", str(prices_csv),
-                "--factor", "momentum",
-                "--label-horizon", "5",
-                "--quantiles", "5",
-                "--momentum-window", "0",
-                "--output-dir", str(tmp_path / "out"),
+                "--input-path",
+                str(prices_csv),
+                "--factor",
+                "momentum",
+                "--label-horizon",
+                "5",
+                "--quantiles",
+                "5",
+                "--momentum-window",
+                "0",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
 
@@ -709,22 +908,34 @@ def test_cli_deterministic_summary_csv(tmp_path: Path) -> None:
     out2 = tmp_path / "run2"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out1),
-            "--experiment-name", "det_test",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out1),
+            "--experiment-name",
+            "det_test",
         ]
     )
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(out2),
-            "--experiment-name", "det_test",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(out2),
+            "--experiment-name",
+            "det_test",
         ]
     )
     df1 = pd.read_csv(out1 / "det_test_summary.csv")

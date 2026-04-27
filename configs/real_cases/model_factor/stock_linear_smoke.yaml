@@ -1,0 +1,58 @@
+name: stock_linear_smoke
+factor_name: stock_linear_5d_smoke
+features_path: ../../../data/processed/stock_factor4model_2016_2026/smoke_inputs/features_safe_smoke.parquet
+feature_columns:
+  - turnover_rate
+  - turnover_rate_f
+  - volume_ratio
+  - pe_ttm
+  - pb
+  - ps_ttm
+  - dv_ttm
+  - total_mv
+  - circ_mv
+  - free_share
+  - atr_bfq
+  - bias1_bfq
+  - bias2_bfq
+  - bias3_bfq
+  - cci_bfq
+  - macd_bfq
+  - macd_dea_bfq
+  - macd_dif_bfq
+  - mtm_bfq
+  - obv_bfq
+  - rsi_bfq_6
+  - rsi_bfq_12
+  - rsi_bfq_24
+  - vr_bfq
+  - wr_bfq
+prices_path: ../../../data/processed/stock_factor4model_2016_2026/smoke_inputs/prices_raw_smoke.parquet
+rebalance_frequency: W
+n_quantiles: 5
+direction: long
+universe:
+  name: default
+target:
+  kind: forward_return
+  horizon: 5
+feature_preprocess:
+  missing_policy: median_impute
+  cross_sectional_transform: winsorize_zscore
+  scale_features: auto
+model:
+  family: linear
+  params: {}
+training:
+  window_type: rolling
+  train_window_n_dates: 120
+  min_train_dates: 60
+  min_train_rows: 50000
+  retrain_every_n_dates: 20
+  min_score_assets: 2000
+neutralization:
+  enabled: false
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: ../../../outputs/real_cases

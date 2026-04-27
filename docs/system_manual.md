@@ -6,6 +6,19 @@ context see [architecture.md](architecture.md).  For contributor guidance see
 
 ---
 
+## Scope
+
+`alpha-lab` is a Level 1/2 research system:
+
+- Level 1: factor discovery
+- Level 2: portfolio construction validation
+
+It is not an execution replay engine, implementability-grade platform,
+order-fill simulator, or microstructure execution simulator. Execution realism
+is intentionally out of scope.
+
+---
+
 ## Setup
 
 **Requirements**: Python 3.12, `uv`.
@@ -20,6 +33,14 @@ this works automatically.  For non-editable installs, set:
 
 ```bash
 export ALPHA_LAB_PROJECT_ROOT=/path/to/alpha-lab
+```
+
+**External data root**: vendor-backed research datasets should live outside the
+repository.  By default the external store resolves to
+`~/.local/share/alpha-lab/data`. Override it when needed:
+
+```bash
+export ALPHA_LAB_DATA_ROOT=/path/to/alpha-lab-data
 ```
 
 A `RuntimeError` is raised at import time if the resolved root does not contain
@@ -37,9 +58,475 @@ In WSL or sandboxed environments with restricted cache directories:
 UV_CACHE_DIR=/tmp/uv-cache make check
 ```
 
-If you use the Tushare ingestion path, also provide a Tushare Pro token via
-`TUSHARE_TOKEN` or `--token`.  This is only required for the extraction step,
-not for downstream research workflows.
+---
+
+## CLI Workflow Map
+
+`alpha-lab --help` shows the unified Level 1/2 router:
+
+- `alpha-lab run ...` (legacy single-experiment route)
+- `alpha-lab real-case ...` (single-factor/model-factor/composite case workflows)
+- `alpha-lab campaign ...` (campaign orchestration and ranking)
+- `alpha-lab bridge ...` (project-pack / round-context / writeback drafting)
+- `alpha-lab data ...` (external dataset ingest / update / export)
+- `alpha-lab profiles` (evaluation-profile discovery)
+
+Profile discovery:
+
+```bash
+alpha-lab profiles
+```
+
+Read-only data inspection example:
+
+```bash
+alpha-lab data query \
+  --sql "select date, asset, close from daily_bars order by date desc, asset limit 5"
+```
+
+Evaluation profile guidance:
+
+| Profile | Primary use | Decision tendency |
+|---|---|---|
+| `default_research` | Routine Level 1/2 research runs | Balanced baseline standards |
+| `exploratory_screening` | Broad candidate discovery and early funneling | More permissive: easier to retain borderline candidates |
+| `stricter_research` | Higher-confidence evidence and Level 2-readiness review | More conservative: stricter robustness/promotion/validation checks |
+
+Profile choice affects all default Level 1/2 decision stages:
+
+1. factor verdict classification
+2. campaign triage label and ranking metadata
+3. Level 2 promotion gate outcomes
+4. Level 2 portfolio-validation guardrails and recommendations
+
+Uncertainty mode defaults to normal-approximation CI (`uncertainty.method=normal`).
+Bootstrap CI is opt-in through evaluation config/profile
+(`uncertainty.method=bootstrap` or `uncertainty.method=block_bootstrap`) and will
+propagate method metadata into outputs.
+
+Campaign flag forwarding example:
+
+```bash
+alpha-lab campaign run research_campaign_1 --evaluation-profile default_research
+```
+
+Bridge quickstart:
+
+```bash
+alpha-lab bridge init-project \
+  --slug momentum-factor \
+  --title-zh 动量因子项目 \
+  --category factor_family \
+  --owner yukun \
+  --market ashare \
+  --frequency daily \
+  --chatgpt-project-name "Momentum Factor"
+
+alpha-lab bridge start-round \
+  --project momentum-factor \
+  --topic "三个月成交额加权动量"
+```
+
+---
+
+## End-to-End Level 1/2 Walkthrough
+
+```bash
+# 1) Inspect available profile(s)
+alpha-lab profiles
+
+# 2) Run single-factor case workflow
+alpha-lab real-case single-factor run configs/real_cases/single_factor/bp.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 3) Run model-factor case workflow
+alpha-lab real-case model-factor run configs/real_cases/model_factor/demo.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 4) Run composite case workflow
+alpha-lab real-case composite run configs/real_cases/composite/value_quality_lowvol.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+# 5) Run campaign workflow
+alpha-lab campaign run research_campaign_1 \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+Expected Level 1/2 flow for each case:
+
+1. Level 1 evaluation
+2. Campaign triage
+3. Level 2 promotion gate
+4. Level 2 portfolio validation
+
+For `real-case model-factor`, the case-specific front half is:
+
+1. load wide research feature table
+2. train rolling/expanding cross-sectional model on past data only
+3. emit canonical factor output `[date, asset, factor, value]`
+4. continue through the standard Level 1/2 flow above
+
+Primary artifacts to audit:
+
+- `run_manifest.json`
+- `metrics.json`
+- `summary.md`
+- `experiment_card.md`
+- `level2_portfolio_validation/portfolio_validation_summary.json`
+- `level2_portfolio_validation/portfolio_validation_metrics.json`
+- `level2_portfolio_validation/portfolio_validation_package.json`
+
+Core Level 1/2 JSON contract validation is enforced for:
+`run_manifest.json`, `metrics.json`, `campaign_manifest.json`,
+`campaign_results.json`, `research_validation_package.json`,
+`portfolio_validation_summary.json`, `portfolio_validation_metrics.json`,
+`portfolio_validation_package.json`, and `campaign_profile_comparison.json`.
+
+### Tushare Pro Real-Data Quickstart
+
+Use a small pilot first to control point usage, then scale up. The recommended
+flow is: ingest raw snapshots into the external Parquet-backed data store, then
+export a compact case slice as CSV inputs for the existing Level 1/2 pipeline.
+
+```bash
+# 0) Set token (replace with your real token)
+export TUSHARE_TOKEN="your_tushare_token"
+
+# 1) Initialize the external data root once
+alpha-lab data init
+
+# 2) Ingest a pilot Tushare core dataset into the external Parquet store
+alpha-lab data ingest tushare core \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
+  --asset-limit 100
+
+# 3) Export the requested Level 1/2 case slice as canonical CSV inputs
+alpha-lab data export-case-inputs \
+  --output-dir data/processed/real_case_inputs/tushare_v1 \
+  --slice-preset standard
+
+# Optional: use a custom ts_code list instead of full-market fetch
+# --assets-file path/to/ts_codes.txt
+
+# Optional: control long-window chunking
+# --chunk-months 6   # default
+# --chunk-months 0   # disable chunking
+
+# Optional: for daily price-volume research only, skip slow ROE fetches
+# --daily-research-only
+
+# Optional: explicitly export bp / roe_ttm when needed
+# --factors bp roe_ttm
+
+# Optional: fully override the preset window or export mode
+# --start-date 2021-01-01 --end-date 2024-03-31 --universe all_ashare --adjustment raw
+
+# 4) Run single-factor real-case pipelines on generated inputs
+alpha-lab real-case single-factor run configs/real_cases/bp_tushare_v1.yaml \
+  --evaluation-profile default_research \
+  --render-report
+
+alpha-lab real-case single-factor run configs/real_cases/roe_tushare_v1.yaml \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+If you see `您的token不对，请确认。`, your current token is invalid or expired.
+Re-check the token value and reset `TUSHARE_TOKEN`.
+
+内置的日频量价切片预设如下：
+
+- `pilot`: 最近 3 年，`top_liquid_300`，`qfq`
+- `standard`: 最近 5 年，`listed_90d`，`qfq`
+- `robust`: 最近 8 年，`listed_90d`，`qfq`
+- `institutional`: 最近 8 年，`institutional_ashare`，`qfq`
+
+目前支持的流动性 universe 额外包括：
+
+- `institutional_ashare`
+- `top_liquid_300`
+- `top_liquid_500`
+- `top_liquid_800`
+
+`institutional_ashare` 会保留上市满 `180` 天、当日非 ST/非停牌，且通过过去
+`20` 个样本日流动性筛选的 A 股：平均 `amount >= 20000`（Tushare 日频
+`amount` 单位为千元，约等于人民币 2000 万元），并剔除当日流动性后 `20%`。
+`top_liquid_*` 则按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
+
+旧版兼容命令 `alpha-lab web ui` 的自动数据源表单也默认使用 `standard`，
+并提供 `pilot / standard / robust / institutional` 可选项；你仍然可以在表单里继续
+手动修改开始/结束日期。新的交互式研究流程默认推荐使用 `alpha-lab web unified`。
+
+针对 A 股日频量价因子研究，`alpha-lab data export-case-inputs` 现在默认导出更完整的
+研究列：
+
+- `open / high / low / close / pre_close`
+- `volume / amount / vwap / turnover_rate`
+- `up_limit / down_limit / is_limit_up / is_limit_down`
+- `is_suspended / is_st`
+- `is_hs300 / is_zz500 / is_zz1000 / is_sz50`
+
+当 canonical 主库中存在对应表时，还会额外导出：
+
+- `asset_status.csv`
+- `index_membership.csv`
+
+覆盖约束如下：
+
+- 最低要求：最新可用日期向前至少覆盖最近 3 年，否则 `validate` 会报错
+- 稳健目标：最新可用日期向前覆盖最近 8 年；如果不足 8 年，`validate` 会给 warning
+- `export-case-inputs` 会拒绝超出 `daily_bars` 可用范围的窗口，但会用交易日历把非交易日的开始/结束日期映射到最近的开市边界
+
+长窗口的 Tushare ingest / update 默认会自动分块：
+
+- 默认按 `6` 个月分块
+- CLI 会打印每个 chunk 和每个主要抓取阶段的进度
+- 如果你明确想关掉分块，可以传 `--chunk-months 0`
+
+如果你当前只做日频量价研究，推荐在 ingest / update 时加上
+`--daily-research-only`。这样会跳过最慢的 ROE / `financial_indicator`
+抓取，但仍保留以下研究必需数据：
+
+- `daily_bars` 中的 `open/high/low/close/pre_close/volume/amount/vwap/turnover_rate`
+- `up_limit/down_limit/is_limit_up/is_limit_down`
+- `asset_status` 中的 `is_suspended/is_st`
+- `index_membership` 及 `prices.csv` 里的指数成分标记列
+
+### BaoStock Real-Data Quickstart
+
+BaoStock does not require Tushare points and can be used as an alternative
+A-share source.
+
+```bash
+# 1) Generate canonical CSV inputs from BaoStock (pilot mode)
+UV_CACHE_DIR=/tmp/uv-cache uv run --with baostock python \
+  scripts/generate_baostock_real_case_inputs.py \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
+  --asset-limit 100 \
+  --output-dir data/processed/real_case_inputs/baostock_v1
+
+# Optional: use a custom stock list
+# --assets-file path/to/ashare_codes.txt
+
+# 2) Run single-factor real-case pipeline on canonical Tushare inputs
+alpha-lab real-case single-factor run configs/real_cases/single_factor/mom20_ex5_reversal_5d_tushare_qfq_listed90.yaml \
+  --evaluation-profile default_research \
+  --render-report
+```
+
+For a stable first-pass demo, use a price-only recipe config like
+`mom20_ex5_reversal_5d_tushare_qfq_listed90` before moving to wider data bundles.
+
+### Research Bridge + ChatGPT Projects
+
+`alpha-lab bridge` 是 `quant-knowledge + alpha-lab + ChatGPT Projects` 混合工作流的
+项目层。它不会改变默认的 Level 1/2 研究主路径，只负责：
+
+- 在 `quant-knowledge/55_projects/<slug>/` 下维护项目状态
+- 生成适合上传到 ChatGPT Project 的稳定项目包与单轮上下文包
+- 把讨论结果脚手架成 `alpha-lab` case 草案
+- 把实验结果先沉淀为人工审核草稿，再正式写回 `50_experiments/`
+
+标准命令如下：
+
+```bash
+alpha-lab bridge refresh-project-pack --project momentum-factor
+alpha-lab bridge start-round --project momentum-factor --topic "三个月成交额加权动量"
+alpha-lab bridge scaffold-case --project momentum-factor --round <round_id> --case-name mom_amt_60
+alpha-lab bridge summarize-run --project momentum-factor --round <round_id> --run-root <run_dir>
+alpha-lab bridge apply-writeback --project momentum-factor --draft <draft_path>
+```
+
+生成物分层：
+
+- 稳定项目包：
+  - `01_project_brief.md`
+  - `02_project_rules.md`
+  - `03_card_map.md`
+  - `10_active_state.md`
+- 单轮包：
+  - `30_rounds/<round_id>/round_context_digest.md`
+  - `30_rounds/<round_id>/round_prompt.md`
+  - `30_rounds/<round_id>/web_search_tasks.md`
+  - `30_rounds/<round_id>/discussion_capture.md`
+- 回写草稿：
+  - `50_writeback_drafts/*__writeback_draft.md`
+  - `50_writeback_drafts/*__state_update_patch.md`
+
+`apply-writeback` 默认要求 draft frontmatter 里已经人工改成
+`review_status: approved`。这一步完成后，bridge 会：
+
+- 把 `experiment_card.md / summary.md / run_manifest.json` 写入 `50_experiments/`
+- 更新 `55_projects/<slug>/10_active_state.md`
+- 向 `55_projects/<slug>/20_decision_log.md` 追加一条项目级结论
+
+### 旧版 Web UI + BaoStock 自定义因子输入（兼容）
+
+`alpha-lab web ui` 已进入兼容期；新交互式流程优先使用
+`alpha-lab web unified`。以下内容仅用于仍依赖旧版单因子上传页面的场景。
+
+在 Web UI 里选择 `data_source=baostock` 时，内置只会自动映射 `bp/roe_ttm`。
+如果你要跑自定义因子，推荐两种方式：
+
+1. 离线先产出标准 `factor.csv`（手动模式上传 spec）。
+2. 在 spec 里写 `factor_input.recipe`，让 Web UI 在拉到 `prices.csv` 后自动生成因子。
+
+建议分层：
+- `factor_input.recipe`：因子构建层（base/preprocess/orthogonalize）。
+- 顶层 `direction`：组合方向层。
+- 顶层 `preprocess`：回测层；如果 `factor_input.mode=recipe` 且
+  `disable_pipeline_preprocess=true`，Web UI 会自动禁用这一层，避免重复处理。
+
+标准因子文件格式（必须）：
+
+| date | asset | factor | value |
+|---|---|---|---|
+| 2024-01-03 | 000001.SZ | mom3_resid_lv5 | 0.127 |
+| 2024-01-03 | 600000.SH | mom3_resid_lv5 | -0.084 |
+
+示例 spec（可直接上传 Web UI，选择 `Baostock`）：
+
+```yaml
+name: mom3_resid_lv5_demo
+factor_name: mom3_resid_lv5
+factor_path: ./placeholder.csv
+prices_path: ./placeholder_prices.csv
+factor_input:
+  mode: recipe
+  disable_pipeline_preprocess: true
+  recipe:
+    base:
+      method: momentum
+      window: 3
+    preprocess:
+      winsorize:
+        enabled: true
+        lower: 0.01
+        upper: 0.99
+        min_group_size: 5
+      standardization:
+        method: zscore
+        min_group_size: 5
+    orthogonalize:
+      enabled: true
+      exposures:
+        - method: low_volatility
+          window: 5
+      min_obs: 20
+      ridge: 1.0e-8
+rebalance_frequency: M
+n_quantiles: 5
+direction: long
+universe:
+  name: baostock_all_a
+  path: ./placeholder_universe.csv
+  in_universe_column: in_universe
+target:
+  kind: forward_return
+  horizon: 5
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: dist/web_ui_runs
+```
+
+如果希望先离线生成因子再上传：
+
+```bash
+uv run python scripts/build_factor_from_recipe.py \
+  --recipe path/to/recipe.yaml \
+  --prices data/processed/real_case_inputs/baostock_v1/prices.csv \
+  --factor-name mom3_resid_lv5 \
+  --output data/processed/real_case_inputs/baostock_v1/mom3_resid_lv5.csv
+```
+
+### Profile-Aware Compact Workflow
+
+Run one deterministic case under two profiles and export side-by-side
+comparisons:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_level12_example.py \
+  --output-root-dir dist/examples/profile_aware_level12 \
+  --profiles exploratory_screening default_research
+```
+
+Inspect:
+
+- `dist/examples/profile_aware_level12/profile_comparison.md`
+- `dist/examples/profile_aware_level12/profile_comparison.json`
+- `dist/examples/profile_aware_level12/runs/<profile>/profile_aware_bp_single_factor/metrics.json`
+
+See `docs/profile_aware_level12_example.md` for the full walkthrough.
+
+### Profile-Aware Campaign Comparison Workflow
+
+Run a compact deterministic multi-case campaign under multiple profiles and
+export campaign-level profile sensitivity:
+
+```bash
+alpha-lab campaign compare-profiles \
+  --source example \
+  --output-root-dir dist/examples/profile_aware_campaign_level12 \
+  --pair-mode adjacent \
+  --artifact-hint-path-mode relative \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+Inspect:
+
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.md`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_case_matrix.csv`
+- `dist/examples/profile_aware_campaign_level12/campaign_profile_dashboard_zh.html` (factor-first dashboard)
+
+For an existing campaign definition:
+
+```bash
+alpha-lab campaign compare-profiles \
+  --source campaign \
+  --campaign-config configs/campaigns/research_campaign_1/campaign.yaml \
+  --output-root-dir dist/campaign_profile_comparisons/research_campaign_1 \
+  --pair-mode adjacent \
+  --artifact-hint-path-mode relative \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+By default, comparison artifact hints are rendered relative to `--output-root-dir`
+for portability. Use `--artifact-hint-path-mode absolute` to keep absolute paths.
+Use `--pair-mode all_pairs` to include non-adjacent profile pairs such as
+`exploratory_screening -> stricter_research`.
+
+Render a Chinese-first local HTML dashboard from comparison outputs:
+
+```bash
+alpha-lab campaign render-dashboard \
+  --comparison-json dist/examples/profile_aware_campaign_level12/campaign_profile_comparison.json \
+  --output-html dist/examples/profile_aware_campaign_level12/campaign_profile_dashboard_zh.html \
+  --overwrite
+```
+
+Legacy script route remains available for backward compatibility:
+
+```bash
+uv run --no-sync --frozen python scripts/run_profile_aware_campaign_level12_example.py \
+  --output-root-dir dist/examples/profile_aware_campaign_level12 \
+  --profiles exploratory_screening default_research stricter_research
+```
+
+See `docs/profile_aware_campaign_level12_example.md` for the full walkthrough.
 
 ---
 
@@ -84,41 +571,6 @@ Rules:
 - Factor values at `date=t` may only use information available at or before `t`.
 - Labels and forward returns must be stored in **separate** tables.
 
-For full research-input contracts (prices/factors/labels/universe/tradability),
-see `alpha_lab.research_contracts` and `ResearchBundle.validate()`.
-
----
-
-## Tushare Real-Data Ingestion
-
-Alpha Lab supports an offline-first Tushare ingestion path for A-share data.
-The design intent is to fetch once, standardize once, and then run research on
-stored files.
-
-Pipeline:
-
-```text
-fetch raw snapshots -> standardize vendor tables -> build workflow inputs -> run existing workflows
-```
-
-Script entrypoint:
-
-```bash
-uv run python scripts/tushare_pipeline.py <command> ...
-```
-
-Commands:
-
-- `fetch-snapshots`
-- `build-standardized`
-- `build-cases`
-
-The resulting case configs feed the existing `scripts/run_research_workflow.py`
-entrypoints. They do not introduce a separate workflow engine.
-
-See [tushare_integration.md](tushare_integration.md) for endpoint coverage,
-fallback behavior, and PIT notes.
-
 ---
 
 ## Core API
@@ -126,8 +578,7 @@ fallback behavior, and PIT notes.
 ### run_factor_experiment
 
 Connects all evaluation modules (IC, quantile returns, long-short, turnover,
-and optionally portfolio simulation) into a single call. It also attaches
-timing and governance metadata to the `ExperimentResult`.
+and optionally portfolio simulation) into a single call.
 
 ```python
 from alpha_lab.experiment import run_factor_experiment
@@ -144,15 +595,12 @@ result = run_factor_experiment(
 
 # Core outputs (always present)
 result.summary               # ExperimentSummary scalar metrics
-result.ic_df                 # [date, ic]
-result.rank_ic_df            # [date, rank_ic]
-result.quantile_returns_df   # [date, quantile, mean_return]
-result.long_short_df         # [date, long_short_return]
+result.ic_df                 # [date, factor, ic]
+result.rank_ic_df            # [date, factor, rank_ic]
+result.quantile_returns_df   # [date, factor, quantile, quantile_return]
+result.long_short_df         # [date, factor, long_short_return]
 result.factor_df             # full-sample factor values
 result.label_df              # full-sample forward-return labels
-result.delay_spec            # DelaySpec alignment assumptions
-result.label_metadata        # LabelMetadata serializable label window
-result.metadata              # ExperimentMetadata governance object
 ```
 
 **Portfolio simulation** (optional):
@@ -173,19 +621,6 @@ result.portfolio_return_df              # [date, portfolio_return]
 result.portfolio_turnover_df            # [date, portfolio_turnover] (active rebalance dates)
 result.portfolio_cost_adjusted_return_df  # [date, portfolio_return, adjusted_return]
 result.portfolio_summary                # PortfolioSummary scalars
-```
-
-**Richer research diagnostics** (optional):
-
-```python
-result = run_factor_experiment(
-    prices,
-    lambda p: momentum(p, window=20),
-    horizon=5,
-    generate_factor_report=True,
-)
-
-result.factor_report  # FactorReport (rolling IC, coverage, monotonicity, decay)
 ```
 
 **Using StrategySpec** (makes construction intent explicit):
@@ -233,15 +668,11 @@ wf = run_walk_forward_experiment(
     horizon=5,
     n_quantiles=5,
     cost_rate=0.001,   # long-short cost-adjusted return (separate from portfolio path)
-    purge_periods=1,   # metadata-only validation/timing controls
-    embargo_periods=1,
 )
 
 # Fold-level summary
 wf.fold_summary_df          # one row per fold
 wf.per_fold_results         # list of ExperimentResult, one per fold
-wf.validation_spec          # WalkForwardValidationSpec
-wf.fold_windows_df          # explicit fold windows (train/val/test boundaries)
 
 # Aggregate statistics
 agg = wf.aggregate_summary  # WalkForwardAggregate
@@ -261,132 +692,6 @@ wf.pooled_cost_adjusted_portfolio_return_df # [fold_id, date, portfolio_return, 
 training-window dates as a gap between training and test windows.  No
 validation-period outputs are produced — the validation dates are excluded from
 both training and test evaluation.
-
----
-
-### Advanced research modules
-
-PIT sample construction:
-
-```python
-from alpha_lab.research_universe import construct_research_universe, ResearchUniverseRules
-
-u = construct_research_universe(
-    prices,
-    asset_metadata=asset_metadata_df,
-    market_state=market_state_df,
-    rules=ResearchUniverseRules(min_listing_age_days=60, min_adv=5_000_000),
-)
-```
-
-Rich labels and sample weights:
-
-```python
-from alpha_lab.labels import triple_barrier_labels
-from alpha_lab.sample_weights import build_sample_weights
-
-lbl = triple_barrier_labels(prices, horizon=10, pt_mult=1.0, sl_mult=1.0)
-w = build_sample_weights(
-    lbl.labels,
-    sample_id_col="asset",
-    decision_col="date",
-    return_col="label_value",
-    confidence_col="confidence",
-    half_life_periods=20,
-)
-```
-
-Purged validation:
-
-```python
-from alpha_lab.purged_validation import purged_kfold_split, purged_fold_summary
-
-folds = purged_kfold_split(events_df, n_splits=5, embargo_periods=2)
-diag = purged_fold_summary(folds)
-```
-
-Factor governance:
-
-```python
-from alpha_lab.neutralization import neutralize_signal
-from alpha_lab.factor_selection import screen_factors
-from alpha_lab.multiple_testing import apply_multiple_testing_to_trial_log
-from alpha_lab.feature_importance import build_feature_importance_report
-```
-
-Alpha-pool and executability diagnostics:
-
-```python
-from alpha_lab.composite_signals import compose_signals
-from alpha_lab.alpha_pool_diagnostics import alpha_pool_diagnostics
-from alpha_lab.capacity_diagnostics import run_capacity_diagnostics
-from alpha_lab.exposure_audit import run_exposure_audit
-from alpha_lab.research_costs import layered_research_costs
-```
-
----
-
-### End-to-end research templates
-
-`alpha_lab.research_templates` exposes canonical orchestration entrypoints for
-repeatable daily research campaigns.
-
-```python
-from alpha_lab.factors.momentum import momentum
-from alpha_lab.research_templates import (
-    SingleFactorWorkflowSpec,
-    run_single_factor_research_workflow,
-)
-
-result = run_single_factor_research_workflow(
-    prices,
-    spec=SingleFactorWorkflowSpec(
-        experiment_name="momentum_template",
-        factor_fn=lambda p: momentum(p, window=20),
-        validation_mode="purged_kfold",
-        append_trial_log=True,
-        export_handoff=True,
-        handoff_output_dir="data/processed/handoff",
-    ),
-    asset_metadata=asset_metadata_df,
-    market_state=market_state_df,
-)
-
-result.decision.verdict
-# reject / needs_review / candidate_for_registry / candidate_for_external_backtest
-```
-
-For the full single-factor and composite-template contract, see
-`docs/research_templates.md`.
-
----
-
-### Research package (canonical end-product)
-
-`alpha_lab.research_package` is a post-processing layer that turns completed
-case outputs into one standardized package artifact.
-
-```python
-from alpha_lab.research_package import build_research_package, export_research_package
-
-package = build_research_package("data/processed/research_cases/case1_single_reversal")
-export_research_package(package, output_dir="data/processed/research_cases/case1_single_reversal")
-```
-
-Package outputs:
-
-- `research_package.json` (complete machine-readable payload)
-- `research_package.md` (concise review-oriented summary)
-- optional `artifact_index.json` (explicit artifact path map)
-
-Package verdict logic is explicit and transparent. It is assembled from:
-
-- workflow `PromotionDecision`
-- replay warnings/limitations
-- execution-impact flags
-- explicit missing-artifact records
-
-See `docs/research_package.md` for field-level details.
 
 ---
 
@@ -446,7 +751,7 @@ using the quant-knowledge frontmatter schema.
 
 ```python
 path = export_experiment_card(result, name="momentum-5d-Ashare")
-# vault defaults to OBSIDIAN_VAULT_PATH from config / env var
+# requires OBSIDIAN_VAULT_PATH to be set, unless vault_path is passed explicitly
 # returns the resolved Path of the written file
 
 # Explicit vault and overwrite:
@@ -472,78 +777,14 @@ Setup, Results, and YAML frontmatter are auto-generated from the
 visible notice to that effect.  Interpretation, Next Steps, Open Questions,
 and Notes are placeholders for researcher completion.
 
-When metadata is available, exported cards include:
-- `dataset_id`, `dataset_hash`, and `trial_id` in frontmatter
-- timing assumptions (`DelaySpec`) in Setup
-- validation scheme and runtime versions in Setup
+Generated research cards should be Chinese-first in their human-readable
+sections. Keep the body and headings in Chinese by default, and preserve
+English only for necessary technical terms, proper nouns, formulas, code
+symbols, file paths, and quoted source titles.
 
 **Vault path resolution order:**
-`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var → config default
-(`/mnt/c/quant/vault/quant-knowledge`).  An empty or whitespace env var is
-treated as "not configured" and falls through to the default.
-
----
-
-### Trial Log
-
-Append-only per-trial accounting for anti-p-hacking hygiene:
-
-```python
-from alpha_lab.trial_log import append_trial_log, trial_row_from_result
-
-row = trial_row_from_result(result, experiment_name="momentum_h5")
-append_trial_log(row)  # default: data/processed/trial_log.csv
-```
-
----
-
-### External Backtest Handoff
-
-Use `alpha_lab.handoff` to export deterministic research-to-backtest artifacts:
-
-```python
-from alpha_lab.handoff import export_handoff_artifact
-from alpha_lab.handoff import PortfolioConstructionSpec, ExecutionAssumptionsSpec
-
-export = export_handoff_artifact(
-    result,
-    output_dir="data/processed/handoff",
-    universe_df=universe_df,
-    tradability_df=tradability_df,
-    include_label_snapshot=True,
-    portfolio_construction=PortfolioConstructionSpec(
-        signal_name="momentum_20d",
-        construction_method="top_bottom_k",
-        top_k=20,
-        bottom_k=20,
-        weight_method="rank",
-    ),
-    execution_assumptions=ExecutionAssumptionsSpec(
-        fill_price_rule="next_open",
-        execution_delay_bars=1,
-    ),
-)
-
-export.artifact_path
-export.manifest_path
-export.dataset_fingerprint
-```
-
-Walk-forward fold export:
-
-```python
-from alpha_lab.handoff import export_walk_forward_handoff_artifacts
-
-exports = export_walk_forward_handoff_artifacts(
-    wf_result,
-    output_dir="data/processed/handoff",
-    universe_df=universe_df,
-    tradability_df=tradability_df,
-    fold_ids=[0, 1, 2],
-)
-```
-
-See [handoff_artifact.md](handoff_artifact.md) for schema and versioning policy.
+`vault_path` argument → `OBSIDIAN_VAULT_PATH` env var.  An empty or whitespace
+env var is treated as "not configured".
 
 ---
 
@@ -566,6 +807,10 @@ Schema is validated on every append and load; mismatches raise `ValueError`.
 ---
 
 ### Comparison
+
+`alpha_lab.comparison` 是旧版低层 helper，保留给已有 notebook 和脚本兼容。
+新的 Level 1/2 对比流程优先使用 `campaign_profile_comparison.json`、
+`campaign_profile_case_matrix.csv` 等 campaign profile comparison artifacts。
 
 ```python
 from alpha_lab.comparison import compare_experiments, rank_experiments
@@ -617,9 +862,6 @@ result.provenance.run_timestamp_utc  # ISO-8601 UTC run time
 result.provenance.git_commit         # short commit hash or None
 result.provenance.portfolio_cost_rate
 result.provenance.strategy_repr      # repr(spec) or None
-result.provenance.python_version
-result.provenance.pandas_version
-result.provenance.numpy_version
 
 result.n_eval_dates       # distinct dates in the evaluation period
 result.n_eval_assets      # distinct assets in the evaluation period
@@ -652,5 +894,5 @@ Two `UserWarning`s are raised for clearly no-op parameter combinations:
 - No full backtesting engine or realistic execution simulation.
 - No position accounting or broker integration.
 - No market impact or intraday slippage model.
-- No database, dashboard, or streaming experiment tracking.
+- No database, deployed multi-user dashboard, or streaming experiment tracking.
 - Cost model is a minimal research friction estimate only.

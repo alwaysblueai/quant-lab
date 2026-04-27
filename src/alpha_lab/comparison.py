@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting import SUMMARY_COLUMNS
 
 # Ordered output columns for comparison DataFrames.
@@ -58,27 +59,23 @@ def compare_experiments(summaries: list[pd.DataFrame]) -> pd.DataFrame:
         If any element is not a :class:`pandas.DataFrame`.
     """
     if not summaries:
-        raise ValueError("summaries must be a non-empty list")
+        raise AlphaLabDataError("summaries must be a non-empty list")
 
     for i, s in enumerate(summaries):
         if not isinstance(s, pd.DataFrame):
-            raise TypeError(
+            raise AlphaLabDataError(
                 f"summaries[{i}] must be a pandas DataFrame, got {type(s).__name__}"
             )
         if len(s) != 1:
-            raise ValueError(
-                f"summaries[{i}] must contain exactly one row, got {len(s)}"
-            )
+            raise AlphaLabDataError(f"summaries[{i}] must contain exactly one row, got {len(s)}")
         missing = set(SUMMARY_COLUMNS) - set(s.columns)
         if missing:
-            raise ValueError(
+            raise AlphaLabDataError(
                 f"summaries[{i}] is missing required columns: {sorted(missing)}"
             )
         extra = set(s.columns) - set(SUMMARY_COLUMNS)
         if extra:
-            raise ValueError(
-                f"summaries[{i}] contains unexpected columns: {sorted(extra)}"
-            )
+            raise AlphaLabDataError(f"summaries[{i}] contains unexpected columns: {sorted(extra)}")
 
     combined = pd.concat(summaries, ignore_index=True)
     combined = combined.rename(columns=_RENAME)
@@ -123,7 +120,7 @@ def rank_experiments(
     any fixed input regardless of how many rows share the same metric value.
     """
     if metric not in comparison_df.columns:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"metric {metric!r} is not a column in comparison_df; "
             f"available columns: {list(comparison_df.columns)}"
         )
@@ -133,9 +130,6 @@ def rank_experiments(
     remaining = [c for c in comparison_df.columns if c != metric]
     sort_cols = [metric] + remaining
     sort_ascending = [ascending] + [True] * len(remaining)
-    return (
-        comparison_df.sort_values(
-            sort_cols, ascending=sort_ascending, na_position="last"
-        )
-        .reset_index(drop=True)
-    )
+    return comparison_df.sort_values(
+        sort_cols, ascending=sort_ascending, na_position="last"
+    ).reset_index(drop=True)

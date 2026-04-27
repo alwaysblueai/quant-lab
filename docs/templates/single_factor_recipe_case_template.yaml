@@ -1,0 +1,54 @@
+name: example_single_factor_case
+factor_name: example_factor
+factor_path: ./placeholder_factor.csv
+prices_path: ./placeholder_prices.csv
+
+factor_input:
+  mode: recipe
+  disable_pipeline_preprocess: true
+  recipe:
+    base:
+      method: momentum
+      lookback: 20
+      skip_recent: 5
+    preprocess:
+      winsorize:
+        enabled: true
+        lower: 0.01
+        upper: 0.99
+        min_group_size: 5
+      standardization:
+        method: zscore
+        min_group_size: 5
+      min_coverage: 0.2
+
+rebalance_frequency: W
+n_quantiles: 5
+direction: long
+
+universe:
+  name: baostock_all_a
+  path: ./placeholder_universe.csv
+  in_universe_column: in_universe
+
+target:
+  kind: forward_return
+  horizon: 5
+
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+
+transaction_cost:
+  one_way_rate: 0.001
+
+output:
+  root_dir: dist/web_ui_runs
+
+# 说明：
+# - 当 recipe 层已经启用预处理时，case 层预处理应保持为 no-op。
+# - 使用 Web UI 自动数据源模式时，在运行时替换占位符。
+# - 如果不使用 recipe 模式，请移除 factor_input，并把 factor_path 指向真实 CSV。

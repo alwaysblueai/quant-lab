@@ -180,9 +180,7 @@ def test_experiment_strategy_warns_on_conflicting_holding_period() -> None:
 def test_experiment_strategy_enables_portfolio_simulation() -> None:
     prices = _make_prices()
     spec = StrategySpec(holding_period=1, rebalance_frequency=1)
-    result = run_factor_experiment(
-        prices, lambda p: momentum(p, window=5), strategy=spec
-    )
+    result = run_factor_experiment(prices, lambda p: momentum(p, window=5), strategy=spec)
     assert result.portfolio_weights_df is not None
     assert result.portfolio_return_df is not None
     assert result.portfolio_summary is not None
@@ -199,9 +197,7 @@ def test_experiment_strategy_none_leaves_no_portfolio() -> None:
 def test_experiment_strategy_long_top_k_limits_weights() -> None:
     prices = _make_prices(n_assets=6)
     spec = StrategySpec(long_top_k=3, holding_period=1, rebalance_frequency=1)
-    result = run_factor_experiment(
-        prices, lambda p: momentum(p, window=5), strategy=spec
-    )
+    result = run_factor_experiment(prices, lambda p: momentum(p, window=5), strategy=spec)
     assert result.portfolio_weights_df is not None
     for date, g in result.portfolio_weights_df.groupby("date"):
         n_long = (g["weight"] > 0).sum()
@@ -211,9 +207,7 @@ def test_experiment_strategy_long_top_k_limits_weights() -> None:
 def test_experiment_strategy_long_short_net_zero() -> None:
     prices = _make_prices(n_assets=6)
     spec = StrategySpec(long_top_k=2, short_bottom_k=2, holding_period=1, rebalance_frequency=1)
-    result = run_factor_experiment(
-        prices, lambda p: momentum(p, window=5), strategy=spec
-    )
+    result = run_factor_experiment(prices, lambda p: momentum(p, window=5), strategy=spec)
     assert result.portfolio_weights_df is not None
     for date, g in result.portfolio_weights_df.groupby("date"):
         net = g["weight"].sum()
@@ -240,9 +234,7 @@ def test_experiment_strategy_cost_rate_separate_from_spec() -> None:
     """portfolio_cost_rate is not part of StrategySpec; it is a separate param."""
     prices = _make_prices()
     spec = StrategySpec(holding_period=1, rebalance_frequency=1)
-    result_no_cost = run_factor_experiment(
-        prices, lambda p: momentum(p, window=5), strategy=spec
-    )
+    result_no_cost = run_factor_experiment(prices, lambda p: momentum(p, window=5), strategy=spec)
     result_with_cost = run_factor_experiment(
         prices,
         lambda p: momentum(p, window=5),

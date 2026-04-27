@@ -1,14 +1,19 @@
 [project]
 name = "alpha-lab"
 version = "0.1.0"
-description = "Quant research workspace"
+description = "Level 1/2 quant research system for factor discovery and portfolio validation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "baostock>=0.8.9",
+    "cvxpy>=1.6",
+    "duckdb>=1.5.1",
     "ipykernel>=6.30.1",
     "jupyterlab>=4.4.10",
+    "lightgbm>=4.6.0",
     "matplotlib>=3.10.8",
     "mypy>=1.18.2",
+    "networkx>=3.6",
     "numpy>=2.3.3",
     "pandas>=2.3.2",
     "polars>=1.33.1",
@@ -19,7 +24,11 @@ dependencies = [
     "scipy>=1.16.2",
     "statsmodels>=0.14.6",
     "tushare>=1.4.29",
+    "xgboost>=3.2.0",
 ]
+
+[project.scripts]
+alpha-lab = "alpha_lab.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -33,6 +42,7 @@ addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
 xfail_strict = true
+markers = []
 
 [tool.ruff]
 line-length = 100

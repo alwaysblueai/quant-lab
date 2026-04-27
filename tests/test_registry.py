@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.registry import (
     REGISTRY_COLUMNS,
     append_to_registry,
@@ -226,7 +227,7 @@ def test_register_experiment_rejects_empty_summary(rpath: Path):
 
 
 def test_register_experiment_rejects_non_dataframe(rpath: Path):
-    with pytest.raises(TypeError):
+    with pytest.raises(AlphaLabDataError):
         register_experiment("exp1", {"factor_name": "f"}, rpath)  # type: ignore[arg-type]
 
 
@@ -388,7 +389,7 @@ def test_append_to_registry_raises_on_extra_columns_in_existing_file(rpath: Path
 
 
 def test_append_to_registry_rejects_non_dataframe(rpath: Path):
-    with pytest.raises(TypeError):
+    with pytest.raises(AlphaLabDataError):
         append_to_registry({"experiment_name": "e1"}, rpath)  # type: ignore[arg-type]
 
 

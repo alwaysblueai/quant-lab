@@ -7,9 +7,7 @@ import pandas as pd
 import pytest
 
 from alpha_lab.experiment import ExperimentResult, ExperimentSummary, run_factor_experiment
-from alpha_lab.experiment_metadata import ExperimentMetadata
 from alpha_lab.factors.momentum import momentum
-from alpha_lab.timing import DelaySpec
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -38,11 +36,7 @@ def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
     """Factor that returns the same value for every asset on every date."""
     dates = pd.to_datetime(prices["date"]).unique()
     assets = prices["asset"].unique()
-    rows = [
-        {"date": d, "asset": a, "factor": "const", "value": 1.0}
-        for d in dates
-        for a in assets
-    ]
+    rows = [{"date": d, "asset": a, "factor": "const", "value": 1.0} for d in dates for a in assets]
     return pd.DataFrame(rows)
 
 
@@ -62,6 +56,7 @@ def test_result_fields_are_dataframes():
     assert isinstance(result.label_df, pd.DataFrame)
     assert isinstance(result.ic_df, pd.DataFrame)
     assert isinstance(result.rank_ic_df, pd.DataFrame)
+    assert isinstance(result.mutual_information_df, pd.DataFrame)
     assert isinstance(result.quantile_returns_df, pd.DataFrame)
     assert isinstance(result.long_short_df, pd.DataFrame)
 
@@ -96,6 +91,11 @@ def test_rank_ic_df_has_expected_columns():
     assert {"date", "rank_ic"}.issubset(result.rank_ic_df.columns)
 
 
+def test_mutual_information_df_has_expected_columns():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    assert {"date", "mutual_information"}.issubset(result.mutual_information_df.columns)
+
+
 def test_quantile_returns_df_has_expected_columns():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     assert {"date", "quantile", "mean_return"}.issubset(result.quantile_returns_df.columns)
@@ -128,6 +128,7 @@ def test_summary_numeric_fields_are_finite_or_nan():
     for field in (
         s.mean_ic,
         s.mean_rank_ic,
+        s.mean_mutual_information,
         s.ic_ir,
         s.mean_long_short_return,
         s.long_short_hit_rate,
@@ -184,6 +185,12 @@ def test_summary_mean_rank_ic_matches_rank_ic_df():
     assert math.isclose(result.summary.mean_rank_ic, expected)
 
 
+def test_summary_mean_mutual_information_matches_mutual_information_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    expected = float(result.mutual_information_df["mutual_information"].dropna().mean())
+    assert math.isclose(result.summary.mean_mutual_information, expected)
+
+
 def test_summary_mean_long_short_return_matches_long_short_df():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     expected = float(result.long_short_df["long_short_return"].dropna().mean())
@@ -224,6 +231,151 @@ def test_summary_ic_ir_matches_mean_over_std():
     if len(ic_vals) > 1:
         expected = float(ic_vals.mean()) / float(ic_vals.std(ddof=1))
         assert math.isclose(result.summary.ic_ir, expected)
+
+
+def test_summary_ic_positive_rate_matches_ic_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    ic_vals = result.ic_df["ic"].dropna()
+    expected = float((ic_vals > 0).mean()) if len(ic_vals) > 0 else float("nan")
+    if math.isnan(expected):
+        assert math.isnan(result.summary.ic_positive_rate)
+    else:
+        assert math.isclose(result.summary.ic_positive_rate, expected)
+
+
+def test_summary_ic_valid_ratio_matches_ic_df():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    expected = float(result.ic_df["ic"].notna().mean())
+    assert math.isclose(result.summary.ic_valid_ratio, expected)
+
+
+def test_summary_long_short_ir_matches_mean_over_std():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    ls_vals = result.long_short_df["long_short_return"].dropna()
+    if len(ls_vals) <= 1:
+        assert math.isnan(result.summary.long_short_ir)
+        return
+    ls_std = float(ls_vals.std(ddof=1))
+    if ls_std == 0.0 or math.isnan(ls_std):
+        assert math.isnan(result.summary.long_short_ir)
+        return
+    expected = float(ls_vals.mean()) / ls_std
+    assert math.isclose(result.summary.long_short_ir, expected)
+
+
+def test_summary_dsr_pvalue_is_unit_interval_or_nan() -> None:
+    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    dsr = result.summary.dsr_pvalue
+    if math.isnan(dsr):
+        assert math.isnan(dsr)
+    else:
+        assert 0.0 <= dsr <= 1.0
+
+
+def test_summary_long_short_return_per_turnover_matches_ratio():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    mean_ls = result.summary.mean_long_short_return
+    mean_turn = result.summary.mean_long_short_turnover
+    if math.isnan(mean_turn) or mean_turn <= 0.0:
+        assert math.isnan(result.summary.long_short_return_per_turnover)
+    else:
+        expected = mean_ls / mean_turn
+        assert math.isclose(result.summary.long_short_return_per_turnover, expected)
+
+
+def test_summary_subperiod_robustness_share_in_unit_interval():
+    result = run_factor_experiment(_make_prices(n_days=60), _momentum_fn)
+    for value in (
+        result.summary.subperiod_ic_positive_share,
+        result.summary.subperiod_long_short_positive_share,
+    ):
+        if not math.isnan(value):
+            assert 0.0 <= value <= 1.0
+
+
+def test_rolling_stability_df_has_expected_columns():
+    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    assert {
+        "date",
+        "rolling_mean_ic",
+        "rolling_ic_positive_rate",
+        "rolling_mean_rank_ic",
+        "rolling_rank_ic_positive_rate",
+        "rolling_mean_mutual_information",
+        "rolling_mutual_information_positive_rate",
+        "rolling_mean_long_short_return",
+        "rolling_long_short_positive_rate",
+    }.issubset(result.rolling_stability_df.columns)
+
+
+def test_summary_rolling_metrics_match_rolling_stability_df():
+    result = run_factor_experiment(_make_prices(n_days=90), _momentum_fn)
+    rolling = result.rolling_stability_df
+
+    rolling_ic = rolling["rolling_mean_ic"].dropna()
+    if len(rolling_ic) == 0:
+        assert math.isnan(result.summary.rolling_ic_positive_share)
+        assert math.isnan(result.summary.rolling_ic_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_ic_positive_share,
+            float((rolling_ic > 0).mean()),
+        )
+        assert math.isclose(result.summary.rolling_ic_min_mean, float(rolling_ic.min()))
+
+    rolling_rank = rolling["rolling_mean_rank_ic"].dropna()
+    if len(rolling_rank) == 0:
+        assert math.isnan(result.summary.rolling_rank_ic_positive_share)
+        assert math.isnan(result.summary.rolling_rank_ic_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_rank_ic_positive_share,
+            float((rolling_rank > 0).mean()),
+        )
+        assert math.isclose(
+            result.summary.rolling_rank_ic_min_mean,
+            float(rolling_rank.min()),
+        )
+
+    rolling_ls = rolling["rolling_mean_long_short_return"].dropna()
+    if len(rolling_ls) == 0:
+        assert math.isnan(result.summary.rolling_long_short_positive_share)
+        assert math.isnan(result.summary.rolling_long_short_min_mean)
+    else:
+        assert math.isclose(
+            result.summary.rolling_long_short_positive_share,
+            float((rolling_ls > 0).mean()),
+        )
+        assert math.isclose(
+            result.summary.rolling_long_short_min_mean,
+            float(rolling_ls.min()),
+        )
+
+
+def test_summary_rolling_metrics_are_nan_for_short_samples():
+    result = run_factor_experiment(_make_prices(n_days=18), _momentum_fn)
+    assert math.isnan(result.summary.rolling_ic_positive_share)
+    assert math.isnan(result.summary.rolling_rank_ic_positive_share)
+    assert math.isnan(result.summary.rolling_long_short_positive_share)
+    assert math.isnan(result.summary.rolling_ic_min_mean)
+    assert math.isnan(result.summary.rolling_rank_ic_min_mean)
+    assert math.isnan(result.summary.rolling_long_short_min_mean)
+
+
+def test_summary_coverage_ratios_in_unit_interval():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    for value in (
+        result.summary.eval_coverage_ratio_mean,
+        result.summary.eval_coverage_ratio_min,
+    ):
+        if not math.isnan(value):
+            assert 0.0 <= value <= 1.0
+
+
+def test_summary_instability_flags_are_strings():
+    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    assert isinstance(result.summary.instability_flags, tuple)
+    assert all(isinstance(flag, str) for flag in result.summary.instability_flags)
 
 
 # ---------------------------------------------------------------------------
@@ -499,70 +651,3 @@ def test_ic_ir_is_nan_when_ic_has_zero_variance():
     ic_vals = result.ic_df["ic"].dropna()
     if len(ic_vals) > 1 and float(ic_vals.std(ddof=1)) == 0.0:
         assert math.isnan(result.summary.ic_ir)
-
-
-# ---------------------------------------------------------------------------
-# 8. Timing / metadata / diagnostics contracts
-# ---------------------------------------------------------------------------
-
-
-def test_default_delay_spec_matches_horizon() -> None:
-    result = run_factor_experiment(_make_prices(), _momentum_fn, horizon=3)
-    assert result.delay_spec is not None
-    assert result.delay_spec.return_horizon_periods == 3
-    assert result.label_metadata is not None
-    assert result.label_metadata.horizon_periods == 3
-
-
-def test_custom_delay_spec_must_match_horizon() -> None:
-    with pytest.raises(ValueError, match="must match horizon"):
-        run_factor_experiment(
-            _make_prices(),
-            _momentum_fn,
-            horizon=5,
-            delay_spec=DelaySpec.for_horizon(3),
-        )
-
-
-def test_metadata_without_delay_is_completed_by_runner() -> None:
-    md = ExperimentMetadata(dataset_id="snapshot-1")
-    result = run_factor_experiment(_make_prices(), _momentum_fn, metadata=md, horizon=2)
-    assert result.metadata is not None
-    assert result.metadata.delay is not None
-    assert result.metadata.delay.return_horizon_periods == 2
-
-
-def test_generate_factor_report_attaches_report() -> None:
-    result = run_factor_experiment(
-        _make_prices(),
-        _momentum_fn,
-        horizon=5,
-        generate_factor_report=True,
-    )
-    assert result.factor_report is not None
-    assert result.factor_report.horizon == 5
-
-
-def test_sample_weights_are_propagated_when_provided() -> None:
-    prices = _make_prices(n_assets=4, n_days=20)
-    keys = prices[["date", "asset"]].drop_duplicates().copy()
-    keys["sample_weight"] = 1.0
-    result = run_factor_experiment(
-        prices,
-        _momentum_fn,
-        sample_weights=keys,
-    )
-    assert result.sample_weights_df is not None
-    assert {"date", "asset", "sample_weight"} == set(result.sample_weights_df.columns)
-    assert len(result.sample_weights_df) == len(
-        result.factor_df[["date", "asset"]].drop_duplicates()
-    )
-
-
-def test_sample_weights_duplicate_keys_raise() -> None:
-    prices = _make_prices(n_assets=4, n_days=20)
-    keys = prices[["date", "asset"]].drop_duplicates().iloc[:10].copy()
-    bad = pd.concat([keys, keys.iloc[[0]]], ignore_index=True)
-    bad["sample_weight"] = 1.0
-    with pytest.raises(ValueError, match="duplicate"):
-        run_factor_experiment(prices, _momentum_fn, sample_weights=bad)

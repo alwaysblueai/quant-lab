@@ -1,4 +1,5 @@
 """Tests for alpha_lab.config path resolution."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,10 +53,26 @@ def test_invalid_env_var_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     import importlib
 
     import alpha_lab.config as cfg
+    from alpha_lab.exceptions import AlphaLabConfigError
 
-    with pytest.raises(RuntimeError, match="pyproject.toml"):
+    with pytest.raises(AlphaLabConfigError, match="pyproject.toml"):
         importlib.reload(cfg)
 
     # Clean up — reload with correct state
     monkeypatch.delenv("ALPHA_LAB_PROJECT_ROOT", raising=False)
     importlib.reload(cfg)
+
+
+def test_data_root_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    from alpha_lab import config as cfg
+
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    importlib.reload(cfg)
+    try:
+        assert cfg.DATA_ROOT == (tmp_path / "warehouse").resolve()
+        assert cfg.resolve_data_root() == (tmp_path / "warehouse").resolve()
+    finally:
+        monkeypatch.delenv("ALPHA_LAB_DATA_ROOT", raising=False)
+        importlib.reload(cfg)

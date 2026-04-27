@@ -1,0 +1,57 @@
+name: value_quality_lowvol_v1
+prices_path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/prices.csv
+rebalance_frequency: M
+n_quantiles: 5
+
+universe:
+  name: ashare_main
+  path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/universe.csv
+  in_universe_column: in_universe
+
+target:
+  kind: forward_return
+  horizon: 5
+
+components:
+  - name: bp
+    path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/bp.csv
+    factor: bp
+    weight: 0.4
+    direction: positive
+    transform: zscore
+
+  - name: roe_ttm
+    path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/roe_ttm.csv
+    factor: roe_ttm
+    weight: 0.4
+    direction: positive
+    transform: zscore
+
+  - name: resid_vol_60d
+    path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/resid_vol_60d.csv
+    factor: resid_vol_60d
+    weight: 0.2
+    direction: negative
+    transform: zscore
+
+preprocess:
+  winsorize: true
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  min_group_size: 5
+  min_coverage: 0.6
+
+neutralization:
+  enabled: false
+  exposures_path: ../../data/processed/real_case_inputs/value_quality_lowvol_v1/exposures.csv
+  size_col: size_exposure
+  industry_col: industry
+  beta_col: beta_exposure
+  min_obs: 20
+  ridge: 1.0e-8
+
+transaction_cost:
+  one_way_rate: 0.001
+
+output:
+  root_dir: ../../outputs/real_cases

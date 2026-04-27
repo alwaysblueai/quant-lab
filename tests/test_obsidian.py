@@ -127,12 +127,18 @@ def test_obsidian_markdown_has_yaml_frontmatter(tmp_path: Path) -> None:
     md_path = tmp_path / "note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -148,12 +154,18 @@ def test_obsidian_markdown_has_horizon_in_frontmatter(tmp_path: Path) -> None:
     md_path = tmp_path / "note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "3",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "3",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -165,16 +177,22 @@ def test_obsidian_markdown_has_required_sections(tmp_path: Path) -> None:
     md_path = tmp_path / "note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     content = md_path.read_text(encoding="utf-8")
-    for section in ("## Experiment", "## Summary Metrics", "## Interpretation", "## Next Steps"):
+    for section in ("## 实验信息", "## 摘要指标", "## 解释", "## 下一步"):
         assert section in content
 
 
@@ -188,13 +206,20 @@ def test_cli_obsidian_dir_path_creates_file_in_dir(tmp_path: Path) -> None:
     notes_dir = tmp_path / "notes"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "dir_test",
-            "--obsidian-markdown-path", str(notes_dir) + "/",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "dir_test",
+            "--obsidian-markdown-path",
+            str(notes_dir) + "/",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -206,13 +231,20 @@ def test_cli_obsidian_dir_path_filename_contains_experiment_name(tmp_path: Path)
     notes_dir = tmp_path / "notes"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "dir_name_test",
-            "--obsidian-markdown-path", str(notes_dir) + "/",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "dir_name_test",
+            "--obsidian-markdown-path",
+            str(notes_dir) + "/",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -226,13 +258,20 @@ def test_cli_obsidian_dir_path_filename_starts_with_date(tmp_path: Path) -> None
     notes_dir = tmp_path / "notes"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "date_test",
-            "--obsidian-markdown-path", str(notes_dir) + "/",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "date_test",
+            "--obsidian-markdown-path",
+            str(notes_dir) + "/",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -248,13 +287,20 @@ def test_cli_obsidian_existing_dir_auto_generates_filename(tmp_path: Path) -> No
     notes_dir.mkdir()
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "existing_dir_test",
-            "--obsidian-markdown-path", str(notes_dir),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "existing_dir_test",
+            "--obsidian-markdown-path",
+            str(notes_dir),
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -270,12 +316,18 @@ def test_cli_obsidian_refuses_overwrite_by_default(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     md_path = tmp_path / "note.md"
     args = [
-        "--input-path", str(prices_csv),
-        "--factor", "momentum",
-        "--label-horizon", "5",
-        "--quantiles", "5",
-        "--output-dir", str(tmp_path / "out"),
-        "--obsidian-markdown-path", str(md_path),
+        "--input-path",
+        str(prices_csv),
+        "--factor",
+        "momentum",
+        "--label-horizon",
+        "5",
+        "--quantiles",
+        "5",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--obsidian-markdown-path",
+        str(md_path),
     ]
     main(args)
     with pytest.raises(SystemExit):
@@ -286,12 +338,18 @@ def test_cli_obsidian_overwrite_flag_allows_rewrite(tmp_path: Path) -> None:
     prices_csv = _write_prices_csv(tmp_path / "prices.csv")
     md_path = tmp_path / "note.md"
     args = [
-        "--input-path", str(prices_csv),
-        "--factor", "momentum",
-        "--label-horizon", "5",
-        "--quantiles", "5",
-        "--output-dir", str(tmp_path / "out"),
-        "--obsidian-markdown-path", str(md_path),
+        "--input-path",
+        str(prices_csv),
+        "--factor",
+        "momentum",
+        "--label-horizon",
+        "5",
+        "--quantiles",
+        "5",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--obsidian-markdown-path",
+        str(md_path),
         "--obsidian-overwrite",
     ]
     assert main(args) == 0
@@ -316,13 +374,20 @@ def test_cli_registry_stores_resolved_file_path_not_dir(
     notes_dir = tmp_path / "notes"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "path_test",
-            "--obsidian-markdown-path", str(notes_dir) + "/",
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "path_test",
+            "--obsidian-markdown-path",
+            str(notes_dir) + "/",
             "--append-registry",
         ]
     )
@@ -344,13 +409,20 @@ def test_cli_registry_obsidian_path_matches_written_file(
     md_path = tmp_path / "my_note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--experiment-name", "path_match_test",
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--experiment-name",
+            "path_match_test",
+            "--obsidian-markdown-path",
+            str(md_path),
             "--append-registry",
         ]
     )
@@ -372,12 +444,18 @@ def test_obsidian_note_does_not_contain_literal_nan(tmp_path: Path) -> None:
     md_path = tmp_path / "note.md"
     main(
         [
-            "--input-path", str(prices_csv),
-            "--factor", "momentum",
-            "--label-horizon", "5",
-            "--quantiles", "5",
-            "--output-dir", str(tmp_path / "out"),
-            "--obsidian-markdown-path", str(md_path),
+            "--input-path",
+            str(prices_csv),
+            "--factor",
+            "momentum",
+            "--label-horizon",
+            "5",
+            "--quantiles",
+            "5",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--obsidian-markdown-path",
+            str(md_path),
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -410,8 +488,11 @@ def test_obsidian_note_nan_metric_renders_as_em_dash_unit() -> None:
     # Constant factor → zero cross-sectional variance → IC is always NaN
     def constant_fn(p: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(
-            [{"date": d, "asset": a, "factor": "const", "value": 1.0}
-             for d in p["date"].unique() for a in p["asset"].unique()]
+            [
+                {"date": d, "asset": a, "factor": "const", "value": 1.0}
+                for d in p["date"].unique()
+                for a in p["asset"].unique()
+            ]
         )
 
     result = run_factor_experiment(prices, constant_fn)

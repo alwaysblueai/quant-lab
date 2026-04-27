@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 
@@ -140,7 +141,7 @@ def test_constant_prices_zero_return():
 
 def test_missing_column_raises():
     df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=5), "close": range(5)})
-    with pytest.raises(KeyError, match="asset"):
+    with pytest.raises(AlphaLabDataError, match="asset"):
         momentum(df)
 
 
@@ -192,7 +193,41 @@ def test_min_periods_tolerates_nan_gaps():
 
 
 # --------------------------------------------------------------------------- #
-# T11 – multiple assets are computed independently                             #
+# T11 – skip_recent excludes the most recent rows                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_skip_recent_excludes_most_recent_rows():
+    prices = [100.0 + float(i) for i in range(30)]
+    df = _make_df({"A": prices})
+
+    result = momentum(df, window=20, skip_recent=5).set_index("date")["value"]
+
+    assert result.iloc[:25].isna().all()
+    expected = prices[25 - 5] / prices[25 - 5 - 20] - 1.0
+    assert result.iloc[25] == pytest.approx(expected)
+    expected_last = prices[29 - 5] / prices[29 - 25] - 1.0
+    assert result.iloc[29] == pytest.approx(expected_last)
+
+
+# --------------------------------------------------------------------------- #
+# T12 – skip_recent has no lookahead bias                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_skip_recent_has_no_lookahead_bias():
+    prices = [float(100 + i) for i in range(30)]
+    df_full = _make_df({"A": prices})
+    result_full = momentum(df_full, window=20, skip_recent=5).set_index("date")["value"]
+
+    df_prefix = _make_df({"A": prices[:26]})
+    result_prefix = momentum(df_prefix, window=20, skip_recent=5).set_index("date")["value"]
+
+    assert result_full.iloc[25] == pytest.approx(result_prefix.iloc[25])
+
+
+# --------------------------------------------------------------------------- #
+# T13 – multiple assets are computed independently                             #
 # --------------------------------------------------------------------------- #
 
 
@@ -213,7 +248,7 @@ def test_multiple_assets():
 
 
 # --------------------------------------------------------------------------- #
-# T12 – empty input returns empty DataFrame                                    #
+# T14 – empty input returns empty DataFrame                                    #
 # --------------------------------------------------------------------------- #
 
 
@@ -226,7 +261,7 @@ def test_empty_input_returns_empty_df():
 
 
 # --------------------------------------------------------------------------- #
-# T13 – NaN in date or asset raises ValueError                                 #
+# T15 – NaN in date or asset raises ValueError                                 #
 # --------------------------------------------------------------------------- #
 
 
@@ -245,7 +280,7 @@ def test_nan_asset_raises():
 
 
 # --------------------------------------------------------------------------- #
-# T14 – non-positive prices produce NaN                                        #
+# T16 – non-positive prices produce NaN                                        #
 # --------------------------------------------------------------------------- #
 
 
@@ -303,6 +338,13 @@ def test_invalid_window_raises():
         momentum(df, window=0)
 
 
+def test_invalid_skip_recent_raises():
+    df = _make_df({"A": [10.0, 11.0, 12.0]})
+
+    with pytest.raises(ValueError, match="skip_recent"):
+        momentum(df, window=2, skip_recent=-1)
+
+
 def test_invalid_min_periods_raises():
     df = _make_df({"A": [10.0, 11.0, 12.0]})
 
@@ -311,3 +353,6 @@ def test_invalid_min_periods_raises():
 
     with pytest.raises(ValueError, match="min_periods"):
         momentum(df, window=2, min_periods=4)
+
+    with pytest.raises(ValueError, match="min_periods"):
+        momentum(df, window=2, skip_recent=2, min_periods=6)

@@ -258,9 +258,11 @@ def test_walk_forward_rejects_repeated_dates():
     walk_forward_split() would split a shared timestamp across train/test,
     creating leakage.  The function must error explicitly."""
     # Simulate a 3-asset panel: each date appears 3 times
-    panel_dates = pd.Series(
-        pd.date_range("2024-01-01", periods=5, freq="B").repeat(3)
-    ).sort_values().reset_index(drop=True)
+    panel_dates = (
+        pd.Series(pd.date_range("2024-01-01", periods=5, freq="B").repeat(3))
+        .sort_values()
+        .reset_index(drop=True)
+    )
 
     with pytest.raises(ValueError, match="repeated values"):
         walk_forward_split(panel_dates, train_size=6, test_size=3, step=3)

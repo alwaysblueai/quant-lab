@@ -1,0 +1,41 @@
+name: mom20_raw_reversal_10d_tushare_qfq_listed90_tradable
+factor_name: mom20_raw
+factor_path: ../../../data/processed/real_case_inputs/tushare_qfq_listed90_20200401_20260401/mom20_raw.csv
+prices_path: ../../../data/processed/real_case_inputs/tushare_qfq_listed90_20200401_20260401/prices.csv
+factor_input:
+  mode: recipe
+  disable_pipeline_preprocess: true
+  recipe:
+    base:
+      method: momentum
+      window: 20
+    preprocess:
+      winsorize:
+        enabled: true
+        lower: 0.01
+        upper: 0.99
+        min_group_size: 5
+      standardization:
+        method: zscore
+        min_group_size: 5
+      min_coverage: 0.2
+rebalance_frequency: W
+n_quantiles: 5
+direction: short
+universe:
+  name: listed_90d_tradable
+  path: ../../../data/processed/real_case_inputs/tushare_qfq_listed90_20200401_20260401/tradable_universe.csv
+  in_universe_column: in_universe
+target:
+  kind: forward_return
+  horizon: 10
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: ../../../outputs/real_cases

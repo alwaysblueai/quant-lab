@@ -1,139 +1,247 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
+
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.research_integrity.leakage_checks import check_cross_section_transform_scope
+from alpha_lab.sorted_panel import ensure_sorted
+
+_REQUIRED_COLUMNS: frozenset[str] = frozenset({"date", "asset", "value"})
 
 
 def winsorize_cross_section(
     df: pd.DataFrame,
     *,
-    value_col: str = "value",
-    by: str = "date",
     lower: float = 0.01,
     upper: float = 0.99,
     min_group_size: int = 3,
+    enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Winsorize values within each cross-sectional group."""
-    _validate_transform_inputs(df, value_col=value_col, by=by, min_group_size=min_group_size)
+    """Winsorize ``value`` per date cross-section.
+
+    When a date has fewer than ``min_group_size`` valid rows the group is
+    **skipped** and raw values flow through untouched. This is deliberately
+    different from :func:`zscore_cross_section` / :func:`rank_cross_section`,
+    which NaN-out such groups: clipping is defined for any sample size ≥1,
+    whereas standardization/ranking require a meaningful cross-sectional
+    distribution.
+    """
+
+    _validate_signal_frame(df)
     out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
 
-    def _clip(vals: pd.Series) -> pd.Series:
-        n = int(vals.notna().sum())
-        if n < min_group_size:
-            return vals
-        lo = vals.quantile(lower)
-        hi = vals.quantile(upper)
-        return vals.clip(lower=lo, upper=hi)
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    lo = grouped.transform("quantile", lower)
+    hi = grouped.transform("quantile", upper)
+    eligible = valid_count >= min_group_size
+    clipped = out["value"].clip(lower=lo, upper=hi)
+    out.loc[eligible, "value"] = clipped.loc[eligible]
 
-    out[value_col] = out.groupby(by, sort=True)[value_col].transform(_clip)
-    return out
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="winsorize_cross_section",
+        enforce_integrity=enforce_integrity,
+    )
+
+
+def mad_winsorize_cross_section(
+    df: pd.DataFrame,
+    *,
+    k: float = 3.0,
+    min_group_size: int = 3,
+    enforce_integrity: bool = True,
+) -> pd.DataFrame:
+    """MAD winsorize ``value`` per date cross-section."""
+    if k <= 0:
+        raise AlphaLabConfigError("k must be > 0")
+
+    _validate_signal_frame(df)
+    out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    median = grouped.transform("median")
+    abs_dev = (out["value"] - median).abs()
+    mad = abs_dev.groupby(out["date"], sort=False).transform("median")
+
+    eligible = (valid_count >= min_group_size) & np.isfinite(mad) & (mad > 0.0)
+    lo = median - float(k) * mad
+    hi = median + float(k) * mad
+    clipped = out["value"].clip(lower=lo, upper=hi)
+    out.loc[eligible, "value"] = clipped.loc[eligible]
+
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="mad_winsorize_cross_section",
+        enforce_integrity=enforce_integrity,
+    )
 
 
 def zscore_cross_section(
     df: pd.DataFrame,
     *,
-    value_col: str = "value",
-    by: str = "date",
     min_group_size: int = 3,
+    enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Compute cross-sectional z-scores with small-group safeguards."""
-    _validate_transform_inputs(df, value_col=value_col, by=by, min_group_size=min_group_size)
+    """Z-score standardize ``value`` per date cross-section.
+
+    Uses **population standard deviation** (``ddof=0``) via
+    :func:`~alpha_lab.preprocess.zscore_series`.  This is intentional:
+    the goal is within-date normalization, not estimating a population
+    parameter.  See ``zscore_series`` docstring for the full rationale
+    and contrast with ``compute_ic_summary`` (which uses ``ddof=1``).
+
+    Dates with fewer than ``min_group_size`` valid rows have the entire group
+    NaN-ed: a z-score computed from a handful of observations is not
+    informative and should not flow downstream. Contrast with
+    :func:`winsorize_cross_section`, which skips small groups without
+    nulling them.
+    """
+
+    _validate_signal_frame(df)
     out = df.copy()
+    values = pd.to_numeric(out["value"], errors="coerce")
+    out["value"] = values
 
-    def _z(vals: pd.Series) -> pd.Series:
-        n = int(vals.notna().sum())
-        if n < min_group_size:
-            return pd.Series(np.nan, index=vals.index, dtype=float)
-        mu = vals.mean()
-        std = vals.std(ddof=0)
-        if std == 0 or np.isnan(std):
-            return pd.Series(0.0, index=vals.index, dtype=float)
-        return (vals - mu) / std
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    mean = grouped.transform("mean")
+    # pandas transform("std") uses sample std (ddof=1); convert to ddof=0
+    # to match zscore_series semantics.
+    std_sample = grouped.transform("std")
+    scale = pd.Series(np.nan, index=out.index, dtype=float)
+    positive_count = valid_count > 0
+    scale.loc[positive_count] = np.sqrt(
+        (valid_count.loc[positive_count] - 1.0) / valid_count.loc[positive_count]
+    )
+    std_pop = std_sample * scale
 
-    out[value_col] = out.groupby(by, sort=True)[value_col].transform(_z)
-    return out
+    small_group = valid_count < min_group_size
+    valid_row = values.notna() & (~small_group)
+    std_zero_or_nan = (~np.isfinite(std_pop)) | std_pop.eq(0.0)
+
+    out.loc[:, "value"] = np.nan
+    out.loc[valid_row & std_zero_or_nan, "value"] = 0.0
+    z_mask = valid_row & (~std_zero_or_nan)
+    out.loc[z_mask, "value"] = (values.loc[z_mask] - mean.loc[z_mask]) / std_pop.loc[z_mask]
+
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="zscore_cross_section",
+        enforce_integrity=enforce_integrity,
+    )
 
 
 def rank_cross_section(
     df: pd.DataFrame,
     *,
-    value_col: str = "value",
-    by: str = "date",
-    pct: bool = True,
-    min_group_size: int = 2,
-) -> pd.DataFrame:
-    """Compute cross-sectional ranks per group."""
-    _validate_transform_inputs(df, value_col=value_col, by=by, min_group_size=min_group_size)
-    out = df.copy()
-
-    def _rank(vals: pd.Series) -> pd.Series:
-        n = int(vals.notna().sum())
-        if n < min_group_size:
-            return pd.Series(np.nan, index=vals.index, dtype=float)
-        return vals.rank(method="average", ascending=True, na_option="keep", pct=pct)
-
-    out[value_col] = out.groupby(by, sort=True)[value_col].transform(_rank)
-    return out
-
-
-def neutralize_by_group(
-    df: pd.DataFrame,
-    *,
-    group_col: str,
-    value_col: str = "value",
-    by: str = "date",
     min_group_size: int = 3,
+    pct: bool = True,
+    enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Group-demean values within each (date, group) with size safeguards."""
-    _validate_transform_inputs(df, value_col=value_col, by=by, min_group_size=min_group_size)
-    if group_col not in df.columns:
-        raise ValueError(f"df is missing group_col {group_col!r}")
+    """Cross-sectional rank transform for ``value`` per date.
+
+    Dates with fewer than ``min_group_size`` valid rows have the entire group
+    NaN-ed (ranks from a degenerate sample are not meaningful). Ties are
+    resolved with pandas' ``method="average"``.
+    """
+
+    _validate_signal_frame(df)
     out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
 
-    keys = [by, group_col]
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    ranked = grouped.rank(
+        method="average",
+        ascending=True,
+        pct=pct,
+    )
+    out["value"] = ranked
+    out.loc[valid_count < min_group_size, "value"] = np.nan
 
-    def _demean(vals: pd.Series) -> pd.Series:
-        n = int(vals.notna().sum())
-        if n < min_group_size:
-            return pd.Series(np.nan, index=vals.index, dtype=float)
-        return vals - vals.mean()
-
-    out[value_col] = out.groupby(keys, sort=True)[value_col].transform(_demean)
-    return out
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="rank_cross_section",
+        enforce_integrity=enforce_integrity,
+    )
 
 
 def apply_min_coverage_gate(
     df: pd.DataFrame,
     *,
-    value_col: str = "value",
-    by: str = "date",
-    min_coverage: float = 0.3,
+    min_coverage: float,
+    enforce_integrity: bool = True,
 ) -> pd.DataFrame:
-    """Drop groups whose non-null coverage is below min_coverage."""
+    """Set `value` to NaN on dates whose non-null coverage is below threshold."""
+
+    _validate_signal_frame(df)
     if min_coverage <= 0 or min_coverage > 1:
-        raise ValueError("min_coverage must be in (0, 1]")
-    _validate_transform_inputs(df, value_col=value_col, by=by, min_group_size=1)
+        raise AlphaLabConfigError("min_coverage must be in (0, 1]")
+
     out = df.copy()
+    grouped = out.groupby("date", sort=False)["value"]
+    coverage = grouped.transform("count") / grouped.transform("size")
+    out.loc[coverage < min_coverage, "value"] = np.nan
+    out = _coerce_sort(out)
+    return _validate_transform_scope(
+        source_df=df,
+        transformed_df=out,
+        transform_name="apply_min_coverage_gate",
+        enforce_integrity=enforce_integrity,
+    )
 
-    n_total = out.groupby(by, sort=True)[value_col].size()
-    n_valid = out.groupby(by, sort=True)[value_col].apply(lambda s: int(s.notna().sum()))
-    coverage = (n_valid / n_total).rename("_coverage")
-    keep_dates = set(coverage[coverage >= min_coverage].index)
-    return out[out[by].isin(keep_dates)].reset_index(drop=True)
+
+def _validate_signal_frame(df: pd.DataFrame) -> None:
+    missing = _REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise AlphaLabDataError(f"signal transform input missing columns: {sorted(missing)}")
 
 
-def _validate_transform_inputs(
-    df: pd.DataFrame,
+def _coerce_sort(df: pd.DataFrame) -> pd.DataFrame:
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return ensure_sorted(df, by=("date", "asset"))
+
+
+def _validate_transform_scope(
     *,
-    value_col: str,
-    by: str,
-    min_group_size: int,
-) -> None:
-    if value_col not in df.columns:
-        raise ValueError(f"df is missing value_col {value_col!r}")
-    if by not in df.columns:
-        raise ValueError(f"df is missing by column {by!r}")
-    if min_group_size <= 0:
-        raise ValueError("min_group_size must be >= 1")
-    if not pd.api.types.is_numeric_dtype(df[value_col]):
-        raise ValueError(f"{value_col!r} must be numeric")
+    source_df: pd.DataFrame,
+    transformed_df: pd.DataFrame,
+    transform_name: str,
+    enforce_integrity: bool,
+) -> pd.DataFrame:
+    if not enforce_integrity:
+        return transformed_df
+
+    check = check_cross_section_transform_scope(
+        source_df,
+        transformed_df,
+        date_col="date",
+        asset_col="asset",
+        object_name=transform_name,
+    )
+    transformed_df.attrs["integrity_scope_check"] = check.to_dict()
+
+    if check.status == "fail":
+        raise AlphaLabDataError(f"{transform_name} failed integrity scope check: {check.message}")
+    if check.status == "warn":
+        warnings.warn(
+            f"{transform_name} integrity warning: {check.message}",
+            UserWarning,
+            stacklevel=3,
+        )
+    return transformed_df

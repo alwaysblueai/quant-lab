@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.interfaces import validate_factor_output
 
 _QUANTILE_ASSIGNMENT_COLUMNS = ("date", "asset", "factor", "quantile")
 _QUANTILE_RETURN_COLUMNS = ("date", "factor", "quantile", "mean_return")
@@ -43,20 +44,18 @@ def quantile_assignments(
         assignment.  ``quantile`` is an integer in ``[1, n_quantiles]``.
     """
     if n_quantiles < 2:
-        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+        raise AlphaLabConfigError(f"n_quantiles must be >= 2, got {n_quantiles}")
     if factors.empty:
         return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
 
-    _validate_canonical(factors, "factors")
+    validate_factor_output(factors)
     factor_name = _single_factor_name(factors, "factors")
 
     df = factors[["date", "asset", "value"]].dropna(subset=["value"]).copy()
     if df.empty:
         return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
 
-    df["quantile"] = df.groupby("date", sort=True)["value"].transform(
-        lambda s: _assign_quantile(s, n_quantiles)
-    )
+    df["quantile"] = _assign_quantiles_by_date(df, value_col="value", n_quantiles=n_quantiles)
     df = df.dropna(subset=["quantile"])
     df["quantile"] = df["quantile"].astype(int)
     df["factor"] = factor_name
@@ -67,6 +66,8 @@ def quantile_returns(
     factors: pd.DataFrame,
     labels: pd.DataFrame,
     n_quantiles: int = 5,
+    *,
+    merged_pairs: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Compute average return per cross-sectional quantile bucket.
 
@@ -108,13 +109,13 @@ def quantile_returns(
         NaN-dropping are excluded entirely.
     """
     if n_quantiles < 2:
-        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+        raise AlphaLabConfigError(f"n_quantiles must be >= 2, got {n_quantiles}")
 
     if factors.empty or labels.empty:
         return pd.DataFrame(columns=list(_QUANTILE_RETURN_COLUMNS))
 
-    _validate_canonical(factors, "factors")
-    _validate_canonical(labels, "labels")
+    validate_factor_output(factors)
+    validate_factor_output(labels)
 
     factor_name = _single_factor_name(factors, "factors")
     # Enforce a single label name so the merge below stays one-to-one.
@@ -122,23 +123,34 @@ def quantile_returns(
     # (date, asset) the merge would silently fan out rows and corrupt mean_return.
     _single_factor_name(labels, "labels")
 
-    # Merge strictly on (date, asset) — the only safe join key.
-    # validate="one_to_one" is a hard guard: after the single-label check above
-    # the merge must be 1:1; any violation indicates a data-contract breach.
-    merged = factors[["date", "asset", "value"]].merge(
-        labels[["date", "asset", "value"]].rename(columns={"value": "_label"}),
-        on=["date", "asset"],
-        how="inner",
-        validate="one_to_one",
-    )
+    if merged_pairs is not None:
+        required = {"date", "asset", "value_factor", "value_label"}
+        missing = required - set(merged_pairs.columns)
+        if missing:
+            raise AlphaLabDataError(f"merged_pairs is missing required columns: {sorted(missing)}")
+        merged = merged_pairs[["date", "asset", "value_factor", "value_label"]].rename(
+            columns={"value_factor": "value", "value_label": "_label"}
+        )
+    else:
+        # Merge strictly on (date, asset) — the only safe join key.
+        # validate="one_to_one" is a hard guard: after the single-label check above
+        # the merge must be 1:1; any violation indicates a data-contract breach.
+        merged = factors[["date", "asset", "value"]].merge(
+            labels[["date", "asset", "value"]].rename(columns={"value": "_label"}),
+            on=["date", "asset"],
+            how="inner",
+            validate="one_to_one",
+        )
     merged = merged.dropna(subset=["value", "_label"])
 
     if merged.empty:
         return pd.DataFrame(columns=list(_QUANTILE_RETURN_COLUMNS))
 
     # Cross-sectional quantile assignment per date — uses only same-date data.
-    merged["quantile"] = merged.groupby("date", sort=True)["value"].transform(
-        lambda s: _assign_quantile(s, n_quantiles)
+    merged["quantile"] = _assign_quantiles_by_date(
+        merged,
+        value_col="value",
+        n_quantiles=n_quantiles,
     )
     merged = merged.dropna(subset=["quantile"])
     merged["quantile"] = merged["quantile"].astype(int)
@@ -173,22 +185,35 @@ def long_short_return(quantile_ret: pd.DataFrame) -> pd.DataFrame:
 
     missing = set(_QUANTILE_RETURN_COLUMNS) - set(quantile_ret.columns)
     if missing:
-        raise ValueError(f"Missing columns in quantile_ret: {missing}")
+        raise AlphaLabDataError(f"Missing columns in quantile_ret: {missing}")
 
-    def _ls(group: pd.DataFrame) -> float:
-        q_min = int(group["quantile"].min())
-        q_max = int(group["quantile"].max())
-        if q_min == q_max:
-            return float("nan")
-        bottom = float(group.loc[group["quantile"] == q_min, "mean_return"].mean())
-        top = float(group.loc[group["quantile"] == q_max, "mean_return"].mean())
-        return top - bottom
+    per_bucket = (
+        quantile_ret.groupby(["date", "factor", "quantile"], sort=True, as_index=False)[
+            "mean_return"
+        ]
+        .mean()
+        .sort_values(["date", "factor", "quantile"], kind="mergesort")
+    )
+    grouped = per_bucket.groupby(["date", "factor"], sort=True, group_keys=False)
+    first_rows = (
+        grouped.head(1)
+        .set_index(["date", "factor"])[["quantile", "mean_return"]]
+        .rename(columns={"quantile": "q_min", "mean_return": "bottom"})
+    )
+    last_rows = (
+        grouped.tail(1)
+        .set_index(["date", "factor"])[["quantile", "mean_return"]]
+        .rename(columns={"quantile": "q_max", "mean_return": "top"})
+    )
+    n_q = per_bucket.groupby(["date", "factor"], sort=True)["quantile"].nunique()
+    agg = first_rows.join(last_rows).join(n_q.rename("n_q"))
+    long_short = agg["top"] - agg["bottom"]
+    long_short.loc[agg["n_q"] < 2] = np.nan
 
     result = (
-        quantile_ret.groupby(["date", "factor"], sort=True)
-        .apply(_ls, include_groups=False)
+        long_short.rename("long_short_return")
         .reset_index()
-        .rename(columns={0: "long_short_return"})
+        .sort_values(["date", "factor"], kind="mergesort")
     )
     return result[list(_LONG_SHORT_COLUMNS)].reset_index(drop=True)
 
@@ -245,33 +270,72 @@ def _assign_quantile(series: pd.Series, n_quantiles: int) -> pd.Series:
     # Row-order invariant because the rank depends only on relative value ordering.
     dense_rank = series.rank(method="dense", na_option="keep")
 
-    def _bucket(r: float) -> float:
-        # Linear map: rank 1 → bucket 1, rank n_distinct → bucket effective_q.
-        # Endpoints are always exact integers by construction.  Half-way values
-        # (exact .5) use "round half up" via int(q + 0.5), which is explicit
-        # and auditable — Python's built-in round() uses banker's rounding
-        # (round-half-to-even) and would be harder to reason about here.
-        q = (r - 1) / (n_distinct - 1) * (effective_q - 1) + 1
-        return float(int(q + 0.5))
-
-    return dense_rank.apply(lambda r: _bucket(r) if pd.notna(r) else float("nan"))
+    # Vectorised bucket assignment (replaces per-element .apply(lambda)).
+    # Linear map: rank 1 → bucket 1, rank n_distinct → bucket effective_q.
+    # Round-half-up via (q + 0.5).astype(int) matches the original int(q + 0.5).
+    r = dense_rank.to_numpy(dtype=float)
+    q = (r - 1) / (n_distinct - 1) * (effective_q - 1) + 1
+    buckets = np.where(np.isnan(r), np.nan, np.floor(q + 0.5))
+    return pd.Series(buckets, index=series.index, dtype=float)
 
 
-def _validate_canonical(df: pd.DataFrame, table_name: str) -> None:
-    missing = set(FACTOR_OUTPUT_COLUMNS) - set(df.columns)
-    if missing:
-        raise ValueError(f"{table_name} is missing required columns: {missing}")
-    if df["date"].isna().any():
-        raise ValueError(f"{table_name} contains NaT in 'date'")
-    if df["asset"].isna().any():
-        raise ValueError(f"{table_name} contains NaN in 'asset'")
-    dupes = df.duplicated(subset=["date", "asset", "factor"])
-    if dupes.any():
-        raise ValueError(f"{table_name} contains duplicate (date, asset, factor) rows")
+def _assign_quantiles_by_date(
+    df: pd.DataFrame,
+    *,
+    value_col: str,
+    n_quantiles: int,
+) -> pd.Series:
+    """Vectorised per-date wrapper around _assign_quantile semantics."""
+    n_rows = len(df)
+    out = np.full(n_rows, np.nan, dtype=float)
+    if n_rows == 0:
+        return pd.Series(out, index=df.index, dtype=float)
+
+    dates = pd.to_datetime(df["date"], errors="coerce").to_numpy()
+    values = pd.to_numeric(df[value_col], errors="coerce").to_numpy(dtype=float)
+
+    valid_rows = np.isfinite(values) & ~pd.isna(dates)
+    if not valid_rows.any():
+        return pd.Series(out, index=df.index, dtype=float)
+
+    valid_idx = np.flatnonzero(valid_rows)
+    valid_dates = dates[valid_rows]
+    valid_values = values[valid_rows]
+
+    order = np.argsort(valid_dates, kind="mergesort")
+    ordered_idx = valid_idx[order]
+    ordered_dates = valid_dates[order]
+    ordered_values = valid_values[order]
+
+    unique_dates, start_idx = np.unique(ordered_dates, return_index=True)
+    end_idx = np.append(start_idx[1:], len(ordered_dates))
+
+    for i in range(len(unique_dates)):
+        begin = int(start_idx[i])
+        end = int(end_idx[i])
+        row_idx = ordered_idx[begin:end]
+        group_values = ordered_values[begin:end]
+
+        n_valid = int(group_values.size)
+        if n_valid < 2:
+            continue
+
+        effective_q = min(n_quantiles, n_valid)
+        unique_vals, inverse = np.unique(group_values, return_inverse=True)
+        n_distinct = int(unique_vals.size)
+        if n_distinct == 1:
+            out[row_idx] = 1.0
+            continue
+
+        dense_rank = inverse.astype(float) + 1.0
+        q = (dense_rank - 1.0) / float(n_distinct - 1) * float(effective_q - 1) + 1.0
+        out[row_idx] = np.floor(q + 0.5)
+
+    return pd.Series(out, index=df.index, dtype=float)
 
 
 def _single_factor_name(df: pd.DataFrame, table_name: str) -> str:
     names = pd.unique(df["factor"])
     if len(names) != 1:
-        raise ValueError(f"{table_name} must contain exactly one factor name")
+        raise AlphaLabDataError(f"{table_name} must contain exactly one factor name")
     return str(names[0])

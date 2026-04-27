@@ -4,6 +4,7 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -11,7 +12,7 @@ from alpha_lab.cli import _build_factor_fn, _load_prices, _safe_filename
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.data_validation import validate_price_panel
 from alpha_lab.obsidian import write_obsidian_note
-from alpha_lab.walk_forward import WalkForwardResult, run_walk_forward_experiment
+from alpha_lab.walk_forward import run_walk_forward_experiment
 
 SUPPORTED_FACTORS = frozenset({"momentum", "reversal", "low_volatility"})
 
@@ -21,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="run_walk_forward_experiment",
         description=(
             "Run a walk-forward factor experiment and write fold-level / aggregate "
-            "artifacts for out-of-sample research."
+            "artifacts for Level 1/2 out-of-sample research validation."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -33,13 +34,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--test-size", required=True, type=int, help="Test window in unique dates.")
     p.add_argument("--step", required=True, type=int, help="Date advance between folds.")
     p.add_argument("--val-size", default=0, type=int, help="Gap between train and test windows.")
-    p.add_argument("--purge-periods", default=0, type=int, help="Metadata-only purge periods.")
-    p.add_argument(
-        "--embargo-periods",
-        default=0,
-        type=int,
-        help="Metadata-only embargo periods.",
-    )
     p.add_argument("--cost-rate", type=float, default=None, metavar="RATE")
     p.add_argument("--momentum-window", type=int, default=20)
     p.add_argument("--reversal-window", type=int, default=5)
@@ -67,7 +61,11 @@ def _fmt_float(value: float) -> str:
 
 
 def _walk_forward_markdown(
-    *, experiment_name: str, wf: WalkForwardResult, factor: str, horizon: int
+    *,
+    experiment_name: str,
+    wf: Any,
+    factor: str,
+    horizon: int,
 ) -> str:
     agg = wf.aggregate_summary
     lines = [
@@ -133,10 +131,6 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--{name.replace('_', '-')} must be a positive integer")
     if args.val_size < 0:
         parser.error("--val-size must be >= 0")
-    if args.purge_periods < 0:
-        parser.error("--purge-periods must be >= 0")
-    if args.embargo_periods < 0:
-        parser.error("--embargo-periods must be >= 0")
     if args.quantiles < 2:
         parser.error("--quantiles must be at least 2")
     if args.cost_rate is not None and args.cost_rate < 0:
@@ -173,8 +167,6 @@ def main(argv: list[str] | None = None) -> int:
         n_quantiles=args.quantiles,
         cost_rate=args.cost_rate,
         val_size=args.val_size,
-        purge_periods=args.purge_periods,
-        embargo_periods=args.embargo_periods,
     )
 
     out_dir = Path(args.output_dir)

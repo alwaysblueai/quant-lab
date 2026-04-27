@@ -1,0 +1,230 @@
+name: bench
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: bench-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    if: contains(github.event.pull_request.labels.*.name, 'perf-review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      UV_CACHE_DIR: /tmp/uv-cache
+      BENCH_ITERATIONS: "10"
+      BENCH_REPEAT: "3"
+      AB_SIGMA_K: "2"
+      AB_FAIL_ON_SLOWER: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Resolve SHAs and Prepare Worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="$(git merge-base HEAD "origin/${{ github.base_ref }}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          BASE_WORKTREE="$RUNNER_TEMP/bench_base"
+          HEAD_WORKTREE="$RUNNER_TEMP/bench_head"
+          rm -rf "$BASE_WORKTREE" "$HEAD_WORKTREE"
+
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          git worktree add --detach "$HEAD_WORKTREE" "$HEAD_SHA"
+
+          {
+            echo "BASE_SHA=$BASE_SHA"
+            echo "HEAD_SHA=$HEAD_SHA"
+            echo "BASE_WORKTREE=$BASE_WORKTREE"
+            echo "HEAD_WORKTREE=$HEAD_WORKTREE"
+          } >> "$GITHUB_ENV"
+
+      - name: Sync Dependencies (base + head)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in "$BASE_WORKTREE" "$HEAD_WORKTREE"; do
+            echo "[sync] $dir"
+            (cd "$dir" && uv sync --frozen)
+          done
+
+      - name: Run Interleaved A/B Bench (medium)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRE_OUT="$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/pre"
+          POST_OUT="$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/post"
+          rm -rf "$PRE_OUT" "$POST_OUT"
+          mkdir -p "$PRE_OUT" "$POST_OUT"
+
+          for i in $(seq 1 "$BENCH_ITERATIONS"); do
+            echo "[${i}/${BENCH_ITERATIONS}] pre(base)"
+            (
+              cd "$BASE_WORKTREE"
+              uv run --no-sync --frozen python scripts/bench_pipeline.py \
+                --size medium \
+                --repeat "$BENCH_REPEAT" \
+                --output-root "$PRE_OUT"
+            )
+
+            echo "[${i}/${BENCH_ITERATIONS}] post(head)"
+            (
+              cd "$HEAD_WORKTREE"
+              uv run --no-sync --frozen python scripts/bench_pipeline.py \
+                --size medium \
+                --repeat "$BENCH_REPEAT" \
+                --output-root "$POST_OUT"
+            )
+          done
+
+      - name: Compare A/B
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMPARE_DIR="$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/compare"
+          rm -rf "$COMPARE_DIR"
+          mkdir -p "$COMPARE_DIR"
+
+          FAIL_FLAG=""
+          if [ "$AB_FAIL_ON_SLOWER" = "true" ]; then
+            FAIL_FLAG="--fail-on-slower"
+          fi
+
+          (
+            cd "$HEAD_WORKTREE"
+            uv run --no-sync --frozen python scripts/ab_compare.py \
+              --pre "$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/pre" \
+              --post "$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/post" \
+              --stage all \
+              --min-runs "$BENCH_ITERATIONS" \
+              --sigma-k "$AB_SIGMA_K" \
+              --output-dir "$COMPARE_DIR" \
+              $FAIL_FLAG
+          )
+
+      - name: Optional Baseline Compare (informational only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE_FILE="$HEAD_WORKTREE/tests/perf_baselines/medium_phase7_step1.json"
+          BASELINE_OUT="$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/baseline"
+          rm -rf "$BASELINE_OUT"
+          mkdir -p "$BASELINE_OUT"
+
+          if [ ! -f "$BASELINE_FILE" ]; then
+            echo "baseline file not found: $BASELINE_FILE"
+            exit 0
+          fi
+
+          set +e
+          (
+            cd "$HEAD_WORKTREE"
+            uv run --no-sync --frozen python scripts/bench_pipeline.py \
+              --size medium \
+              --repeat "$BENCH_REPEAT" \
+              --output-root "$BASELINE_OUT" \
+              --compare "$BASELINE_FILE"
+          )
+          status=$?
+          set -e
+          echo "baseline_compare_exit=$status"
+
+      - name: Build PR Comment Body
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMENT_PATH="$GITHUB_WORKSPACE/outputs/benchmarks/ci_ab/bench_comment.md"
+          python - <<'PY'
+          from pathlib import Path
+
+          workspace = Path(".").resolve()
+          compare_md = workspace / "outputs" / "benchmarks" / "ci_ab" / "compare" / "compare.md"
+          baseline_root = workspace / "outputs" / "benchmarks" / "ci_ab" / "baseline"
+
+          baseline_md = None
+          if baseline_root.exists():
+              run_dirs = sorted([p for p in baseline_root.iterdir() if p.is_dir()])
+              if run_dirs:
+                  candidate = run_dirs[-1] / "compare.md"
+                  if candidate.exists():
+                      baseline_md = candidate
+
+          lines = ["<!-- bench-report -->", "## Bench A/B Report", ""]
+          if compare_md.exists():
+              lines.append(compare_md.read_text(encoding="utf-8").strip())
+          else:
+              lines.append("A/B compare report not found.")
+
+          if baseline_md is not None:
+              lines.extend(
+                  [
+                      "",
+                      "---",
+                      "",
+                      "### Baseline Compare (Informational)",
+                      "",
+                      baseline_md.read_text(encoding="utf-8").strip(),
+                  ]
+              )
+
+          out = workspace / "outputs" / "benchmarks" / "ci_ab" / "bench_comment.md"
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"comment_written={out}")
+          PY
+
+      - name: Create or Update PR Comment
+        if: github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- bench-report -->";
+            const body = fs.readFileSync("outputs/benchmarks/ci_ab/bench_comment.md", "utf8");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 }
+            );
+            const existing = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Upload Bench Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-ci-ab-${{ github.run_id }}
+          path: outputs/benchmarks/ci_ab
+          if-no-files-found: warn

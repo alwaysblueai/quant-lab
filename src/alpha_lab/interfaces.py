@@ -4,6 +4,8 @@ from typing import Protocol
 
 import pandas as pd
 
+from alpha_lab.exceptions import AlphaLabDataError
+
 FACTOR_OUTPUT_COLUMNS = ("date", "asset", "factor", "value")
 
 
@@ -26,6 +28,9 @@ class Factor(Protocol):
         ...
 
 
+_VALIDATED_ATTR = "_alpha_lab_factor_output_validated"
+
+
 def validate_factor_output(df: pd.DataFrame) -> None:
     """Validate the canonical factor output contract.
 
@@ -43,26 +48,33 @@ def validate_factor_output(df: pd.DataFrame) -> None:
     ValueError
         If any contract is violated.
     """
+    # Fast path: already validated. The fingerprint guards against in-place
+    # mutation invalidating the cached result — any change to row count or
+    # the top value reshuffles the fingerprint and forces revalidation.
+    cached = df.attrs.get(_VALIDATED_ATTR)
+    if cached is not None and cached == _validation_fingerprint(df):
+        return
+
     required_cols = set(FACTOR_OUTPUT_COLUMNS)
 
     # --- Required columns ---------------------------------------------------
     missing = required_cols - set(df.columns)
     if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+        raise AlphaLabDataError(f"Missing required columns: {missing}")
 
     # --- Not empty ----------------------------------------------------------
     if df.empty:
-        raise ValueError("Factor output is empty")
+        raise AlphaLabDataError("Factor output is empty")
 
     # --- All-NaN value column -----------------------------------------------
     if df["value"].isna().all():
-        raise ValueError("Factor values are all NaN")
+        raise AlphaLabDataError("Factor values are all NaN")
 
     # --- NaT in date --------------------------------------------------------
     dates = pd.to_datetime(df["date"], errors="coerce")
     n_nat = int(dates.isna().sum())
     if n_nat > 0:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Factor output 'date' column contains {n_nat} NaT or unparseable "
             "value(s).  All dates must be valid timestamps."
         )
@@ -70,28 +82,40 @@ def validate_factor_output(df: pd.DataFrame) -> None:
     # --- Null or empty asset strings ----------------------------------------
     asset_null = int(df["asset"].isna().sum())
     if asset_null > 0:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Factor output 'asset' column contains {asset_null} null value(s)."
         )
     asset_empty = int((df["asset"].astype(str).str.strip() == "").sum())
     if asset_empty > 0:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Factor output 'asset' column contains {asset_empty} empty string(s)."
         )
 
     # --- Null or empty factor-name strings ----------------------------------
     factor_null = int(df["factor"].isna().sum())
     if factor_null > 0:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Factor output 'factor' column contains {factor_null} null value(s)."
         )
     factor_empty = int((df["factor"].astype(str).str.strip() == "").sum())
     if factor_empty > 0:
-        raise ValueError(
+        raise AlphaLabDataError(
             f"Factor output 'factor' column contains {factor_empty} empty string(s)."
         )
 
     # --- Duplicate (date, asset, factor) ------------------------------------
     dupes = df.duplicated(subset=["date", "asset", "factor"])
     if dupes.any():
-        raise ValueError("Factor output contains duplicate (date, asset, factor) rows")
+        raise AlphaLabDataError("Factor output contains duplicate (date, asset, factor) rows")
+
+    df.attrs[_VALIDATED_ATTR] = _validation_fingerprint(df)
+
+
+def _validation_fingerprint(df: pd.DataFrame) -> tuple:
+    n = len(df)
+    if n == 0:
+        return (0, None)
+    top = df["value"].iat[0]
+    if isinstance(top, float) and top != top:
+        top = "__nan__"
+    return (n, top)

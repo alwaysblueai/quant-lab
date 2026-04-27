@@ -1,0 +1,38 @@
+name: roe_ttm_single_factor_v1
+factor_name: roe_ttm
+factor_path: ../../data/processed/real_case_inputs/single_factor_v1/roe_ttm.csv
+prices_path: ../../data/processed/real_case_inputs/single_factor_v1/prices.csv
+rebalance_frequency: M
+n_quantiles: 5
+direction: long
+
+universe:
+  name: ashare_main
+  path: ../../data/processed/real_case_inputs/single_factor_v1/universe.csv
+  in_universe_column: in_universe
+
+target:
+  kind: forward_return
+  horizon: 5
+
+preprocess:
+  winsorize: true
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: zscore
+  min_group_size: 5
+  min_coverage: 0.6
+
+neutralization:
+  enabled: true
+  exposures_path: ../../data/processed/real_case_inputs/single_factor_v1/exposures.csv
+  size_col: size_exposure
+  industry_col: industry
+  min_obs: 20
+  ridge: 1.0e-8
+
+transaction_cost:
+  one_way_rate: 0.001
+
+output:
+  root_dir: ../../outputs/real_cases

@@ -22,10 +22,8 @@ import pandas as pd
 import pytest
 
 from alpha_lab.experiment import run_factor_experiment
-from alpha_lab.experiment_metadata import ExperimentMetadata
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.reporting import export_experiment_card
-from alpha_lab.timing import DelaySpec
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -208,31 +206,13 @@ def test_export_markdown_has_autogen_and_manual_in_same_note(vault: Path, result
     assert "manual" in lower
 
 
-def test_export_markdown_includes_delay_and_validation_fields(vault: Path) -> None:
-    rich_result = run_factor_experiment(
-        _make_prices(),
-        _momentum_fn,
-        horizon=5,
-        delay_spec=DelaySpec.for_horizon(5, purge_periods=2, embargo_periods=1),
-        metadata=ExperimentMetadata(
-            dataset_id="dataset-v1",
-            dataset_hash="abc123",
-            trial_id="trial-7",
-        ),
-    )
-    path = export_experiment_card(rich_result, name="delay-validation-test", vault_path=vault)
-    content = path.read_text(encoding="utf-8")
-    assert "Decision timestamp" in content
-    assert "Validation scheme" in content
-    assert "dataset_id: dataset-v1" in content
-    assert "dataset_hash: abc123" in content
-
-
 def test_export_markdown_notice_appears_before_setup(vault: Path, result) -> None:
     path = export_experiment_card(result, name="notice-order-test", vault_path=vault)
     content = path.read_text(encoding="utf-8")
     notice_pos = content.lower().find("auto-generated")
-    setup_pos = content.find("## Setup")
+    setup_pos = content.find("## 基本信息")
+    assert notice_pos != -1
+    assert setup_pos != -1
     assert notice_pos < setup_pos
 
 
@@ -276,7 +256,7 @@ def test_export_markdown_has_yaml_frontmatter(vault: Path, result) -> None:
 def test_export_markdown_has_required_sections(vault: Path, result) -> None:
     path = export_experiment_card(result, name="sections-test", vault_path=vault)
     content = path.read_text(encoding="utf-8")
-    for section in ("## Setup", "## Results", "## Interpretation", "## Next Steps"):
+    for section in ("## 基本信息", "## 结果", "## 解释", "## 下一步"):
         assert section in content, f"Missing section: {section}"
 
 

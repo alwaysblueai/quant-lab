@@ -10,6 +10,7 @@ from alpha_lab.comparison import (
     compare_experiments,
     rank_experiments,
 )
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting import SUMMARY_COLUMNS
 
 # ---------------------------------------------------------------------------
@@ -105,9 +106,7 @@ def test_compare_experiments_factor_names_preserved():
 
 
 def test_compare_experiments_nan_cost_adj_preserved():
-    result = compare_experiments(
-        [_make_summary(mean_cost_adjusted_long_short_return=float("nan"))]
-    )
+    result = compare_experiments([_make_summary(mean_cost_adjusted_long_short_return=float("nan"))])
     assert math.isnan(float(result["mean_cost_adjusted_long_short_return"].iloc[0]))
 
 
@@ -115,9 +114,7 @@ def test_compare_experiments_finite_cost_adj_preserved():
     result = compare_experiments(
         [_make_summary(mean_cost_adjusted_long_short_return=0.0025, cost_rate=0.001)]
     )
-    assert float(result["mean_cost_adjusted_long_short_return"].iloc[0]) == pytest.approx(
-        0.0025
-    )
+    assert float(result["mean_cost_adjusted_long_short_return"].iloc[0]) == pytest.approx(0.0025)
 
 
 def test_compare_experiments_index_reset():
@@ -137,7 +134,7 @@ def test_compare_experiments_rejects_empty_list():
 
 
 def test_compare_experiments_rejects_non_dataframe():
-    with pytest.raises(TypeError):
+    with pytest.raises(AlphaLabDataError):
         compare_experiments([{"factor_name": "f"}])  # type: ignore[list-item]
 
 
@@ -156,7 +153,7 @@ def test_compare_experiments_schema_mismatch_second_element_raises():
 
 def test_compare_experiments_rejects_non_dataframe_in_middle():
     good = _make_summary()
-    with pytest.raises(TypeError):
+    with pytest.raises(AlphaLabDataError):
         compare_experiments([good, "not_a_df", good])  # type: ignore[list-item]
 
 
@@ -172,8 +169,9 @@ def test_compare_experiments_rejects_extra_columns():
 def test_compare_experiments_rejects_multi_row_summary():
     """A summary with more than one row must be rejected explicitly."""
     single = _make_summary(factor_name="f1")
-    multi = pd.concat([_make_summary(factor_name="f2"), _make_summary(factor_name="f3")],
-                      ignore_index=True)
+    multi = pd.concat(
+        [_make_summary(factor_name="f2"), _make_summary(factor_name="f3")], ignore_index=True
+    )
     with pytest.raises(ValueError, match="exactly one row"):
         compare_experiments([single, multi])
 
@@ -316,8 +314,7 @@ def test_rank_experiments_fully_deterministic_repeated_call():
     """Calling rank_experiments twice on the same input must produce
     identical row order — verifying stability across repeated calls."""
     summaries = [
-        _make_summary(factor_name="momentum", mean_ic=0.05, ic_ir=float(v))
-        for v in [1.0, 0.5, 1.5]
+        _make_summary(factor_name="momentum", mean_ic=0.05, ic_ir=float(v)) for v in [1.0, 0.5, 1.5]
     ]
     comp = compare_experiments(summaries)
     r1 = rank_experiments(comp, metric="mean_ic")
