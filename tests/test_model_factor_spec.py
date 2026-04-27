@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from alpha_lab.real_cases.model_factor.spec import (
+    infer_fundamental_feature_columns,
     load_model_factor_case_spec,
     model_factor_case_spec_from_mapping,
 )
@@ -76,3 +77,56 @@ def test_demo_model_factor_spec_fixture_is_loadable(tmp_path: Path) -> None:
     assert spec.target.horizon == 5
     assert spec.n_quantiles == 5
     assert spec.model.family == "ridge"
+
+
+def test_model_factor_spec_parses_feature_availability_and_model_selection() -> None:
+    payload = {
+        "name": "selection_case",
+        "factor_name": "ml_score",
+        "features_path": "features.csv",
+        "feature_columns": ["x1", "x2"],
+        "prices_path": "prices.csv",
+        "rebalance_frequency": "W",
+        "feature_availability": {"mode": "safety_lag", "safety_lag_days": 1},
+        "feature_importance": {"mode": "disabled", "permutation_max_rows": 17},
+        "model": {"family": "ridge", "params": {"alpha": 1.0}},
+        "model_selection": {
+            "enabled": True,
+            "n_splits": 3,
+            "embargo_pct": 0.1,
+            "metric": "rank_ic",
+            "candidates": [
+                {"family": "ridge", "params": {"alpha": 1.0}},
+                {"family": "ridge", "params": {"alpha": 10.0}},
+            ],
+        },
+        "training": {
+            "window_type": "rolling",
+            "train_window_n_dates": 20,
+            "min_train_dates": 10,
+            "min_train_rows": 30,
+            "retrain_every_n_dates": 2,
+            "min_score_assets": 5,
+        },
+    }
+    spec = model_factor_case_spec_from_mapping(payload)
+    assert spec.feature_availability.mode == "safety_lag"
+    assert spec.feature_availability.safety_lag_days == 1
+    assert spec.feature_importance.mode == "disabled"
+    assert spec.feature_importance.permutation_max_rows == 17
+    assert spec.model_selection.enabled is True
+    assert spec.model_selection.metric == "rank_ic"
+    assert len(spec.model_selection.candidates) == 2
+
+
+def test_infer_fundamental_feature_columns_matches_heuristic_tokens() -> None:
+    matched = infer_fundamental_feature_columns(
+        (
+            "feature_momentum",
+            "roe_ttm",
+            "alpha_bp",
+            "slope_signal",
+            "pe_ratio_rolling",
+        )
+    )
+    assert matched == ("roe_ttm", "alpha_bp", "pe_ratio_rolling")
