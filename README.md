@@ -177,20 +177,27 @@ Built-in slice presets for A-share daily price-volume research:
 - `pilot`: recent 3 years, `top_liquid_300`, `qfq`
 - `standard`: recent 5 years, `listed_90d`, `qfq`
 - `robust`: recent 8 years, `listed_90d`, `qfq`
+- `institutional`: recent 8 years, `institutional_ashare`, `qfq`
 
 Explicit `--start-date` / `--end-date` / `--universe` / `--adjustment` still override the preset.
 
 Supported liquidity universes now include:
 
+- `institutional_ashare`
 - `top_liquid_300`
 - `top_liquid_500`
 - `top_liquid_800`
 
-These are ranked by trailing 60-trading-day average `amount`, not same-day amount.
+`institutional_ashare` keeps A-share rows that are listed for at least 180 days,
+are not ST or suspended on the date, and pass a trailing 20-sample liquidity
+screen: average `amount` at least `20000` (Tushare daily `amount` is thousand
+CNY, so roughly RMB 20 million) and outside the bottom 20% by date. The
+`top_liquid_*` universes are ranked by trailing 60-trading-day average `amount`,
+not same-day amount.
 
 The legacy Web UI auto-data-source flow also defaults to `standard`, and exposes
-`pilot / standard / robust` directly in the form. New interactive research
-workflows should use `alpha-lab web unified`.
+`pilot / standard / robust / institutional` directly in the form. New interactive
+research workflows should use `alpha-lab web unified`.
 
 For A-share daily price-volume research, exported `prices.csv` now includes the
 standard research columns needed by most daily factor recipes:

@@ -57,6 +57,37 @@ def test_check_no_future_dates_in_input_fails_on_future_rows():
     assert result.metrics["future_rows"] == 1
 
 
+def test_check_no_future_dates_in_input_passes_datetime_success_path():
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=5, freq="D"),
+            "asset": ["AAA"] * 5,
+        }
+    )
+
+    result = check_no_future_dates_in_input(
+        frame,
+        max_allowed_date=pd.Timestamp("2024-01-05"),
+        object_name="datetime_input",
+    )
+
+    assert result.status == "pass"
+    assert result.metrics["rows_checked"] == 5
+
+
+def test_check_no_future_dates_in_input_still_fails_invalid_values():
+    frame = pd.DataFrame({"date": ["2024-01-01", "not-a-date"], "asset": ["AAA", "BBB"]})
+
+    result = check_no_future_dates_in_input(
+        frame,
+        max_allowed_date="2024-01-05",
+        object_name="invalid_input",
+    )
+
+    assert result.status == "fail"
+    assert "invalid timestamp" in result.message
+
+
 def test_check_asof_inputs_not_after_signal_date_fails_when_known_at_is_future():
     signal_df = pd.DataFrame(
         {

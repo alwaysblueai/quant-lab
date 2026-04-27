@@ -49,7 +49,7 @@ class TushareIngestor:
         token: str | None = None,
         assets: tuple[str, ...] | None = None,
         asset_limit: int | None = None,
-        mode: str = "full",
+        mode: str = "daily",
         include_reference_data: bool = True,
         daily_research_only: bool = False,
         progress_callback: Callable[[str], None] | None = None,
@@ -59,7 +59,7 @@ class TushareIngestor:
         resolved_mode = _normalize_ingest_mode(
             mode=mode,
             daily_research_only=daily_research_only,
-            default_mode="full",
+            default_mode="daily",
         )
         self.catalog.ensure_layout()
         resolved_token = tushare._require_tushare_token(token)
@@ -679,7 +679,7 @@ class TushareIngestor:
         assets: tuple[str, ...] | None = None,
         asset_limit: int | None = None,
         chunk_months: int = 6,
-        mode: str = "full",
+        mode: str = "daily",
         include_reference_data: bool = True,
         daily_research_only: bool = False,
         progress_callback: Callable[[str], None] | None = None,
@@ -689,7 +689,7 @@ class TushareIngestor:
         resolved_mode = _normalize_ingest_mode(
             mode=mode,
             daily_research_only=daily_research_only,
-            default_mode="full",
+            default_mode="daily",
         )
         chunk_ranges = _split_date_range_into_chunks(
             start_date=start_date,

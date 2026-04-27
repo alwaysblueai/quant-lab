@@ -34,15 +34,26 @@ class TestComputeTailRisk:
 
     def test_single_drawdown(self) -> None:
         # +1%, -2%, -1%, +3%, +1%
-        # cum: 0.01, -0.01, -0.02, 0.01, 0.02
-        # peak: 0.01, 0.01, 0.01, 0.01, 0.02
-        # dd:   0.00, 0.02, 0.03, 0.00, 0.00
+        # nav: 1.010000, 0.989800, 0.979902, 1.009299, 1.019392
+        # peak-to-trough drawdown: 1 - 0.979902 / 1.010000 = 0.0298
         df = _make_ls_df([0.01, -0.02, -0.01, 0.03, 0.01])
         result = compute_tail_risk(df)
-        assert pytest.approx(result.max_drawdown, abs=1e-10) == 0.03
+        assert pytest.approx(result.max_drawdown, abs=1e-10) == 0.0298
         assert result.max_drawdown_duration == 2  # peak at idx 0, trough at idx 2
         assert result.max_consecutive_loss_days == 2
         assert result.n_loss_dates == 2
+
+    def test_first_period_loss_draws_down_from_initial_nav(self) -> None:
+        df = _make_ls_df([-0.10, 0.02, 0.03])
+        result = compute_tail_risk(df)
+        assert pytest.approx(result.max_drawdown, abs=1e-10) == 0.10
+        assert result.max_drawdown_duration == 1
+
+    def test_sample_step_uses_non_overlapping_path(self) -> None:
+        df = _make_ls_df([0.10, -0.50, 0.10, 0.10])
+        result = compute_tail_risk(df, sample_step=2)
+        assert result.max_drawdown == 0.0
+        assert result.n_total_dates == 2
 
     def test_var_cvar(self) -> None:
         np.random.seed(42)

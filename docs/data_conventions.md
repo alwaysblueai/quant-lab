@@ -25,6 +25,33 @@ wide table with:
 Features are inputs only. They are **not** reusable factor outputs until the
 model layer converts them into canonical factor form.
 
+For model-factor lab runs, large feature tables should be consumed as Parquet.
+Specs may still point at a CSV source for convenience, but the pipeline treats
+that CSV as a one-time materialization input: it creates or refreshes a sibling
+`.parquet` file when needed and loads the run from the parquet path.
+When the input is Parquet, the model-factor pipeline reads only the required
+identity, availability, preprocessing, and selected feature columns instead of
+materializing the full wide feature table.
+Model-factor price panels follow the same rule: the runner always reads
+`date`, `asset`, and `close`, then adds optional price columns only when the
+active evaluation profile can use them, such as `open/high/low/volume` for
+tradability and next-open sensitivity, `amount` or market-cap columns for
+capacity diagnostics, and cached return columns for baseline comparisons.
+
+Model-factor feature-importance diagnostics are deliberately throttled. By
+default the pipeline computes importance only for the latest fitted model
+version, and permutation importance is sampled with `permutation_max_rows`.
+Specs can set `feature_importance.mode` to `disabled`, `latest_only`, or
+`every_fit` when a run needs a different diagnostics/cost tradeoff.
+The raw forward-return label frame built for model training is also retained.
+For model-factor evaluation, the runner precomputes the active IC-decay
+horizons and passes them as a label cache, avoiding repeated full
+`forward_return` passes in core evaluation and IC-decay diagnostics.
+Training-window diagnostics are aggregated at the run level: the pipeline
+records one window-index summary and keeps per-date details in
+`training_log.csv`, rather than emitting a diagnostics stage for every score
+date.
+
 ### Factor Output
 
 Reusable factor outputs must be long-form with:

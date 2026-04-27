@@ -1082,7 +1082,7 @@ def build_roe_factor(
             left_on="date",
             right_on="event_date",
             direction="backward",
-            allow_exact_matches=True,
+            allow_exact_matches=False,
         )
         aligned["asset"] = asset
         aligned_parts.append(aligned[["date", "asset", "roe_value"]])
@@ -1151,6 +1151,7 @@ def generate_real_case_inputs(
         token=token,
         assets=tuple(assets) if assets is not None else None,
         asset_limit=asset_limit,
+        mode="full",
     )
     export_result = ingestor.export_case_inputs(
         start_date=start_date,

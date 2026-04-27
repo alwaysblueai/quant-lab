@@ -16,6 +16,7 @@ from alpha_lab.reporting import (
     to_obsidian_markdown,
 )
 from alpha_lab.reporting.factor_verdict import FACTOR_VERDICT_TAXONOMY
+from alpha_lab.reporting.research_tearsheet import _build_annual_axis_ticks
 from alpha_lab.research_evaluation_config import ResearchEvaluationConfig, UncertaintyConfig
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,45 @@ def _close_or_both_nan(a: float, b: float) -> bool:
     if math.isnan(a) or math.isnan(b):
         return False
     return math.isclose(a, b)
+
+
+def test_tearsheet_date_ticks_use_months_for_one_year_window():
+    dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+    ticks = _build_annual_axis_ticks(
+        x_values=[float(idx) for idx in range(len(dates))],
+        x_labels=[date.strftime("%Y-%m-%d") for date in dates],
+    )
+
+    labels = [label for _, label in ticks]
+    assert "2024.2" in labels
+    assert "2024.12" in labels
+    assert len(labels) >= 10
+
+
+def test_tearsheet_date_ticks_use_years_for_ten_year_window():
+    dates = pd.date_range("2016-06-01", "2026-06-01", freq="MS")
+    ticks = _build_annual_axis_ticks(
+        x_values=[float(idx) for idx in range(len(dates))],
+        x_labels=[date.strftime("%Y-%m-%d") for date in dates],
+    )
+
+    labels = [label for _, label in ticks]
+    assert "2017.6" in labels
+    assert "2016.7" not in labels
+    assert len(labels) <= 12
+
+
+def test_tearsheet_date_ticks_support_compact_yyyymmdd_labels():
+    dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+    ticks = _build_annual_axis_ticks(
+        x_values=[float(idx) for idx in range(len(dates))],
+        x_labels=[date.strftime("%Y%m%d") for date in dates],
+    )
+
+    labels = [label for _, label in ticks]
+    assert "2024.2" in labels
+    assert "2024.12" in labels
+    assert len(labels) >= 10
 
 
 # ---------------------------------------------------------------------------

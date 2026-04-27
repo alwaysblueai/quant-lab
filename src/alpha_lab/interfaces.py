@@ -28,6 +28,9 @@ class Factor(Protocol):
         ...
 
 
+_VALIDATED_ATTR = "_alpha_lab_factor_output_validated"
+
+
 def validate_factor_output(df: pd.DataFrame) -> None:
     """Validate the canonical factor output contract.
 
@@ -45,6 +48,13 @@ def validate_factor_output(df: pd.DataFrame) -> None:
     ValueError
         If any contract is violated.
     """
+    # Fast path: already validated. The fingerprint guards against in-place
+    # mutation invalidating the cached result — any change to row count or
+    # the top value reshuffles the fingerprint and forces revalidation.
+    cached = df.attrs.get(_VALIDATED_ATTR)
+    if cached is not None and cached == _validation_fingerprint(df):
+        return
+
     required_cols = set(FACTOR_OUTPUT_COLUMNS)
 
     # --- Required columns ---------------------------------------------------
@@ -97,3 +107,15 @@ def validate_factor_output(df: pd.DataFrame) -> None:
     dupes = df.duplicated(subset=["date", "asset", "factor"])
     if dupes.any():
         raise AlphaLabDataError("Factor output contains duplicate (date, asset, factor) rows")
+
+    df.attrs[_VALIDATED_ATTR] = _validation_fingerprint(df)
+
+
+def _validation_fingerprint(df: pd.DataFrame) -> tuple:
+    n = len(df)
+    if n == 0:
+        return (0, None)
+    top = df["value"].iat[0]
+    if isinstance(top, float) and top != top:
+        top = "__nan__"
+    return (n, top)

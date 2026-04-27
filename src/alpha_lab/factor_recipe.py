@@ -197,7 +197,12 @@ def _compute_step_signal(*, prices: pd.DataFrame, step_cfg: Mapping[str, object]
             f"unsupported base.method={raw_method!r}; supported methods: {supported}"
         )
 
-    window = _optional_positive_int(step_cfg.get("window"), field="base.window")
+    raw_window = step_cfg.get("window")
+    window_field = "base.window"
+    if raw_window is None and "lookback" in step_cfg:
+        raw_window = step_cfg.get("lookback")
+        window_field = "base.lookback"
+    window = _optional_positive_int(raw_window, field=window_field)
     skip_recent = _optional_non_negative_int(
         step_cfg.get("skip_recent"),
         field="base.skip_recent",

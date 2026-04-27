@@ -545,6 +545,7 @@ def _build_backtest_result_payload(
         group_returns_df=group_returns_df,
         rebalance_frequency=spec.rebalance_frequency,
         metrics_for_payload=metrics_for_payload,
+        label_horizon=int(spec.target.horizon),
     )
     return {
         "schema_version": "1.0.0",
@@ -552,6 +553,7 @@ def _build_backtest_result_payload(
         "case_name": spec.name,
         "package_type": "composite",
         "rebalance_frequency": spec.rebalance_frequency,
+        "target_horizon": int(spec.target.horizon),
         "summary": summary,
         "source_artifacts": {
             "group_returns_path": str(output_paths["group_returns"]),
@@ -562,7 +564,7 @@ def _build_backtest_result_payload(
     }
 
 
-def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+def _write_json(path: Path, payload: Mapping[str, object], *, pretty: bool = True) -> None:
     jsonable_payload = _to_jsonable(payload)
     if not isinstance(jsonable_payload, Mapping):
         raise ValueError(f"{path} JSON payload root must be an object")
@@ -574,7 +576,16 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(jsonable_payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        if pretty:
+            json.dump(jsonable_payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        else:
+            json.dump(
+                jsonable_payload,
+                f,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=False,
+            )
         f.write("\n")
 
 

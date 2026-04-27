@@ -100,7 +100,7 @@ def test_roe_factor_forward_fill_with_ann_date_fallback() -> None:
             {
                 "asset": "000001.SZ",
                 "ann_date": None,
-                "end_date": "2024-01-05",
+                "end_date": "2024-01-04",
                 "roe_value": 20.0,
             },
         ]
@@ -115,10 +115,9 @@ def test_roe_factor_forward_fill_with_ann_date_fallback() -> None:
     assert not roe.duplicated(subset=["date", "asset", "factor"]).any()
 
     first_date = roe["date"].min()
-    assert first_date == "2024-01-02"
+    assert first_date == "2024-01-03"
 
     by_date = roe.set_index("date")["value"].to_dict()
-    assert by_date["2024-01-02"] == 10.0
     assert by_date["2024-01-03"] == 10.0
     assert by_date["2024-01-04"] == 10.0
     assert by_date["2024-01-05"] == 20.0

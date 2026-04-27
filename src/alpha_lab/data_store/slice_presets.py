@@ -38,6 +38,16 @@ SLICE_PRESETS: dict[str, SlicePresetConfig] = {
         adjustment="qfq",
         description="最近 8 年、前复权、上市满 90 天，用于稳健性复核。",
     ),
+    "institutional": SlicePresetConfig(
+        name="institutional",
+        lookback_years=8,
+        universe_name="institutional_ashare",
+        adjustment="qfq",
+        description=(
+            "最近 8 年、前复权、上市满 180 天、剔除 ST/停牌，并过滤低流动性尾部，"
+            "用于更接近私募常用研究股票池的复核。"
+        ),
+    ),
 }
 
 DEFAULT_SLICE_PRESET = "standard"

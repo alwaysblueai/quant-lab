@@ -43,6 +43,12 @@ _INDEX_MEMBERSHIP_FLAG_COLUMNS: dict[str, str] = {
     "000016.SH": "is_sz50",
 }
 _TOP_LIQUID_UNIVERSE_RE = re.compile(r"^top_liquid_(\d+)$")
+_INSTITUTIONAL_UNIVERSE_NAME = "institutional_ashare"
+_INSTITUTIONAL_MIN_LISTED_DAYS = 180
+_INSTITUTIONAL_LIQUIDITY_LOOKBACK_DAYS = 20
+_INSTITUTIONAL_MIN_ACTIVE_DAYS = 15
+_INSTITUTIONAL_MIN_AVG_AMOUNT = 20_000.0
+_INSTITUTIONAL_MIN_AMOUNT_PERCENTILE = 0.20
 
 
 @dataclass(frozen=True)
@@ -1484,30 +1490,58 @@ class DataCatalog:
         top_liquid_size = _parse_top_liquid_universe_size(universe_name)
         if top_liquid_size is not None:
             return _apply_top_liquidity_universe(frame, n_assets=top_liquid_size)
+        if universe_name == _INSTITUTIONAL_UNIVERSE_NAME:
+            return self._apply_institutional_universe(frame)
         if universe_name == "listed_90d":
-            instruments = self.load_table(
-                "instruments",
-                columns=("asset", "list_date", "delist_date"),
-                assets=tuple(sorted(frame["asset"].astype(str).unique().tolist())),
-                date_field=None,
-            )
-            if instruments.empty:
-                return frame
-            instruments["list_date"] = pd.to_datetime(instruments["list_date"], errors="coerce")
-            instruments["delist_date"] = pd.to_datetime(instruments["delist_date"], errors="coerce")
-            enriched = frame.merge(instruments, on="asset", how="left", validate="many_to_one")
-            enriched["date_ts"] = pd.to_datetime(enriched["date"], errors="coerce")
-            enriched["min_live_date"] = enriched["list_date"] + timedelta(days=90)
-            keep = enriched["list_date"].isna() | (enriched["date_ts"] >= enriched["min_live_date"])
-            if "delist_date" in enriched:
-                keep &= enriched["delist_date"].isna() | (
-                    enriched["date_ts"] <= enriched["delist_date"]
-                )
-            return enriched.loc[keep, list(frame.columns)].copy()
+            return self._apply_listed_age_universe(frame, min_listed_days=90)
         raise AlphaLabDataError(
             "universe_name must be one of ['all_ashare', 'listed_90d', "
-            "'top_liquid_300', 'top_liquid_500', 'top_liquid_800']"
+            "'institutional_ashare', 'top_liquid_300', 'top_liquid_500', "
+            "'top_liquid_800']"
         )
+
+    def _apply_listed_age_universe(
+        self,
+        prices: pd.DataFrame,
+        *,
+        min_listed_days: int,
+        allow_missing_list_date: bool = True,
+    ) -> pd.DataFrame:
+        instruments = self.load_table(
+            "instruments",
+            columns=("asset", "list_date", "delist_date"),
+            assets=tuple(sorted(prices["asset"].astype(str).unique().tolist())),
+            date_field=None,
+        )
+        return _apply_listed_age_filter(
+            prices,
+            instruments=instruments,
+            min_listed_days=min_listed_days,
+            allow_missing_list_date=allow_missing_list_date,
+        )
+
+    def _apply_institutional_universe(self, prices: pd.DataFrame) -> pd.DataFrame:
+        frame = self._apply_listed_age_universe(
+            prices,
+            min_listed_days=_INSTITUTIONAL_MIN_LISTED_DAYS,
+            allow_missing_list_date=False,
+        )
+        if frame.empty:
+            return frame
+
+        date_values = pd.to_datetime(frame["date"], errors="coerce").dropna()
+        if date_values.empty:
+            return frame.iloc[0:0].copy()
+        asset_status = self.load_table(
+            "asset_status",
+            columns=("date", "asset", "is_suspended", "is_st"),
+            start_date=str(date_values.min().strftime("%Y-%m-%d")),
+            end_date=str(date_values.max().strftime("%Y-%m-%d")),
+            assets=tuple(sorted(frame["asset"].astype(str).unique().tolist())),
+        )
+        frame = _merge_asset_status(prices=frame, asset_status=asset_status)
+        frame = _apply_institutional_liquidity_universe(frame)
+        return frame.loc[:, list(prices.columns)].copy()
 
     def _assert_daily_bars_coverage(self, *, start_date: str, end_date: str) -> None:
         bounds = self.load_table("daily_bars", columns=("date",))
@@ -1647,7 +1681,7 @@ def _build_roe_factor_strict(*, events: pd.DataFrame, prices: pd.DataFrame) -> p
             left_on="date",
             right_on="ann_date",
             direction="backward",
-            allow_exact_matches=True,
+            allow_exact_matches=False,
         )
         aligned["asset"] = asset
         aligned_parts.append(aligned[["date", "asset", "roe_value"]])
@@ -1768,6 +1802,110 @@ def _parse_top_liquid_universe_size(universe_name: str) -> int | None:
     if size <= 0:
         raise AlphaLabDataError(f"top_liquid universe size must be positive: {universe_name!r}")
     return size
+
+
+def _apply_listed_age_filter(
+    prices: pd.DataFrame,
+    *,
+    instruments: pd.DataFrame,
+    min_listed_days: int,
+    allow_missing_list_date: bool,
+) -> pd.DataFrame:
+    if prices.empty or instruments.empty:
+        return prices.copy()
+    frame = prices.copy()
+    instrument_frame = instruments.copy()
+    instrument_frame["list_date"] = pd.to_datetime(
+        instrument_frame["list_date"], errors="coerce"
+    )
+    instrument_frame["delist_date"] = pd.to_datetime(
+        instrument_frame["delist_date"], errors="coerce"
+    )
+    enriched = frame.merge(instrument_frame, on="asset", how="left", validate="many_to_one")
+    enriched["date_ts"] = pd.to_datetime(enriched["date"], errors="coerce")
+    enriched["min_live_date"] = enriched["list_date"] + timedelta(days=min_listed_days)
+    if allow_missing_list_date:
+        keep = enriched["list_date"].isna() | (enriched["date_ts"] >= enriched["min_live_date"])
+    else:
+        keep = enriched["list_date"].notna() & (enriched["date_ts"] >= enriched["min_live_date"])
+    if "delist_date" in enriched:
+        keep &= enriched["delist_date"].isna() | (enriched["date_ts"] <= enriched["delist_date"])
+    return enriched.loc[keep, list(frame.columns)].copy()
+
+
+def _apply_institutional_liquidity_universe(
+    prices: pd.DataFrame,
+    *,
+    lookback_days: int = _INSTITUTIONAL_LIQUIDITY_LOOKBACK_DAYS,
+    min_active_days: int = _INSTITUTIONAL_MIN_ACTIVE_DAYS,
+    min_avg_amount: float = _INSTITUTIONAL_MIN_AVG_AMOUNT,
+    min_amount_percentile: float = _INSTITUTIONAL_MIN_AMOUNT_PERCENTILE,
+) -> pd.DataFrame:
+    if prices.empty:
+        return prices.copy()
+    if lookback_days <= 0 or min_active_days <= 0:
+        raise AlphaLabDataError(
+            "institutional universe lookback and active-day thresholds must be positive"
+        )
+    if not 0 <= min_amount_percentile < 1:
+        raise AlphaLabDataError("institutional universe amount percentile must be in [0, 1)")
+
+    frame = prices.copy()
+    original_columns = list(prices.columns)
+    frame["date_ts"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["amount_numeric"] = pd.to_numeric(frame["amount"], errors="coerce")
+    frame["is_suspended_numeric"] = (
+        pd.to_numeric(frame.get("is_suspended"), errors="coerce").fillna(0).astype(int)
+    )
+    frame["is_st_numeric"] = (
+        pd.to_numeric(frame.get("is_st"), errors="coerce").fillna(0).astype(int)
+    )
+    current_tradable = (
+        frame["date_ts"].notna()
+        & frame["amount_numeric"].notna()
+        & (frame["amount_numeric"] > 0)
+        & (frame["is_suspended_numeric"] == 0)
+        & (frame["is_st_numeric"] == 0)
+    )
+    frame["current_tradable"] = current_tradable
+    frame["active_amount"] = frame["amount_numeric"].where(current_tradable)
+    frame["active_day"] = current_tradable.astype(int)
+    frame = frame.sort_values(["asset", "date_ts", "date"], kind="mergesort").reset_index(
+        drop=True
+    )
+    grouped = frame.groupby("asset", sort=False)
+    frame["avg_amount_lookback"] = (
+        grouped["active_amount"]
+        .rolling(window=lookback_days, min_periods=1)
+        .mean()
+        .reset_index(level=0, drop=True)
+    )
+    frame["active_days_lookback"] = (
+        grouped["active_day"]
+        .rolling(window=lookback_days, min_periods=1)
+        .sum()
+        .reset_index(level=0, drop=True)
+    )
+    frame["observed_days_lookback"] = (
+        grouped["active_day"]
+        .rolling(window=lookback_days, min_periods=1)
+        .count()
+        .reset_index(level=0, drop=True)
+    )
+    required_active_days = frame["observed_days_lookback"].clip(upper=min_active_days)
+    frame["floor_amount_candidate"] = frame["avg_amount_lookback"].where(
+        frame["current_tradable"]
+    )
+    amount_floor_by_date = frame.groupby("date", sort=False)["floor_amount_candidate"].transform(
+        lambda values: values.quantile(min_amount_percentile)
+    )
+    keep = (
+        frame["current_tradable"]
+        & (frame["active_days_lookback"] >= required_active_days)
+        & (frame["avg_amount_lookback"] >= min_avg_amount)
+        & (frame["avg_amount_lookback"] >= amount_floor_by_date.fillna(min_avg_amount))
+    )
+    return frame.loc[keep, original_columns].copy()
 
 
 def _apply_top_liquidity_universe(

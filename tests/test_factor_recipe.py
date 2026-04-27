@@ -82,6 +82,26 @@ def test_build_factor_from_recipe_mapping_supports_skip_recent_momentum() -> Non
     assert factor["value"].notna().sum() > 0
 
 
+def test_build_factor_from_recipe_mapping_accepts_legacy_lookback() -> None:
+    prices = _sample_prices()
+    factor_from_window = build_factor_from_recipe_mapping(
+        prices=prices,
+        recipe={"base": {"method": "momentum", "window": 4, "skip_recent": 1}},
+        factor_name="mom4_window",
+    )
+    factor_from_lookback = build_factor_from_recipe_mapping(
+        prices=prices,
+        recipe={"base": {"method": "momentum", "lookback": 4, "skip_recent": 1}},
+        factor_name="mom4_lookback",
+    )
+
+    pd.testing.assert_series_equal(
+        factor_from_window["value"],
+        factor_from_lookback["value"],
+        check_names=False,
+    )
+
+
 def test_build_factor_from_recipe_mapping_supports_amplitude() -> None:
     prices = _sample_prices()
     recipe = {"base": {"method": "amplitude", "window": 5}}

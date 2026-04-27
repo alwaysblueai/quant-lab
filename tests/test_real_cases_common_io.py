@@ -10,6 +10,7 @@ import pytest
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.real_cases.common_io import load_prices, load_tabular_frame, load_universe_mask
 from alpha_lab.real_cases.common_spec import UniverseSpec
+from alpha_lab.sorted_panel import SORTED_ATTR_KEY
 
 
 def test_load_universe_mask_parses_string_flags_strictly(tmp_path: Path) -> None:
@@ -85,6 +86,31 @@ def test_load_tabular_frame_falls_back_to_csv_when_parquet_is_stale(tmp_path: Pa
     assert loaded["value"].tolist() == [1.0]
 
 
+def test_load_tabular_frame_prunes_required_and_present_optional_columns(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "features.parquet"
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02"],
+            "asset": ["000001.SZ"],
+            "known_at": ["2024-01-02"],
+            "feature_a": [1.0],
+            "unused_blob": ["drop_me"],
+        }
+    ).to_parquet(path, index=False)
+
+    loaded = load_tabular_frame(
+        str(path),
+        object_name="features",
+        columns=("date", "asset", "feature_a"),
+        optional_columns=("known_at", "available_at"),
+    )
+
+    assert loaded.columns.tolist() == ["date", "asset", "feature_a", "known_at"]
+    assert loaded["feature_a"].tolist() == [1.0]
+
+
 def test_load_prices_applies_default_dividend_adjustment_when_column_present(
     tmp_path: Path,
 ) -> None:
@@ -124,3 +150,50 @@ def test_load_prices_dividend_adjustment_skips_missing_rows(tmp_path: Path) -> N
     assert loaded.loc[0, "close"] == pytest.approx(10.0 * ratio)
     assert loaded.loc[1, "close"] == pytest.approx(11.0 * ratio)
     assert loaded.loc[2, "close"] == pytest.approx(12.0)
+
+
+def test_load_prices_prunes_columns_and_preserves_optional_dividend_adjustment(
+    tmp_path: Path,
+) -> None:
+    prices_path = tmp_path / "prices.parquet"
+    pd.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-02", "2024-01-03"],
+            "asset": ["000001.SZ", "000001.SZ", "000001.SZ"],
+            "close": [10.0, 11.0, 12.0],
+            "open": [9.9, 10.9, 11.9],
+            "dividend_per_share": [0.0, 0.0, 0.55],
+            "unused_blob": ["x", "y", "z"],
+        }
+    ).to_parquet(prices_path, index=False)
+
+    loaded = load_prices(
+        str(prices_path),
+        columns=("date", "asset", "close"),
+        optional_columns=("open",),
+    )
+
+    assert loaded.columns.tolist() == ["date", "asset", "close", "dividend_per_share", "open"]
+    assert "unused_blob" not in loaded.columns
+    ratio = 1.0 - 0.55 / 11.0
+    assert loaded.loc[0, "close"] == pytest.approx(10.0 * ratio)
+
+
+def test_load_prices_marks_asset_date_sorted_panel(tmp_path: Path) -> None:
+    prices_path = tmp_path / "prices.csv"
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-01", "2024-01-01"],
+            "asset": ["000002.SZ", "000002.SZ", "000001.SZ"],
+            "close": [11.0, 10.0, 20.0],
+        }
+    ).to_csv(prices_path, index=False)
+
+    loaded = load_prices(str(prices_path))
+
+    assert loaded.attrs[SORTED_ATTR_KEY] == ("asset", "date")
+    assert loaded[["asset", "date"]].astype(str).values.tolist() == [
+        ["000001.SZ", "2024-01-01"],
+        ["000002.SZ", "2024-01-01"],
+        ["000002.SZ", "2024-01-02"],
+    ]

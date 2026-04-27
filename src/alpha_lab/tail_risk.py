@@ -19,7 +19,7 @@ class TailRiskSummary:
     """Scalar tail-risk metrics for a long-short return series."""
 
     max_drawdown: float
-    """Maximum peak-to-trough drawdown of cumulative L/S return.
+    """Maximum peak-to-trough drawdown of compounded L/S NAV.
     Expressed as a positive fraction (e.g. 0.15 means 15% drawdown).
     NaN when the series is empty or all-NaN."""
 
@@ -53,6 +53,8 @@ class TailRiskSummary:
 
 def compute_tail_risk(
     long_short_df: pd.DataFrame,
+    *,
+    sample_step: int = 1,
 ) -> TailRiskSummary:
     """Compute tail-risk summary from a long-short return DataFrame.
 
@@ -61,6 +63,9 @@ def compute_tail_risk(
     long_short_df:
         DataFrame with columns ``[date, long_short_return]``.
         NaN returns are dropped before computation.
+    sample_step:
+        Evaluate every Nth sorted observation.  Use a value greater than one
+        when the input returns are overlapping forward returns.
 
     Returns
     -------
@@ -73,6 +78,9 @@ def compute_tail_risk(
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["long_short_return"])
     df = df.sort_values("date", kind="mergesort").reset_index(drop=True)
+    step = max(1, int(sample_step))
+    if step > 1:
+        df = df.iloc[::step].reset_index(drop=True)
 
     if df.empty:
         return _empty_summary()
@@ -80,10 +88,11 @@ def compute_tail_risk(
     returns = df["long_short_return"].to_numpy(dtype=float)
     n_total = len(returns)
 
-    # --- Max drawdown via cumulative return ---
-    cum = np.cumsum(returns)
-    running_max = np.maximum.accumulate(cum)
-    drawdowns = running_max - cum  # always >= 0
+    # --- Max drawdown via compounded NAV ---
+    # Include the starting NAV so an immediate loss is measured from 1.0.
+    nav = np.concatenate(([1.0], np.cumprod(1.0 + returns)))
+    running_max = np.maximum.accumulate(nav)
+    drawdowns = 1.0 - (nav / running_max)
     max_dd = float(np.max(drawdowns))
 
     # Duration: dates from peak to trough of worst drawdown
@@ -91,7 +100,7 @@ def compute_tail_risk(
         trough_idx = int(np.argmax(drawdowns))
         # Peak is the last date where running_max == running_max[trough_idx]
         peak_val = running_max[trough_idx]
-        peak_candidates = np.where(cum[: trough_idx + 1] >= peak_val - 1e-15)[0]
+        peak_candidates = np.where(nav[: trough_idx + 1] >= peak_val - 1e-15)[0]
         peak_idx = int(peak_candidates[-1]) if len(peak_candidates) > 0 else 0
         dd_duration = trough_idx - peak_idx
     else:

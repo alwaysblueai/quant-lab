@@ -109,14 +109,14 @@ def test_data_catalog_exports_case_inputs_from_canonical_tables(
         [
             {
                 "asset": "000001.SZ",
-                "ann_date": "2024-01-02",
+                "ann_date": "2024-01-01",
                 "end_date": "2023-12-31",
                 "roe_value": 10.0,
                 "roe_source_column": "roe_ttm",
             },
             {
                 "asset": "000002.SZ",
-                "ann_date": "2024-01-03",
+                "ann_date": "2024-01-02",
                 "end_date": "2023-12-31",
                 "roe_value": 20.0,
                 "roe_source_column": "roe_ttm",
@@ -316,6 +316,74 @@ def test_data_catalog_exports_case_inputs_from_canonical_tables(
     )
 
 
+def test_data_catalog_roe_ttm_export_excludes_same_day_ann_date(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_root = tmp_path / "warehouse"
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(data_root))
+    catalog = DataCatalog()
+    catalog.ensure_layout()
+
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "asset": "000001.SZ",
+                "close": 10.0,
+                "volume": 1.0,
+                "amount": 10.0,
+            },
+            {
+                "date": "2024-01-03",
+                "asset": "000001.SZ",
+                "close": 10.2,
+                "volume": 1.1,
+                "amount": 11.22,
+            },
+        ]
+    )
+    financial_indicator = pd.DataFrame(
+        [
+            {
+                "asset": "000001.SZ",
+                "ann_date": "2024-01-02",
+                "end_date": "2023-12-31",
+                "roe_value": 10.0,
+                "roe_source_column": "roe_ttm",
+            }
+        ]
+    )
+
+    catalog.upsert_table(
+        "daily_bars",
+        daily_bars,
+        key_cols=("date", "asset"),
+        partition_column="date",
+    )
+    catalog.upsert_table(
+        "financial_indicator",
+        financial_indicator,
+        key_cols=("asset", "ann_date", "end_date"),
+        partition_column="ann_date",
+    )
+
+    export_result = catalog.export_case_inputs(
+        slice_spec=SliceSpec(
+            start_date="2024-01-02",
+            end_date="2024-01-03",
+            factors=("roe_ttm",),
+            adjustment="raw",
+        ),
+        output_dir=tmp_path / "slice_strict_roe",
+    )
+    roe = pd.read_csv(export_result.output_paths["roe_ttm"])
+
+    assert "2024-01-02" not in set(roe["date"].astype(str))
+    assert roe["date"].tolist() == ["2024-01-03"]
+    assert roe["value"].tolist() == [10.0]
+
+
 def test_data_catalog_exports_raw_prices_without_factor_csvs_by_default(
     tmp_path: Path,
     monkeypatch,
@@ -430,6 +498,91 @@ def test_data_catalog_supports_generic_top_liquidity_universes(
 
     prices = pd.read_csv(export_result.output_paths["prices"])
     assert sorted(prices["asset"].unique().tolist()) == ["000001.SZ", "000002.SZ"]
+
+
+def test_data_catalog_supports_institutional_ashare_universe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ALPHA_LAB_DATA_ROOT", str(tmp_path / "warehouse"))
+    catalog = DataCatalog()
+    catalog.ensure_layout()
+
+    dates = pd.date_range("2024-01-02", periods=20, freq="D").strftime("%Y-%m-%d").tolist()
+    final_date = dates[-1]
+    amount_by_asset = {
+        "000001.SZ": 100_000.0,
+        "000002.SZ": 100_000.0,
+        "000003.SZ": 100_000.0,
+        "000004.SZ": 1_000.0,
+        "000005.SZ": 100_000.0,
+    }
+    daily_bars = pd.DataFrame(
+        [
+            {
+                "date": date,
+                "asset": asset,
+                "close": 10.0,
+                "volume": 100.0,
+                "amount": amount,
+            }
+            for date in dates
+            for asset, amount in amount_by_asset.items()
+        ]
+    )
+    asset_status = pd.DataFrame(
+        [
+            {
+                "date": date,
+                "asset": asset,
+                "is_suspended": int(date == final_date and asset == "000003.SZ"),
+                "is_st": int(date == final_date and asset == "000002.SZ"),
+            }
+            for date in dates
+            for asset in amount_by_asset
+        ]
+    )
+    instruments = pd.DataFrame(
+        [
+            {"asset": "000001.SZ", "list_date": "2023-01-01", "delist_date": None},
+            {"asset": "000002.SZ", "list_date": "2023-01-01", "delist_date": None},
+            {"asset": "000003.SZ", "list_date": "2023-01-01", "delist_date": None},
+            {"asset": "000004.SZ", "list_date": "2023-01-01", "delist_date": None},
+            {"asset": "000005.SZ", "list_date": "2023-12-15", "delist_date": None},
+        ]
+    )
+    catalog.upsert_table(
+        "daily_bars", daily_bars, key_cols=("date", "asset"), partition_column="date"
+    )
+    catalog.upsert_table(
+        "asset_status", asset_status, key_cols=("date", "asset"), partition_column="date"
+    )
+    catalog.upsert_table(
+        "instruments", instruments, key_cols=("asset",), partition_column="list_date"
+    )
+    catalog.write_dataset_version(
+        dataset_name=DataCatalog.CORE_DATASET_NAME,
+        table_names=("daily_bars", "asset_status", "instruments"),
+        raw_snapshot_id="snapshot_x",
+        notes={"source": "test"},
+    )
+
+    export_result = catalog.export_case_inputs(
+        slice_spec=SliceSpec(
+            start_date=dates[0],
+            end_date=final_date,
+            universe_name="institutional_ashare",
+        ),
+        output_dir=tmp_path / "slice_institutional",
+    )
+
+    prices = pd.read_csv(export_result.output_paths["prices"])
+    universe = pd.read_csv(export_result.output_paths["universe"])
+    final_assets = sorted(prices.loc[prices["date"] == final_date, "asset"].unique().tolist())
+    assert final_assets == ["000001.SZ"]
+    assert "000004.SZ" not in set(prices["asset"])
+    assert "000005.SZ" not in set(prices["asset"])
+    assert len(universe) == len(prices)
 
 
 def test_data_catalog_partitions_canonical_tables_by_year_and_month(

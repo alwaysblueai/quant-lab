@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from alpha_lab.real_cases.composite.pipeline import run_composite_case
@@ -43,3 +44,8 @@ def test_composite_pipeline_smoke_runs_end_to_end(tmp_path: Path) -> None:
     assert required_keys.issubset(set(result.artifact_paths.keys()))
     for path in result.artifact_paths.values():
         assert path.exists()
+
+    backtest_payload = json.loads(result.artifact_paths["backtest_result_json"].read_text())
+    assert backtest_payload["target_horizon"] == 5
+    assert backtest_payload["summary"]["label_horizon"] == 5
+    assert backtest_payload["summary"]["nav_rebalance_step"] == 5

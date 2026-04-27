@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import io
 import json
 import math
+import re
 import tempfile
 import warnings
 from collections import defaultdict
@@ -878,6 +880,7 @@ def _render_tearsheet_chart_figure(
 
 def _plot_tearsheet_line(*, ax: Any, series_items: list[dict[str, object]]) -> bool:
     has_data = False
+    date_ticks: list[tuple[float, str]] = []
     for series in series_items:
         name = safe_text(series.get("name")) or "series"
         points = series.get("points")
@@ -889,10 +892,17 @@ def _plot_tearsheet_line(*, ax: Any, series_items: list[dict[str, object]]) -> b
             continue
         has_data = True
         ax.plot(x_values, y_values, linewidth=1.6, label=name)
-        if x_labels is not None and len(x_values) >= 2:
-            ax.set_xticks([x_values[0], x_values[-1]])
-            ax.set_xticklabels([x_labels[0], x_labels[-1]])
+        if not date_ticks and x_labels is not None and len(x_values) >= 2:
+            date_ticks = _build_annual_axis_ticks(x_values=x_values, x_labels=x_labels)
     if has_data:
+        if date_ticks:
+            ax.set_xticks([tick[0] for tick in date_ticks])
+            ax.set_xticklabels(
+                [tick[1] for tick in date_ticks],
+                rotation=30 if len(date_ticks) > 6 else 0,
+                ha="right" if len(date_ticks) > 6 else "center",
+            )
+            ax.set_xlabel("Date", fontsize=9)
         ax.legend(loc="best", fontsize=9)
     return has_data
 
@@ -983,6 +993,129 @@ def _parse_line_series_points(
     if len(x_values) < 2:
         return None
     return x_values, y_values, text_x if has_text_x else None
+
+
+def _build_annual_axis_ticks(
+    *,
+    x_values: list[float],
+    x_labels: list[str],
+) -> list[tuple[float, str]]:
+    dated: list[tuple[int, float, dt.date]] = []
+    for idx, (x_value, label) in enumerate(zip(x_values, x_labels, strict=False)):
+        parsed = _parse_axis_date(label)
+        if parsed is not None:
+            dated.append((idx, x_value, parsed))
+    if len(dated) < 2:
+        return []
+
+    start = dated[0][2]
+    end = dated[-1][2]
+    if end < start:
+        return []
+
+    interval = _axis_tick_interval(start=start, end=end)
+    ticks: list[tuple[float, str, dt.date]] = []
+    used_indices: set[int] = set()
+    last_idx = -1
+
+    def append_first_on_or_after(target: dt.date) -> None:
+        nonlocal last_idx
+        candidate: tuple[int, float, dt.date] | None = None
+        for item in dated:
+            idx, _x_value, item_date = item
+            if idx <= last_idx or item_date < target:
+                continue
+            candidate = item
+            break
+        if candidate is None:
+            return
+        idx, x_value, item_date = candidate
+        label = _format_axis_date(item_date, include_day=interval[2])
+        if idx in used_indices or (ticks and ticks[-1][1] == label):
+            return
+        used_indices.add(idx)
+        last_idx = idx
+        ticks.append((x_value, label, item_date))
+
+    target = start
+    while target <= end:
+        append_first_on_or_after(target)
+        target = _add_axis_tick_interval(target, months=interval[0], days=interval[1])
+
+    last_idx_value, last_x, last_date = dated[-1]
+    if (
+        last_idx_value not in used_indices
+        and (not ticks or (last_date - ticks[-1][2]).days >= interval[3])
+    ):
+        ticks.append((last_x, _format_axis_date(last_date, include_day=interval[2]), last_date))
+    if len(ticks) < 2 and last_idx_value not in used_indices:
+        ticks.append((last_x, _format_axis_date(last_date, include_day=interval[2]), last_date))
+    return [(x_value, label) for x_value, label, _date in ticks]
+
+
+def _parse_axis_date(value: object) -> dt.date | None:
+    text = safe_text(value)
+    if text is None:
+        return None
+    normalized = _normalize_date_token(text)
+    if normalized is None:
+        return None
+    try:
+        parts = normalized.replace("/", "-").replace(".", "-").split("-")
+        year = int(parts[0])
+        month = int(parts[1]) if len(parts) >= 2 else 1
+        day = int(parts[2]) if len(parts) >= 3 else 1
+        return dt.date(year, month, day)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _parse_axis_label(value: str) -> dt.date:
+    parts = value.split(".")
+    if len(parts) >= 3:
+        return dt.date(int(parts[0]), int(parts[1]), int(parts[2]))
+    if len(parts) >= 2:
+        return dt.date(int(parts[0]), int(parts[1]), 1)
+    return dt.date(int(parts[0]), 1, 1)
+
+
+def _axis_tick_interval(*, start: dt.date, end: dt.date) -> tuple[int, int, bool, int]:
+    span_days = max(0, (end - start).days)
+    if span_days <= 45:
+        return 0, 7, True, 4
+    if span_days <= 120:
+        return 0, 14, True, 7
+    if span_days <= 550:
+        return 1, 0, False, 15
+    if span_days <= 1095:
+        return 3, 0, False, 45
+    if span_days <= 2190:
+        return 6, 0, False, 90
+    return 12, 0, False, 180
+
+
+def _add_axis_tick_interval(value: dt.date, *, months: int, days: int) -> dt.date:
+    if days > 0:
+        return value + dt.timedelta(days=days)
+    return _add_months_clamped(value, months=max(1, months))
+
+
+def _add_months_clamped(value: dt.date, *, months: int) -> dt.date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    if month == 12:
+        next_month = dt.date(year + 1, 1, 1)
+    else:
+        next_month = dt.date(year, month + 1, 1)
+    last_day = (next_month - dt.timedelta(days=1)).day
+    return dt.date(year, month, min(value.day, last_day))
+
+
+def _format_axis_date(value: dt.date, *, include_day: bool = False) -> str:
+    if include_day:
+        return f"{value.year}.{value.month}.{value.day}"
+    return f"{value.year}.{value.month}"
 
 
 def _as_chart_list(value: object) -> list[dict[str, object]]:
@@ -1941,6 +2074,15 @@ def _normalize_date_token(value: object) -> str | None:
         return text[:10]
     if len(text) >= 10 and text[4] == "/" and text[7] == "/":
         return text[:10].replace("/", "-")
+    compact_ymd = re.search(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)", text)
+    if compact_ymd:
+        return f"{compact_ymd.group(1)}-{compact_ymd.group(2)}-{compact_ymd.group(3)}"
+    compact_ym = re.search(r"(?<!\d)(\d{4})(\d{2})(?!\d)", text)
+    if compact_ym:
+        return f"{compact_ym.group(1)}-{compact_ym.group(2)}-01"
+    compact_year = re.search(r"(?<!\d)(\d{4})(?!\d)", text)
+    if compact_year:
+        return f"{compact_year.group(1)}-01-01"
     return text
 
 

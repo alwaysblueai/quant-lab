@@ -244,18 +244,23 @@ Re-check the token value and reset `TUSHARE_TOKEN`.
 - `pilot`: 最近 3 年，`top_liquid_300`，`qfq`
 - `standard`: 最近 5 年，`listed_90d`，`qfq`
 - `robust`: 最近 8 年，`listed_90d`，`qfq`
+- `institutional`: 最近 8 年，`institutional_ashare`，`qfq`
 
 目前支持的流动性 universe 额外包括：
 
+- `institutional_ashare`
 - `top_liquid_300`
 - `top_liquid_500`
 - `top_liquid_800`
 
-它们都按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
+`institutional_ashare` 会保留上市满 `180` 天、当日非 ST/非停牌，且通过过去
+`20` 个样本日流动性筛选的 A 股：平均 `amount >= 20000`（Tushare 日频
+`amount` 单位为千元，约等于人民币 2000 万元），并剔除当日流动性后 `20%`。
+`top_liquid_*` 则按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
 
 旧版兼容命令 `alpha-lab web ui` 的自动数据源表单也默认使用 `standard`，
-并提供 `pilot / standard / robust` 可选项；你仍然可以在表单里继续手动修改
-开始/结束日期。新的交互式研究流程默认推荐使用 `alpha-lab web unified`。
+并提供 `pilot / standard / robust / institutional` 可选项；你仍然可以在表单里继续
+手动修改开始/结束日期。新的交互式研究流程默认推荐使用 `alpha-lab web unified`。
 
 针对 A 股日频量价因子研究，`alpha-lab data export-case-inputs` 现在默认导出更完整的
 研究列：

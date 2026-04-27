@@ -28,7 +28,7 @@
 | Coverage Mean | 0.997059 |
 | Capacity | available; upper=4951840.69; adv=84004440.33 |
 | Conditional IC | Q5-Q1=0.0159; large-small=-0.1917 |
-| 主要诊断 | positive IC and RankIC means; IC and RankIC signs are consistently positive; signal weakens materially in some periods; rebalance cadence may be too slow for IC decay; long-short max drawdown is elevated; factor performance is regime-dependent |
+| 主要诊断 | positive IC and RankIC means; IC and RankIC signs are consistently positive; signal weakens materially in some periods; rebalance cadence may be too slow for IC decay; factor performance is regime-dependent; confidence interval overlaps zero: long-short |
 | 主要阻断项 | blocked by unstable rolling evidence |
 | 主要风险 | none |
 

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
-from alpha_lab.labels import forward_return
+from alpha_lab.labels import LabelCache, forward_return
 
 
 def _make_df(prices: dict[str, list[float]], start: str = "2020-01-02") -> pd.DataFrame:
@@ -99,3 +99,25 @@ def test_forward_return_no_lookahead_on_prefix():
     pd.testing.assert_series_equal(
         full["value"].iloc[:2], prefix["value"].iloc[:2], check_names=False
     )
+
+
+def test_label_cache_matches_forward_return_multiple_horizons():
+    df = _make_df({"A": [100.0, 101.0, 103.0, 106.0], "B": [200.0, 198.0, 202.0, 205.0]})
+    cache = LabelCache(df)
+
+    for horizon in (1, 2, 3):
+        expected = forward_return(df, horizon=horizon)
+        actual = cache.forward_return(horizon)
+        pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_label_cache_matches_forward_return_execution_price_modes():
+    df = _make_df({"A": [100.0, 101.0, 103.0], "B": [200.0, 198.0, 202.0]})
+    df["open"] = df["close"] * 1.001
+    df["vwap"] = df["close"] * 0.999
+
+    for mode in ("next_open", "vwap"):
+        cache = LabelCache(df, execution_price_mode=mode)
+        expected = forward_return(df, horizon=1, execution_price_mode=mode)
+        actual = cache.forward_return(1)
+        pd.testing.assert_frame_equal(actual, expected)

@@ -637,6 +637,7 @@ def _build_backtest_result_payload(
         group_returns_df=group_returns_df,
         rebalance_frequency=spec.rebalance_frequency,
         metrics_for_payload=metrics_for_payload,
+        label_horizon=int(spec.target.horizon),
     )
     compact_summary = _compact_backtest_summary(summary)
     compact_fallback_fields = [
@@ -650,6 +651,7 @@ def _build_backtest_result_payload(
         "case_name": spec.name,
         "package_type": "single_factor",
         "rebalance_frequency": spec.rebalance_frequency,
+        "target_horizon": int(spec.target.horizon),
         "summary": compact_summary,
         "source_artifacts": {
             "group_returns_path": str(output_paths["group_returns"]),
@@ -660,7 +662,7 @@ def _build_backtest_result_payload(
     }
 
 
-def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+def _write_json(path: Path, payload: Mapping[str, object], *, pretty: bool = True) -> None:
     jsonable_payload = _to_jsonable(payload)
     if not isinstance(jsonable_payload, Mapping):
         raise AlphaLabDataError(f"{path} JSON payload root must be an object")
@@ -672,7 +674,16 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(jsonable_payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        if pretty:
+            json.dump(jsonable_payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        else:
+            json.dump(
+                jsonable_payload,
+                f,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=False,
+            )
         f.write("\n")
 
 
@@ -768,6 +779,13 @@ def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object
             "drawdown_table": [],
             "subperiod_analysis": None,
             "regime_analysis": None,
+            "nav_series_policy": summary.get("nav_series_policy"),
+            "nav_point_interval": summary.get("nav_point_interval"),
+            "nav_rebalance_step": summary.get("nav_rebalance_step"),
+            "label_horizon": summary.get("label_horizon"),
+            "statistics_series_policy": summary.get("statistics_series_policy"),
+            "statistics_rebalance_step": summary.get("statistics_rebalance_step"),
+            "statistics_periods_per_year": summary.get("statistics_periods_per_year"),
         }
     )
     return compact

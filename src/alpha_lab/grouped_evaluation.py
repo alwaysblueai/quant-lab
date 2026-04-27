@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
-from alpha_lab.evaluation import compute_ic, compute_rank_ic
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.interfaces import validate_factor_output
 
@@ -315,9 +315,11 @@ def _summarize_conditional_metric(
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     extras = extra_group_stats or {}
+    grouped_metrics = _conditional_corr_by_date_and_group(merged, group_col=group_col)
 
     for group_value in group_values:
-        group_block = merged.loc[merged[group_col] == group_value].copy()
+        group_block = merged.loc[merged[group_col] == group_value]
+        group_metric_block = grouped_metrics.loc[grouped_metrics[group_col] == group_value]
         if group_block.empty:
             row: dict[str, object] = {
                 group_col: group_value,
@@ -334,24 +336,8 @@ def _summarize_conditional_metric(
             rows.append(row)
             continue
 
-        metric_input = group_block.rename(
-            columns={
-                "factor_name": "factor",
-                "label_name": "label",
-                "factor_value": "value_factor",
-                "label_value": "value_label",
-            }
-        )
-        factor_input = metric_input.loc[:, ["date", "asset", "factor", "value_factor"]].rename(
-            columns={"value_factor": "value"}
-        )
-        label_input = metric_input.loc[:, ["date", "asset", "label", "value_label"]].rename(
-            columns={"label": "factor", "value_label": "value"}
-        )
-        ic_df = compute_ic(factor_input, label_input)
-        rank_ic_df = compute_rank_ic(factor_input, label_input)
-        ic_vals = pd.to_numeric(ic_df["ic"], errors="coerce").dropna()
-        rank_ic_vals = pd.to_numeric(rank_ic_df["rank_ic"], errors="coerce").dropna()
+        ic_vals = pd.to_numeric(group_metric_block["ic"], errors="coerce").dropna()
+        rank_ic_vals = pd.to_numeric(group_metric_block["rank_ic"], errors="coerce").dropna()
 
         row = {
             group_col: group_value,
@@ -361,8 +347,10 @@ def _summarize_conditional_metric(
             "rank_ic_positive_rate": (
                 float((rank_ic_vals > 0).mean()) if len(rank_ic_vals) > 0 else float("nan")
             ),
-            "n_dates_used": int(ic_df.loc[ic_df["ic"].notna(), "date"].nunique())
-            if not ic_df.empty
+            "n_dates_used": int(
+                group_metric_block.loc[group_metric_block["ic"].notna(), "date"].nunique()
+            )
+            if not group_metric_block.empty
             else 0,
         }
         if group_col == "magnitude_quintile":
@@ -374,3 +362,50 @@ def _summarize_conditional_metric(
         rows.append(row)
 
     return pd.DataFrame(rows)
+
+
+def _conditional_corr_by_date_and_group(
+    merged: pd.DataFrame,
+    *,
+    group_col: str,
+) -> pd.DataFrame:
+    values = merged.loc[:, ["date", group_col, "factor_value", "label_value"]].copy()
+    values["date"] = pd.to_datetime(values["date"], errors="coerce")
+    values["factor_value"] = pd.to_numeric(values["factor_value"], errors="coerce")
+    values["label_value"] = pd.to_numeric(values["label_value"], errors="coerce")
+    values = values.dropna(subset=["date", group_col, "factor_value", "label_value"])
+    if values.empty:
+        return pd.DataFrame(columns=[group_col, "date", "ic", "rank_ic"])
+
+    rows: list[dict[str, object]] = []
+    for (group_value, date), block in values.groupby([group_col, "date"], sort=True):
+        factor_values = block["factor_value"].to_numpy(dtype=float)
+        label_values = block["label_value"].to_numpy(dtype=float)
+        ic = _pearson_corr(factor_values, label_values)
+        if len(factor_values) < 2:
+            rank_ic = float("nan")
+        else:
+            rank_ic = _pearson_corr(
+                scipy_stats.rankdata(factor_values, method="average"),
+                scipy_stats.rankdata(label_values, method="average"),
+            )
+        rows.append(
+            {
+                group_col: group_value,
+                "date": date,
+                "ic": ic,
+                "rank_ic": rank_ic,
+            }
+        )
+    return pd.DataFrame(rows, columns=[group_col, "date", "ic", "rank_ic"])
+
+
+def _pearson_corr(x: np.ndarray, y: np.ndarray) -> float:
+    if x.size < 2 or y.size < 2:
+        return float("nan")
+    x_dev = x - x.mean()
+    y_dev = y - y.mean()
+    denom = float(np.sqrt(np.dot(x_dev, x_dev) * np.dot(y_dev, y_dev)))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return float("nan")
+    return float(np.dot(x_dev, y_dev) / denom)

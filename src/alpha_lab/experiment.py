@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import datetime
 import subprocess
+import time
 import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 import numpy as np
@@ -437,6 +439,17 @@ class ExperimentResult:
     integrity_report: IntegrityReport | None = None
     """Aggregate integrity report object for this run."""
 
+    stage_timings: Mapping[str, float] = field(default_factory=dict)
+    """Wall-clock seconds spent in each major pipeline stage.
+
+    Keys (when populated): ``factor``, ``label``, ``merge``, ``ic``,
+    ``quantile``, ``regime_tail``, ``summarise``, ``portfolio``. Values are
+    float seconds measured with :func:`time.perf_counter`. Stages skipped at
+    runtime (e.g. ``portfolio`` when no holding period was supplied) are
+    omitted. Intended for performance triage, not for billing or guarantees;
+    measurements include any I/O or integrity-check time inside the stage.
+    """
+
 
 def run_factor_experiment(
     prices: pd.DataFrame,
@@ -549,6 +562,16 @@ def run_factor_experiment(
     max_price_date = pd.Timestamp(pd.to_datetime(prices["date"]).max())
     _record_integrity(pit_check(prices, max_allowed_date=max_price_date, object_name="prices"))
 
+    stage_timings: dict[str, float] = {}
+
+    @contextmanager
+    def _stage(name: str):
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            stage_timings[name] = stage_timings.get(name, 0.0) + (time.perf_counter() - start)
+
     # --- Step 0: resolve strategy overrides ---------------------------------
     # StrategySpec is the explicit domain boundary between the factor research
     # layer and the portfolio research layer.  When provided it overrides all
@@ -602,20 +625,21 @@ def run_factor_experiment(
         )
 
     # --- Step 1: factor values (full sample) --------------------------------
-    factor_df = factor_fn(prices)
-    validate_factor_output(factor_df)
-    _record_integrity(
-        pit_check(factor_df, max_allowed_date=max_price_date, object_name="factor_df")
-    )
-    _record_integrity(
-        check_cross_section_transform_scope(
-            prices[["date", "asset"]],
-            factor_df[["date", "asset", "value"]],
-            date_col="date",
-            asset_col="asset",
-            object_name="factor_vs_prices_scope",
+    with _stage("factor"):
+        factor_df = factor_fn(prices)
+        validate_factor_output(factor_df)
+        _record_integrity(
+            pit_check(factor_df, max_allowed_date=max_price_date, object_name="factor_df")
         )
-    )
+        _record_integrity(
+            check_cross_section_transform_scope(
+                prices[["date", "asset"]],
+                factor_df[["date", "asset", "value"]],
+                date_col="date",
+                asset_col="asset",
+                object_name="factor_vs_prices_scope",
+            )
+        )
 
     # --- Step 2: forward-return labels (full sample) ------------------------
     # Labels at date t: close[t+horizon]/close[t] - 1 (strictly future prices).
@@ -624,165 +648,174 @@ def run_factor_experiment(
     # (e.g. next-open execution prices, tradability-masked labels) for
     # sensitivity analysis.  The result must be canonical long-form
     # ``[date, asset, factor, value]``.
-    if label_fn is not None:
-        label_df = label_fn(prices)
-        validate_factor_output(label_df)
-    else:
-        cached = _cached_forward_labels(
-            precomputed_forward_labels,
-            horizon=horizon,
+    with _stage("label"):
+        if label_fn is not None:
+            label_df = label_fn(prices)
+            validate_factor_output(label_df)
+        else:
+            cached = _cached_forward_labels(
+                precomputed_forward_labels,
+                horizon=horizon,
+            )
+            label_df = cached if cached is not None else forward_return(prices, horizon=horizon)
+        _record_integrity(
+            pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df")
         )
-        label_df = cached if cached is not None else forward_return(prices, horizon=horizon)
-    _record_integrity(pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df"))
-    _record_integrity(
-        check_factor_label_temporal_order(
-            factor_df,
-            label_df,
-            join_keys=("date", "asset"),
-            factor_date_col="date",
-            label_date_col="date",
-            object_name="factor_label_alignment",
+        _record_integrity(
+            check_factor_label_temporal_order(
+                factor_df,
+                label_df,
+                join_keys=("date", "asset"),
+                factor_date_col="date",
+                label_date_col="date",
+                object_name="factor_label_alignment",
+            )
         )
-    )
-    _record_integrity(
-        check_factor_label_value_clone_risk(
-            factor_df,
-            label_df,
-            join_keys=("date", "asset"),
-            factor_value_col="value",
-            label_value_col="value",
-            object_name="factor_label_value_leakage",
+        _record_integrity(
+            check_factor_label_value_clone_risk(
+                factor_df,
+                label_df,
+                join_keys=("date", "asset"),
+                factor_value_col="value",
+                label_value_col="value",
+                object_name="factor_label_value_leakage",
+            )
         )
-    )
 
     # --- Step 3: resolve evaluation period ----------------------------------
-    if train_end is not None and test_start is not None:
-        # time_split is date-comparison-based and is panel-safe: all rows
-        # sharing a date receive the same mask value.
-        masks = time_split(
-            factor_df["date"],
-            train_end=train_end,
-            test_start=test_start,
-            val_start=val_start,
-        )
-        eval_factor = factor_df[masks["test"]].reset_index(drop=True)
-        # Filter labels by the exact test-period dates (not by positional mask,
-        # since label_df may have a different row structure than factor_df).
-        eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
-        eval_label = label_df[label_df["date"].isin(eval_date_index)].reset_index(drop=True)
-    else:
-        eval_factor = factor_df.copy()
-        eval_label = label_df.copy()
-        eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
+    with _stage("merge"):
+        if train_end is not None and test_start is not None:
+            # time_split is date-comparison-based and is panel-safe: all rows
+            # sharing a date receive the same mask value.
+            masks = time_split(
+                factor_df["date"],
+                train_end=train_end,
+                test_start=test_start,
+                val_start=val_start,
+            )
+            eval_factor = factor_df[masks["test"]].reset_index(drop=True)
+            # Filter labels by the exact test-period dates (not by positional mask,
+            # since label_df may have a different row structure than factor_df).
+            eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
+            eval_label = label_df[label_df["date"].isin(eval_date_index)].reset_index(drop=True)
+        else:
+            eval_factor = factor_df.copy()
+            eval_label = label_df.copy()
+            eval_date_index = pd.DatetimeIndex(eval_factor["date"].unique())
 
-    # --- Step 3b: diagnostics -----------------------------------------------
-    n_eval_dates = int(eval_factor["date"].nunique())
-    n_eval_assets = int(eval_factor["asset"].nunique())
-    # Count eval dates that have no valid (non-NaN) forward return label for
-    # any asset.  These are excluded from IC and quantile-return computation.
-    dates_with_labels: set[object] = set(
-        eval_label.loc[eval_label["value"].notna(), "date"].unique()
-    )
-    eval_factor_dates: set[object] = set(eval_factor["date"].unique())
-    n_label_nan_dates = len(eval_factor_dates - dates_with_labels)
-
-    merged_eval = (
-        eval_factor[["date", "asset", "value"]]
-        .rename(columns={"value": "value_factor"})
-        .merge(
-            eval_label[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
-            on=["date", "asset"],
-            how="inner",
-            validate="one_to_one",
+        # --- Step 3b: diagnostics -------------------------------------------
+        n_eval_dates = int(eval_factor["date"].nunique())
+        n_eval_assets = int(eval_factor["asset"].nunique())
+        # Count eval dates that have no valid (non-NaN) forward return label for
+        # any asset.  These are excluded from IC and quantile-return computation.
+        dates_with_labels: set[object] = set(
+            eval_label.loc[eval_label["value"].notna(), "date"].unique()
         )
-    )
-    valid_eval = merged_eval.dropna(subset=["value_factor", "value_label"])
-    if valid_eval.empty:
-        valid_assets_by_date = pd.Series(dtype=float)
-    else:
-        valid_assets_by_date = valid_eval.groupby("date")["asset"].nunique()
-    mean_eval_assets_per_date = (
-        float(valid_assets_by_date.mean()) if len(valid_assets_by_date) > 0 else float("nan")
-    )
-    min_eval_assets_per_date = (
-        float(valid_assets_by_date.min()) if len(valid_assets_by_date) > 0 else float("nan")
-    )
-    if n_eval_assets > 0 and np.isfinite(mean_eval_assets_per_date):
-        eval_coverage_ratio_mean = mean_eval_assets_per_date / float(n_eval_assets)
-    else:
-        eval_coverage_ratio_mean = float("nan")
-    if n_eval_assets > 0 and np.isfinite(min_eval_assets_per_date):
-        eval_coverage_ratio_min = min_eval_assets_per_date / float(n_eval_assets)
-    else:
-        eval_coverage_ratio_min = float("nan")
+        eval_factor_dates: set[object] = set(eval_factor["date"].unique())
+        n_label_nan_dates = len(eval_factor_dates - dates_with_labels)
+
+        merged_eval = (
+            eval_factor[["date", "asset", "value"]]
+            .rename(columns={"value": "value_factor"})
+            .merge(
+                eval_label[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
+                on=["date", "asset"],
+                how="inner",
+                validate="one_to_one",
+            )
+        )
+        valid_eval = merged_eval.dropna(subset=["value_factor", "value_label"])
+        if valid_eval.empty:
+            valid_assets_by_date = pd.Series(dtype=float)
+        else:
+            valid_assets_by_date = valid_eval.groupby("date")["asset"].nunique()
+        mean_eval_assets_per_date = (
+            float(valid_assets_by_date.mean()) if len(valid_assets_by_date) > 0 else float("nan")
+        )
+        min_eval_assets_per_date = (
+            float(valid_assets_by_date.min()) if len(valid_assets_by_date) > 0 else float("nan")
+        )
+        if n_eval_assets > 0 and np.isfinite(mean_eval_assets_per_date):
+            eval_coverage_ratio_mean = mean_eval_assets_per_date / float(n_eval_assets)
+        else:
+            eval_coverage_ratio_mean = float("nan")
+        if n_eval_assets > 0 and np.isfinite(min_eval_assets_per_date):
+            eval_coverage_ratio_min = min_eval_assets_per_date / float(n_eval_assets)
+        else:
+            eval_coverage_ratio_min = float("nan")
 
     # --- Step 4: IC / RankIC -----------------------------------------------
-    ic_df = compute_ic(eval_factor, eval_label, merged_pairs=merged_eval)
-    rank_ic_df = compute_rank_ic(eval_factor, eval_label, merged_pairs=merged_eval)
-    mi_df = compute_mutual_information(eval_factor, eval_label, merged_pairs=merged_eval)
+    with _stage("ic"):
+        ic_df = compute_ic(eval_factor, eval_label, merged_pairs=merged_eval)
+        rank_ic_df = compute_rank_ic(eval_factor, eval_label, merged_pairs=merged_eval)
+        mi_df = compute_mutual_information(eval_factor, eval_label, merged_pairs=merged_eval)
 
-    # --- Step 5: quantile returns and long-short ----------------------------
-    qr_df = quantile_returns(
-        eval_factor,
-        eval_label,
-        n_quantiles=n_quantiles,
-        merged_pairs=merged_eval,
-    )
-    ls_df = long_short_return(qr_df)
+    # --- Step 5 / 5b: quantile returns, long-short, assignments, turnover --
+    with _stage("quantile"):
+        qr_df = quantile_returns(
+            eval_factor,
+            eval_label,
+            n_quantiles=n_quantiles,
+            merged_pairs=merged_eval,
+        )
+        ls_df = long_short_return(qr_df)
 
-    # --- Step 5b: portfolio assignments and turnover ------------------------
-    # Assignments are computed from eval_factor only (no label required).
-    # The universe may include the last `horizon` dates where labels are NaN —
-    # those dates still represent real rebalancing events.
-    asgn_df = quantile_assignments(eval_factor, n_quantiles=n_quantiles)
-    qto_df = quantile_turnover(asgn_df)
-    lsto_df = long_short_turnover(qto_df)
+        # Assignments are computed from eval_factor only (no label required).
+        # The universe may include the last `horizon` dates where labels are NaN —
+        # those dates still represent real rebalancing events.
+        asgn_df = quantile_assignments(eval_factor, n_quantiles=n_quantiles)
+        qto_df = quantile_turnover(asgn_df)
+        lsto_df = long_short_turnover(qto_df)
 
-    # --- Step 6: summary ----------------------------------------------------
-    # Restrict turnover to dates present in long_short_df so that
-    # mean_long_short_turnover is averaged over the same universe as
-    # mean_long_short_return and cost-adjusted returns.
-    ls_dates = set(ls_df["date"].unique()) if not ls_df.empty else set()
-    lsto_for_summary = lsto_df[lsto_df["date"].isin(ls_dates)] if not lsto_df.empty else lsto_df
-    rolling_stability_df = _build_rolling_stability_frame(
-        ic_df,
-        rank_ic_df,
-        mi_df,
-        ls_df,
-        window=rolling_stability_thresholds.rolling_window_size,
-    )
-    tail_risk = compute_tail_risk(ls_df)
+    # --- Step 6 / 6b: rolling stability, tail risk, regime ------------------
+    with _stage("regime_tail"):
+        # Restrict turnover to dates present in long_short_df so that
+        # mean_long_short_turnover is averaged over the same universe as
+        # mean_long_short_return and cost-adjusted returns.
+        ls_dates = set(ls_df["date"].unique()) if not ls_df.empty else set()
+        lsto_for_summary = (
+            lsto_df[lsto_df["date"].isin(ls_dates)] if not lsto_df.empty else lsto_df
+        )
+        rolling_stability_df = _build_rolling_stability_frame(
+            ic_df,
+            rank_ic_df,
+            mi_df,
+            ls_df,
+            window=rolling_stability_thresholds.rolling_window_size,
+        )
+        tail_risk_sample_step = max(1, int(horizon), int(rebalance_frequency or 1))
+        tail_risk = compute_tail_risk(ls_df, sample_step=tail_risk_sample_step)
 
-    # --- Step 6b: regime-conditional analysis ---------------------------------
-    regime_df = classify_market_regimes(
-        ic_df,
-        ls_df,
-        prices,
-        vol_window=rolling_stability_thresholds.rolling_window_size,
-    )
-    regime_summary = compute_regime_conditional(
-        ic_df,
-        rank_ic_df,
-        ls_df,
-        regime_df,
-        config=regime_analysis_config,
-    )
+        regime_df = classify_market_regimes(
+            ic_df,
+            ls_df,
+            prices,
+            vol_window=rolling_stability_thresholds.rolling_window_size,
+        )
+        regime_summary = compute_regime_conditional(
+            ic_df,
+            rank_ic_df,
+            ls_df,
+            regime_df,
+            config=regime_analysis_config,
+        )
 
-    summary = _summarise(
-        ic_df,
-        rank_ic_df,
-        mi_df,
-        ls_df,
-        lsto_for_summary,
-        rolling_stability_df=rolling_stability_df,
-        tail_risk=tail_risk,
-        regime_flags=regime_summary.regime_flags,
-        mean_eval_assets_per_date=mean_eval_assets_per_date,
-        min_eval_assets_per_date=min_eval_assets_per_date,
-        eval_coverage_ratio_mean=eval_coverage_ratio_mean,
-        eval_coverage_ratio_min=eval_coverage_ratio_min,
-        rolling_stability_thresholds=rolling_stability_thresholds,
-    )
+    with _stage("summarise"):
+        summary = _summarise(
+            ic_df,
+            rank_ic_df,
+            mi_df,
+            ls_df,
+            lsto_for_summary,
+            rolling_stability_df=rolling_stability_df,
+            tail_risk=tail_risk,
+            regime_flags=regime_summary.regime_flags,
+            mean_eval_assets_per_date=mean_eval_assets_per_date,
+            min_eval_assets_per_date=min_eval_assets_per_date,
+            eval_coverage_ratio_mean=eval_coverage_ratio_mean,
+            eval_coverage_ratio_min=eval_coverage_ratio_min,
+            rolling_stability_thresholds=rolling_stability_thresholds,
+        )
 
     # --- Step 7: optional portfolio simulation ------------------------------
     port_weights_df: pd.DataFrame | None = None
@@ -792,46 +825,56 @@ def run_factor_experiment(
     port_summary: PortfolioSummary | None = None
 
     if holding_period is not None and rebalance_frequency is not None:
-        one_period_labels = _cached_forward_labels(precomputed_forward_labels, horizon=1)
-        port_weights_df, port_return_df, port_turnover_df, port_cost_adj_df = _run_portfolio_block(
-            eval_factor=eval_factor,
-            prices=prices,
-            eval_date_index=eval_date_index,
-            holding_period=holding_period,
-            rebalance_frequency=rebalance_frequency,
-            weighting_method=weighting_method,
-            portfolio_cost_rate=portfolio_cost_rate,
-            strategy=strategy,
-            one_period_labels=one_period_labels,
-        )
-        port_summary = _summarise_portfolio(port_return_df, port_turnover_df, port_cost_adj_df)
-        eval_max_date = (
-            pd.Timestamp(eval_date_index.max()) if len(eval_date_index) > 0 else max_price_date
-        )
-        if port_weights_df is not None and not port_weights_df.empty:
-            _record_integrity(
-                pit_check(
-                    port_weights_df,
-                    max_allowed_date=eval_max_date,
-                    object_name="portfolio_weights_df",
-                )
+        with _stage("portfolio"):
+            one_period_labels = _cached_forward_labels(precomputed_forward_labels, horizon=1)
+            (
+                port_weights_df,
+                port_return_df,
+                port_turnover_df,
+                port_cost_adj_df,
+            ) = _run_portfolio_block(
+                eval_factor=eval_factor,
+                prices=prices,
+                eval_date_index=eval_date_index,
+                holding_period=holding_period,
+                rebalance_frequency=rebalance_frequency,
+                weighting_method=weighting_method,
+                portfolio_cost_rate=portfolio_cost_rate,
+                strategy=strategy,
+                one_period_labels=one_period_labels,
             )
-        if port_return_df is not None and not port_return_df.empty:
-            _record_integrity(
-                pit_check(
-                    port_return_df,
-                    max_allowed_date=eval_max_date,
-                    object_name="portfolio_return_df",
-                )
+            port_summary = _summarise_portfolio(
+                port_return_df, port_turnover_df, port_cost_adj_df
             )
-        if port_turnover_df is not None and not port_turnover_df.empty:
-            _record_integrity(
-                pit_check(
-                    port_turnover_df,
-                    max_allowed_date=eval_max_date,
-                    object_name="portfolio_turnover_df",
-                )
+            eval_max_date = (
+                pd.Timestamp(eval_date_index.max())
+                if len(eval_date_index) > 0
+                else max_price_date
             )
+            if port_weights_df is not None and not port_weights_df.empty:
+                _record_integrity(
+                    pit_check(
+                        port_weights_df,
+                        max_allowed_date=eval_max_date,
+                        object_name="portfolio_weights_df",
+                    )
+                )
+            if port_return_df is not None and not port_return_df.empty:
+                _record_integrity(
+                    pit_check(
+                        port_return_df,
+                        max_allowed_date=eval_max_date,
+                        object_name="portfolio_return_df",
+                    )
+                )
+            if port_turnover_df is not None and not port_turnover_df.empty:
+                _record_integrity(
+                    pit_check(
+                        port_turnover_df,
+                        max_allowed_date=eval_max_date,
+                        object_name="portfolio_turnover_df",
+                    )
+                )
 
     # --- Step 8: build provenance -------------------------------------------
     _factor_names = factor_df["factor"].unique() if not factor_df.empty else []
@@ -889,6 +932,7 @@ def run_factor_experiment(
         regime_summary=regime_summary,
         integrity_checks=tuple(integrity_checks),
         integrity_report=integrity_report,
+        stage_timings=dict(stage_timings),
     )
 
 

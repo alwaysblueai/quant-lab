@@ -21,6 +21,7 @@ from .tushare import TushareIngestor
 UNIVERSE_CHOICES = [
     "all_ashare",
     "listed_90d",
+    "institutional_ashare",
     "top_liquid_300",
     "top_liquid_500",
     "top_liquid_800",
