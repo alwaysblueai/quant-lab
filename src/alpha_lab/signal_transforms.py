@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
-from alpha_lab.preprocess import winsorize_series
 from alpha_lab.research_integrity.leakage_checks import check_cross_section_transform_scope
+from alpha_lab.sorted_panel import ensure_sorted
 
 _REQUIRED_COLUMNS: frozenset[str] = frozenset({"date", "asset", "value"})
 
@@ -32,17 +32,15 @@ def winsorize_cross_section(
 
     _validate_signal_frame(df)
     out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
 
-    for idx in _date_groups(out):
-        values = pd.to_numeric(out.loc[idx, "value"], errors="coerce")
-        valid = values.notna()
-        if int(valid.sum()) < min_group_size:
-            continue
-        out.loc[values.index[valid], "value"] = winsorize_series(
-            values.loc[valid],
-            lower=lower,
-            upper=upper,
-        )
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    lo = grouped.transform("quantile", lower)
+    hi = grouped.transform("quantile", upper)
+    eligible = valid_count >= min_group_size
+    clipped = out["value"].clip(lower=lo, upper=hi)
+    out.loc[eligible, "value"] = clipped.loc[eligible]
 
     out = _coerce_sort(out)
     return _validate_transform_scope(
@@ -66,21 +64,19 @@ def mad_winsorize_cross_section(
 
     _validate_signal_frame(df)
     out = df.copy()
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
 
-    for idx in _date_groups(out):
-        values = pd.to_numeric(out.loc[idx, "value"], errors="coerce")
-        valid = values.notna()
-        if int(valid.sum()) < min_group_size:
-            continue
+    grouped = out.groupby("date", sort=False)["value"]
+    valid_count = grouped.transform("count")
+    median = grouped.transform("median")
+    abs_dev = (out["value"] - median).abs()
+    mad = abs_dev.groupby(out["date"], sort=False).transform("median")
 
-        v = values.loc[valid]
-        median = float(v.median())
-        mad = float((v - median).abs().median())
-        if not np.isfinite(mad) or mad <= 0.0:
-            continue
-        lower = median - float(k) * mad
-        upper = median + float(k) * mad
-        out.loc[v.index, "value"] = v.clip(lower=lower, upper=upper)
+    eligible = (valid_count >= min_group_size) & np.isfinite(mad) & (mad > 0.0)
+    lo = median - float(k) * mad
+    hi = median + float(k) * mad
+    clipped = out["value"].clip(lower=lo, upper=hi)
+    out.loc[eligible, "value"] = clipped.loc[eligible]
 
     out = _coerce_sort(out)
     return _validate_transform_scope(
@@ -210,10 +206,6 @@ def apply_min_coverage_gate(
     )
 
 
-def _date_groups(df: pd.DataFrame) -> list[pd.Index]:
-    return [pd.Index(idx) for _, idx in df.groupby("date", sort=False).groups.items()]
-
-
 def _validate_signal_frame(df: pd.DataFrame) -> None:
     missing = _REQUIRED_COLUMNS - set(df.columns)
     if missing:
@@ -222,7 +214,7 @@ def _validate_signal_frame(df: pd.DataFrame) -> None:
 
 def _coerce_sort(df: pd.DataFrame) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    return df.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True)
+    return ensure_sorted(df, by=("date", "asset"))
 
 
 def _validate_transform_scope(

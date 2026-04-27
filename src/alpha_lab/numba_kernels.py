@@ -24,7 +24,7 @@ def numba_enabled() -> bool:
 
 if NUMBA_AVAILABLE:
 
-    @njit(cache=False)
+    @njit(cache=True)
     def _pearson_corr_numba(x: np.ndarray, y: np.ndarray) -> float:
         n = x.size
         if n < 2:
@@ -52,7 +52,7 @@ if NUMBA_AVAILABLE:
             return np.nan
         return float(cov / np.sqrt(var_x * var_y))
 
-    @njit(cache=False)
+    @njit(cache=True)
     def _average_rank_numba(values: np.ndarray) -> np.ndarray:
         n = values.size
         ranks = np.empty(n, dtype=np.float64)
@@ -73,7 +73,7 @@ if NUMBA_AVAILABLE:
             i = j
         return ranks
 
-    @njit(cache=False)
+    @njit(cache=True)
     def _cross_sectional_corr_by_group_numba(
         x: np.ndarray,
         y: np.ndarray,
@@ -121,3 +121,20 @@ def cross_sectional_corr_by_group_numba(
         method_code,
     )
     return cast(np.ndarray, result)
+
+
+def warmup_numba_kernels() -> bool:
+    if not NUMBA_AVAILABLE:
+        return False
+    sample_x = np.asarray([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
+    sample_y = np.asarray([1.0, 3.0, 2.0, 4.0], dtype=np.float64)
+    start_idx = np.asarray([0], dtype=np.int64)
+    end_idx = np.asarray([4], dtype=np.int64)
+    _ = cross_sectional_corr_by_group_numba(
+        sample_x,
+        sample_y,
+        start_idx,
+        end_idx,
+        method="spearman",
+    )
+    return True

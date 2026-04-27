@@ -1,0 +1,156 @@
+{
+  "run_id": "20260424T183440",
+  "size": "medium",
+  "n_dates": 500,
+  "n_assets": 500,
+  "python_version": "3.12.3",
+  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "git_sha": "459c318",
+  "git_dirty": true,
+  "machine": "x86_64",
+  "processor": "x86_64",
+  "cpu_count": 8,
+  "package_versions": {
+    "numpy": "2.4.3",
+    "pandas": "3.0.1",
+    "scipy": "1.17.1",
+    "scikit-learn": "1.8.0",
+    "numba": "not-installed",
+    "lightgbm": "4.6.0",
+    "xgboost": "3.2.0"
+  },
+  "repeat": 1,
+  "seed": 20260424,
+  "stages_requested": [
+    "load",
+    "label",
+    "transforms",
+    "neutralize",
+    "evaluate",
+    "diagnostics",
+    "integrity",
+    "artifact",
+    "train"
+  ],
+  "total_wall_seconds": 25.195405583999673,
+  "peak_rss_mb": 407.890625,
+  "stages": [
+    {
+      "name": "load",
+      "ok": true,
+      "wall_seconds": 1.1018655880000097,
+      "peak_mem_delta_mb": 71.76128196716309,
+      "n_rows_touched": 250000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        1.1018655880000097
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "label",
+      "ok": true,
+      "wall_seconds": 0.1746509720001086,
+      "peak_mem_delta_mb": 63.36193561553955,
+      "n_rows_touched": 1500000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        0.1746509720001086
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "transforms",
+      "ok": true,
+      "wall_seconds": 0.9033634129998518,
+      "peak_mem_delta_mb": 65.9231185913086,
+      "n_rows_touched": 250000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        0.9033634129998518
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "neutralize",
+      "ok": true,
+      "wall_seconds": 8.798023897999883,
+      "peak_mem_delta_mb": 107.10408306121826,
+      "n_rows_touched": 250000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        8.798023897999883
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "evaluate",
+      "ok": true,
+      "wall_seconds": 2.4906411709998793,
+      "peak_mem_delta_mb": 79.12791156768799,
+      "n_rows_touched": 1000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        2.4906411709998793
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "diagnostics",
+      "ok": true,
+      "wall_seconds": 3.8538511760000347,
+      "peak_mem_delta_mb": 49.22111225128174,
+      "n_rows_touched": 10,
+      "n_repeats": 1,
+      "samples_seconds": [
+        3.8538511760000347
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "integrity",
+      "ok": true,
+      "wall_seconds": 0.6375125219999518,
+      "peak_mem_delta_mb": 40.59640598297119,
+      "n_rows_touched": 1500000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        0.6375125219999518
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "artifact",
+      "ok": true,
+      "wall_seconds": 5.801511988999891,
+      "peak_mem_delta_mb": 9.202438354492188,
+      "n_rows_touched": 500000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        5.801511988999891
+      ],
+      "error": null,
+      "note": null
+    },
+    {
+      "name": "train",
+      "ok": true,
+      "wall_seconds": 1.4339848550000625,
+      "peak_mem_delta_mb": 65.5555067062378,
+      "n_rows_touched": 120000,
+      "n_repeats": 1,
+      "samples_seconds": [
+        1.4339848550000625
+      ],
+      "error": null,
+      "note": null
+    }
+  ]
+}

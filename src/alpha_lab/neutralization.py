@@ -96,38 +96,47 @@ def neutralize_signal(
 
     out = df.copy()
     y_all = pd.to_numeric(out[value_col], errors="coerce")
-    out[output_col] = y_all
+    residuals = y_all.to_numpy(dtype=float, copy=True)
 
     stats: dict[str, dict[str, list[float]]] = {
         family: {"before": [], "after": []} for family, _ in exposure_families
     }
+    full_family_matrix: dict[str, pd.DataFrame] = {}
+    for family, column in exposure_families:
+        if family == "industry":
+            cat = out[column].astype("string")
+            full_family_matrix[family] = pd.get_dummies(
+                cat,
+                prefix="ind",
+                dummy_na=False,
+                dtype=float,
+            )
+        else:
+            full_family_matrix[family] = pd.DataFrame(
+                {column: pd.to_numeric(out[column], errors="coerce")},
+                index=out.index,
+            )
+    row_positions = pd.Series(np.arange(len(out)), index=out.index)
 
     for _, group_idx in out.groupby(by, sort=True).groups.items():
         idx = pd.Index(group_idx)
-        g = out.loc[idx].copy()
-        y = pd.to_numeric(g[value_col], errors="coerce")
+        y = y_all.loc[idx]
 
         family_matrix: dict[str, pd.DataFrame] = {}
-        for family, column in exposure_families:
+        for family, _column in exposure_families:
+            x = full_family_matrix[family].loc[idx]
             if family == "industry":
-                cat = g[column].astype("string")
-                x = pd.get_dummies(cat, prefix="ind", dummy_na=False, dtype=float)
-            else:
-                x = pd.DataFrame(
-                    {column: pd.to_numeric(g[column], errors="coerce")},
-                    index=g.index,
-                )
+                active = x.to_numpy(dtype=float, copy=False).any(axis=0)
+                x = x.loc[:, active]
             family_matrix[family] = x
 
         if not family_matrix:
-            out.loc[idx, output_col] = y
             continue
 
         x_concat = pd.concat(family_matrix.values(), axis=1)
         valid = y.notna() & x_concat.notna().all(axis=1)
         n_obs = int(valid.sum())
         if n_obs < min_obs:
-            out.loc[idx, output_col] = y
             continue
 
         x = x_concat.loc[valid].to_numpy(dtype=float)
@@ -143,11 +152,10 @@ def neutralize_signal(
         beta = np.linalg.solve(xtx, x_design.T @ yv)
         residual = yv - (x_design @ beta)
 
-        neutralized = y.copy()
-        neutralized.loc[valid] = residual
-        out.loc[idx, output_col] = neutralized
+        positions = row_positions.loc[idx].to_numpy(dtype=int)
+        residuals[positions[np.asarray(valid, dtype=bool)]] = residual
+        y_after = pd.Series(residual, index=y.index[valid])
 
-        y_after = neutralized.loc[valid]
         for family, _column in exposure_families:
             fam_x = family_matrix[family].loc[valid]
             before = _mean_abs_corr(y.loc[valid], fam_x)
@@ -156,6 +164,8 @@ def neutralize_signal(
                 stats[family]["before"].append(float(before))
             if np.isfinite(after):
                 stats[family]["after"].append(float(after))
+
+    out[output_col] = residuals
 
     diag_rows: list[dict[str, object]] = []
     label_map = {
@@ -220,22 +230,35 @@ def neutralize_signal(
 
 def _mean_abs_corr(y: pd.Series, x_frame: pd.DataFrame) -> float:
     yv = pd.to_numeric(y, errors="coerce").to_numpy(dtype=float)
-    corrs: list[float] = []
-    for _, col in x_frame.items():
-        xv = pd.to_numeric(col, errors="coerce").to_numpy(dtype=float)
-        valid = np.isfinite(yv) & np.isfinite(xv)
-        if int(valid.sum()) < 2:
-            continue
-        y_sub = yv[valid]
-        x_sub = xv[valid]
-        if np.nanstd(y_sub) == 0 or np.nanstd(x_sub) == 0:
-            continue
-        corr = np.corrcoef(y_sub, x_sub)[0, 1]
-        if np.isfinite(corr):
-            corrs.append(float(abs(corr)))
-    if not corrs:
+    if x_frame.empty or len(yv) == 0:
         return float("nan")
-    return float(np.mean(corrs))
+
+    xv = x_frame.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    if xv.ndim != 2 or xv.shape[1] == 0:
+        return float("nan")
+
+    valid = np.isfinite(yv)[:, None] & np.isfinite(xv)
+    n = valid.sum(axis=0).astype(float)
+    usable = n >= 2.0
+    if not bool(np.any(usable)):
+        return float("nan")
+
+    y_matrix = np.where(valid, yv[:, None], 0.0)
+    x_matrix = np.where(valid, xv, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        y_mean = y_matrix.sum(axis=0) / n
+        x_mean = x_matrix.sum(axis=0) / n
+        y_centered = np.where(valid, yv[:, None] - y_mean, 0.0)
+        x_centered = np.where(valid, xv - x_mean, 0.0)
+        y_var = (y_centered * y_centered).sum(axis=0) / n
+        x_var = (x_centered * x_centered).sum(axis=0) / n
+        cov = (y_centered * x_centered).sum(axis=0) / n
+        corr = cov / np.sqrt(y_var * x_var)
+
+    corr = corr[usable & np.isfinite(corr)]
+    if corr.size == 0:
+        return float("nan")
+    return float(np.mean(np.abs(corr)))
 
 
 def _finite_or_nan(value: float) -> float:

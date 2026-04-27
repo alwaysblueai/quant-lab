@@ -7,6 +7,7 @@ how persistent factor rankings are over time.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,10 @@ from scipy import stats as scipy_stats
 
 from alpha_lab.evaluation import compute_ic, compute_ic_summary, compute_rank_ic
 from alpha_lab.labels import forward_return
+from alpha_lab.sorted_panel import ensure_sorted
+
+AUTOCORR_FAST_PATH_COVERAGE = 0.995
+AUTOCORR_MIN_ASSETS = 3
 
 
 def estimate_ic_half_life(decay_df: pd.DataFrame) -> dict[str, object]:
@@ -138,8 +143,18 @@ def compute_ic_decay(
             )
             continue
 
-        ic_df = compute_ic(factor_df, labels)
-        rank_ic_df = compute_rank_ic(factor_df, labels)
+        merged_eval = (
+            factor_df[["date", "asset", "value"]]
+            .rename(columns={"value": "value_factor"})
+            .merge(
+                labels[["date", "asset", "value"]].rename(columns={"value": "value_label"}),
+                on=["date", "asset"],
+                how="inner",
+                validate="one_to_one",
+            )
+        )
+        ic_df = compute_ic(factor_df, labels, merged_pairs=merged_eval)
+        rank_ic_df = compute_rank_ic(factor_df, labels, merged_pairs=merged_eval)
 
         ic_vals = ic_df["ic"] if not ic_df.empty else pd.Series(dtype=float)
         rank_ic_vals = rank_ic_df["rank_ic"] if not rank_ic_df.empty else pd.Series(dtype=float)
@@ -186,9 +201,65 @@ def compute_factor_autocorrelation(
     pd.DataFrame
         One row per lag with columns: ``[lag, mean_autocorr, std_autocorr, n_dates]``.
     """
-    # Pivot to wide form: rows=dates, cols=assets
+    factor_df = ensure_sorted(factor_df, by=("date", "asset"))
     wide = factor_df.pivot(index="date", columns="asset", values="value")
     wide = wide.sort_index()
+    if wide.empty:
+        return _empty_autocorr_rows(lags)
+
+    coverage_min = float(wide.notna().mean(axis=1).min())
+    if coverage_min >= AUTOCORR_FAST_PATH_COVERAGE:
+        return _autocorr_preranked_fast_path(wide, lags)
+
+    return _autocorr_per_pair_rank_fallback(wide, lags)
+
+
+def _autocorr_preranked_fast_path(
+    wide: pd.DataFrame,
+    lags: tuple[int, ...],
+) -> pd.DataFrame:
+    ranked = wide.rank(axis=1, method="average")
+    ranked_values = ranked.to_numpy(dtype=float, copy=False)
+    n_dates = int(ranked_values.shape[0])
+
+    rows: list[dict[str, object]] = []
+    for lag in lags:
+        lag_int = int(lag)
+        if lag_int >= n_dates:
+            rows.append(
+                {
+                    "lag": lag,
+                    "mean_autocorr": float("nan"),
+                    "std_autocorr": float("nan"),
+                    "n_dates": 0,
+                }
+            )
+            continue
+
+        corrs = _rowwise_pearson_corr(
+            ranked_values[lag_int:],
+            ranked_values[:-lag_int],
+            min_assets=AUTOCORR_MIN_ASSETS,
+        )
+        clean = corrs[np.isfinite(corrs)]
+        rows.append(
+            {
+                "lag": lag,
+                "mean_autocorr": float(np.mean(clean)) if clean.size else float("nan"),
+                "std_autocorr": (
+                    float(np.std(clean, ddof=1)) if int(clean.size) > 1 else float("nan")
+                ),
+                "n_dates": int(clean.size),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _autocorr_per_pair_rank_fallback(
+    wide: pd.DataFrame,
+    lags: tuple[int, ...],
+) -> pd.DataFrame:
     values = wide.to_numpy(dtype=float, copy=False)
     n_dates = int(values.shape[0])
 
@@ -208,7 +279,11 @@ def compute_factor_autocorrelation(
 
         corrs: list[float] = []
         for i in range(lag_int, n_dates):
-            corr = _spearman_corr_on_overlap(values[i], values[i - lag_int], min_assets=3)
+            corr = _spearman_corr_on_overlap(
+                values[i],
+                values[i - lag_int],
+                min_assets=AUTOCORR_MIN_ASSETS,
+            )
             if not np.isfinite(corr):
                 continue
             corrs.append(corr)
@@ -224,6 +299,45 @@ def compute_factor_autocorrelation(
         )
 
     return pd.DataFrame(rows)
+
+
+def _empty_autocorr_rows(lags: tuple[int, ...]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "lag": lag,
+                "mean_autocorr": float("nan"),
+                "std_autocorr": float("nan"),
+                "n_dates": 0,
+            }
+            for lag in lags
+        ]
+    )
+
+
+def _rowwise_pearson_corr(
+    current: np.ndarray,
+    previous: np.ndarray,
+    *,
+    min_assets: int,
+) -> np.ndarray:
+    valid = np.isfinite(current) & np.isfinite(previous)
+    n = valid.sum(axis=1).astype(float)
+    current_zeroed = np.where(valid, current, 0.0)
+    previous_zeroed = np.where(valid, previous, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        current_mean = current_zeroed.sum(axis=1) / n
+        previous_mean = previous_zeroed.sum(axis=1) / n
+        current_centered = np.where(valid, current - current_mean[:, None], 0.0)
+        previous_centered = np.where(valid, previous - previous_mean[:, None], 0.0)
+        numerator = (current_centered * previous_centered).sum(axis=1)
+        denom = np.sqrt(
+            (current_centered * current_centered).sum(axis=1)
+            * (previous_centered * previous_centered).sum(axis=1)
+        )
+        corr = numerator / denom
+    corr[(n < float(min_assets)) | ~np.isfinite(corr)] = np.nan
+    return cast(np.ndarray, corr)
 
 
 def _spearman_corr_on_overlap(
