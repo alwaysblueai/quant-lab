@@ -16,7 +16,6 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[一-鿿]+")
 
 

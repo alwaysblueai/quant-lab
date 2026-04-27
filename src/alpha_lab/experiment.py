@@ -4,7 +4,7 @@ import datetime
 import subprocess
 import time
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -565,7 +565,7 @@ def run_factor_experiment(
     stage_timings: dict[str, float] = {}
 
     @contextmanager
-    def _stage(name: str):
+    def _stage(name: str) -> Iterator[None]:
         start = time.perf_counter()
         try:
             yield
