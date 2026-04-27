@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import difflib
 import json
+import os
 from pathlib import Path
 
 import pytest
 import yaml
 
+from alpha_lab.research_bridge.model_idea import _build_model_idea_exploration_prompt
 from alpha_lab.research_bridge.models import load_project_config
 from alpha_lab.research_bridge.preflight import run_preflight
+from alpha_lab.research_bridge.scoring import (
+    MECHANISM_DISCOVERY,
+    SIGNAL_MAPPING,
+    VALIDATION_KILL_TESTS,
+)
 from alpha_lab.research_bridge.service import (
     _build_factor_recipe_signal_mapping_prompt,
     _build_factor_recipe_validation_kill_tests_prompt,
@@ -18,6 +26,11 @@ from alpha_lab.research_bridge.service import (
     scaffold_case,
     start_round,
     summarize_run,
+)
+
+GOLDEN_ROOT = Path(__file__).resolve().parent / "goldens" / "research_bridge"
+MODEL_IDEA_PROMPT_GOLDEN = (
+    GOLDEN_ROOT / "model_idea_exploration_prompt_constrained_stages.md"
 )
 
 
@@ -733,6 +746,178 @@ def test_explore_idea_constrained_prompt_requires_score_component_rationale(
     prompt = result.to_payload()["gpt_prompt"]
 
     assert "constrained 模式下，引用某张卡片时必须说明你主要依赖哪个检索分量" in prompt
+
+
+def test_model_idea_exploration_prompt_matches_byte_golden() -> None:
+    actual = _build_model_idea_prompt_golden_text().encode("utf-8")
+
+    if os.environ.get("ALPHA_LAB_UPDATE_RESEARCH_BRIDGE_GOLDENS") == "1":
+        MODEL_IDEA_PROMPT_GOLDEN.parent.mkdir(parents=True, exist_ok=True)
+        MODEL_IDEA_PROMPT_GOLDEN.write_bytes(actual)
+
+    expected = MODEL_IDEA_PROMPT_GOLDEN.read_bytes()
+    assert actual == expected, "\n".join(
+        difflib.unified_diff(
+            expected.decode("utf-8").splitlines(),
+            actual.decode("utf-8").splitlines(),
+            fromfile=str(MODEL_IDEA_PROMPT_GOLDEN),
+            tofile="actual model idea exploration prompt",
+            lineterm="",
+        )
+    )
+
+
+def _build_model_idea_prompt_golden_text() -> str:
+    report = _build_model_idea_prompt_golden_report()
+    spec_patch_hint = {
+        "summary": "Switch ridge baseline to turnover-aware LightGBM candidate.",
+        "requires_code_change": False,
+        "patch_fields": {
+            "model": {"family": "lightgbm"},
+            "model_selection": {
+                "enabled": True,
+                "selection_metric": "turnover_penalized_rank_ic",
+            },
+            "feature_preprocess": {
+                "missing_policy": "median_fill",
+                "cross_sectional_transform": "rank",
+            },
+        },
+    }
+    prompts: list[str] = []
+    for stage in (MECHANISM_DISCOVERY, SIGNAL_MAPPING, VALIDATION_KILL_TESTS):
+        prompt = _build_model_idea_exploration_prompt(
+            idea=(
+                "用更强的非线性模型刻画成交额加权动量，但必须保持 PIT、"
+                "行业中性和换手约束。"
+            ),
+            mode="constrained",
+            stage=stage,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            drift_header=(
+                "## 已知漂移模式\n"
+                "- 最近一次回复缺少 early falsifier，不能直接进入 spec patch。"
+            ),
+            upstream_header=(
+                "## 上游模型研究产物\n"
+                "- 机制候选：tree interaction + turnover-aware selection。"
+            ),
+        )
+        prompts.append(f"<!-- stage: {stage} -->\n\n{prompt}")
+    return "\n\n---\n\n".join(prompts) + "\n"
+
+
+def _build_model_idea_prompt_golden_report() -> dict[str, object]:
+    return {
+        "system_contracts": {
+            "supported_model_families": ["linear", "ridge", "lightgbm"],
+            "supported_feature_preprocess": {
+                "missing_policy": ["drop", "median_fill"],
+                "scale_features": ["zscore"],
+                "cross_sectional_transform": ["rank", "winsorize_zscore"],
+                "cross_sectional_group_scope": ["date", "date_and_industry"],
+            },
+            "supported_training": {"window_type": ["rolling", "expanding"]},
+            "supported_selection_metrics": [
+                "rank_ic",
+                "rank_ic_ir",
+                "turnover_penalized_rank_ic",
+            ],
+            "supported_feature_importance": {"mode": ["permutation"]},
+        },
+        "current_spec": {
+            "status": "loaded",
+            "name": "stock_ridge_momentum",
+            "factor_name": "stock_ridge_momentum",
+            "model_family": "ridge",
+            "feature_count": 3,
+            "feature_columns_sample": ["ret_20d", "turnover_20d", "size"],
+            "feature_columns_truncated": False,
+            "target_horizon": 5,
+            "direction": "long_short",
+            "rebalance_frequency": "W",
+            "n_quantiles": 5,
+            "feature_availability_mode": "known_at",
+            "feature_availability_column": "known_at",
+            "feature_availability_safety_lag_days": 1,
+            "training_window_type": "rolling",
+            "training": {"window": 252, "min_periods": 126},
+            "feature_preprocess": {
+                "missing_policy": "median_fill",
+                "cross_sectional_transform": "rank",
+            },
+            "model_selection_enabled": True,
+            "model_selection_metric": "rank_ic_ir",
+            "model_selection": {"top_k": 2},
+            "feature_importance": {"mode": "permutation"},
+            "neutralization": {"industry": True, "size": True},
+            "transaction_cost": {"bps": 10},
+        },
+        "validated_baselines": [
+            {
+                "run_id": "ridge_momentum_202604",
+                "status": "succeeded",
+                "model_family": "ridge",
+                "mean_rank_ic": 0.041,
+                "rank_ic_ir": 0.72,
+                "long_short_ir": 0.83,
+                "cost_aware_long_short_ir": 0.61,
+                "mean_long_short_turnover": 0.18,
+                "coverage_mean": 0.97,
+                "output_keys": ["metrics.json", "summary.md"],
+            }
+        ],
+        "recent_failures": [
+            {
+                "run_id": "gbdt_unlagged_fundamentals",
+                "status": "failed",
+                "output_keys": ["metrics.json"],
+                "failure_reason": "known_at missing for restated fundamentals",
+            }
+        ],
+        "recommendations": {
+            "source_anchors": [
+                {
+                    "path": "src/alpha_lab/model_factor/core.py",
+                    "focus": "ModelFamily and estimator behavior",
+                },
+                {
+                    "path": "src/alpha_lab/real_cases/model_factor/spec.py",
+                    "focus": "spec contracts and feature availability rules",
+                },
+            ],
+            "extras": {
+                "knowledge_matches": [
+                    {
+                        "name": "Finance Tree",
+                        "type": "factor",
+                        "summary": (
+                            "Known_at + winsorize + turnover-aware model selection."
+                        ),
+                    }
+                ],
+                "knowledge_handling_patterns": [
+                    "enforce known_at/as-of or safety_lag for PIT consistency",
+                    "evaluate turnover-aware selection and cost-aware IR together",
+                ],
+                "session_memory": [
+                    {
+                        "created_at_utc": "2026-04-27T09:00:00Z",
+                        "stage": MECHANISM_DISCOVERY,
+                        "mode": "constrained",
+                        "has_response": True,
+                        "has_lint_errors": False,
+                        "idea": "Test nonlinear feature interactions under cost limits.",
+                        "patch_summary": "candidate uses lightgbm and turnover penalty",
+                    }
+                ],
+                "warnings": [
+                    "available_data excludes intraday_tick_volume; keep daily-only.",
+                ],
+            },
+        },
+    }
 
 
 def test_explore_idea_p1_hard_filter_drops_unsatisfiable_dependency(
