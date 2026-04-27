@@ -30,6 +30,7 @@ def test_unified_cli_routes_composite_run(monkeypatch: pytest.MonkeyPatch) -> No
         return 22
 
     monkeypatch.setattr("alpha_lab.real_cases.composite.cli.main", _fake_composite_main)
+    monkeypatch.setenv("ALPHA_LAB_ALLOW_OFF_SCOPE", "1")
 
     rc = main(["real-case", "composite", "run", "spec.yaml"])
     assert rc == 22
@@ -44,10 +45,56 @@ def test_unified_cli_routes_model_factor_run(monkeypatch: pytest.MonkeyPatch) ->
         return 23
 
     monkeypatch.setattr("alpha_lab.real_cases.model_factor.cli.main", _fake_model_factor_main)
+    monkeypatch.setenv("ALPHA_LAB_ALLOW_OFF_SCOPE", "1")
 
     rc = main(["real-case", "model-factor", "run", "spec.yaml"])
     assert rc == 23
     assert captured["argv"] == ["run", "spec.yaml"]
+
+
+def test_unified_cli_routes_model_factor_run_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_model_factor_main(argv: list[str] | None = None) -> int:
+        captured["argv"] = argv
+        return 25
+
+    monkeypatch.setattr("alpha_lab.real_cases.model_factor.cli.main", _fake_model_factor_main)
+    monkeypatch.setenv("ALPHA_LAB_ALLOW_OFF_SCOPE", "1")
+
+    rc = main(["real-case", "model-factor", "run-batch", "configs/*.yaml"])
+    assert rc == 25
+    assert captured["argv"] == ["run-batch", "configs/*.yaml"]
+
+
+def test_unified_cli_routes_model_idea(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_model_idea_main(argv: list[str] | None = None) -> int:
+        captured["argv"] = argv
+        return 24
+
+    monkeypatch.setattr("alpha_lab.research_bridge.model_idea.main", _fake_model_idea_main)
+
+    rc = main(["model-idea", "explore", "--idea", "model improvements"])
+    assert rc == 24
+    assert captured["argv"] == ["explore", "--idea", "model improvements"]
+
+
+def test_unified_cli_blocks_composite_without_off_scope_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ALPHA_LAB_ALLOW_OFF_SCOPE", raising=False)
+    with pytest.raises(SystemExit, match="ALPHA_LAB_ALLOW_OFF_SCOPE"):
+        main(["real-case", "composite", "run", "spec.yaml"])
+
+
+def test_unified_cli_blocks_model_factor_without_off_scope_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ALPHA_LAB_ALLOW_OFF_SCOPE", raising=False)
+    with pytest.raises(SystemExit, match="ALPHA_LAB_ALLOW_OFF_SCOPE"):
+        main(["real-case", "model-factor", "run", "spec.yaml"])
 
 
 def test_unified_cli_routes_campaign_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -719,7 +766,8 @@ def test_unified_cli_top_level_help_is_router(
     with pytest.raises(SystemExit):
         main(["--help"])
     captured = capsys.readouterr()
-    assert "{run,fast-screen,real-case,campaign,profiles,web,bridge,vault,data}" in captured.out
+    expected = "{run,fast-screen,real-case,campaign,profiles,web,bridge,vault,data,model-idea}"
+    assert expected in captured.out
 
 
 def test_unified_cli_campaign_help_lists_compare_profiles(

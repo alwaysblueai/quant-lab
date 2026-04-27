@@ -3,32 +3,33 @@ from __future__ import annotations
 import argparse
 import datetime
 import math
+import os
 import re
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-import alpha_lab.registry as _registry
 from alpha_lab.config import PROCESSED_DATA_DIR
-from alpha_lab.data_validation import validate_price_panel
 from alpha_lab.exceptions import AlphaLabConfigError
-from alpha_lab.experiment import run_factor_experiment
-from alpha_lab.factors.low_volatility import low_volatility
-from alpha_lab.factors.momentum import momentum
-from alpha_lab.factors.reversal import reversal
-from alpha_lab.obsidian import write_obsidian_note
-from alpha_lab.reporting import (
-    export_summary_csv,
-    summarise_experiment_result,
-    to_obsidian_markdown,
-)
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     CAMPAIGN_PROFILE_COMPARE_DEFAULTS,
     get_research_evaluation_config,
     get_research_evaluation_profile_intent,
 )
+
+_OFF_SCOPE_ENV_VAR = "ALPHA_LAB_ALLOW_OFF_SCOPE"
+
+
+def _require_off_scope_acknowledgment(workflow: str) -> None:
+    if os.environ.get(_OFF_SCOPE_ENV_VAR) == "1":
+        return
+    raise SystemExit(
+        f"real-case {workflow} is outside the daily price-volume single-factor "
+        f"scope (see docs/data_conventions.md → 'Daily Price-Volume Workflow Scope'). "
+        f"To run it anyway, set {_OFF_SCOPE_ENV_VAR}=1."
+    )
 
 # ---------------------------------------------------------------------------
 # Factor registry
@@ -40,7 +41,18 @@ REQUIRED_PRICE_COLUMNS: frozenset[str] = frozenset({"date", "asset", "close"})
 # Supported factor names (used for argparse choices and dispatch).
 SUPPORTED_FACTORS: frozenset[str] = frozenset({"momentum", "reversal", "low_volatility"})
 _UNIFIED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset(
-    {"run", "real-case", "campaign", "bridge", "vault", "profiles", "web", "data", "fast-screen"}
+    {
+        "run",
+        "real-case",
+        "campaign",
+        "bridge",
+        "vault",
+        "profiles",
+        "web",
+        "data",
+        "fast-screen",
+        "model-idea",
+    }
 )
 _SUPPORTED_CAMPAIGNS: frozenset[str] = frozenset({"research_campaign_1"})
 
@@ -54,10 +66,16 @@ def _build_factor_fn(
 ) -> object:
     """Return a callable ``(prices) -> factor_df`` for the requested factor."""
     if factor == "momentum":
+        from alpha_lab.factors.momentum import momentum
+
         return lambda prices: momentum(prices, window=momentum_window)
     if factor == "reversal":
+        from alpha_lab.factors.reversal import reversal
+
         return lambda prices: reversal(prices, window=reversal_window)
     if factor == "low_volatility":
+        from alpha_lab.factors.low_volatility import low_volatility
+
         return lambda prices: low_volatility(prices, window=low_volatility_window)
     # argparse choices= guards this path; kept for explicit safety.
     raise AlphaLabConfigError(f"Unknown factor {factor!r}.  Supported: {sorted(SUPPORTED_FACTORS)}")
@@ -335,6 +353,8 @@ def _legacy_main(argv: list[str] | None = None) -> int:
 
     # --- Load data ---
     prices = _load_prices(Path(args.input_path))
+    from alpha_lab.data_validation import validate_price_panel
+
     try:
         validate_price_panel(prices)
     except ValueError as exc:
@@ -358,6 +378,8 @@ def _legacy_main(argv: list[str] | None = None) -> int:
     )
 
     # --- Run pipeline ---
+    from alpha_lab.experiment import run_factor_experiment
+
     result = run_factor_experiment(
         prices,
         factor_fn,  # type: ignore[arg-type]
@@ -368,6 +390,8 @@ def _legacy_main(argv: list[str] | None = None) -> int:
     )
 
     # --- Summarise ---
+    from alpha_lab.reporting import export_summary_csv, summarise_experiment_result
+
     summary = summarise_experiment_result(result, cost_rate=args.cost_rate)
 
     # --- Write summary CSV ---
@@ -383,6 +407,9 @@ def _legacy_main(argv: list[str] | None = None) -> int:
     # Resolve the actual file path first (directory → auto filename).
     resolved_md_path: Path | None = None
     if args.obsidian_markdown_path:
+        from alpha_lab.obsidian import write_obsidian_note
+        from alpha_lab.reporting import to_obsidian_markdown
+
         md_arg_str: str = args.obsidian_markdown_path
         md_arg = Path(md_arg_str)
         if md_arg_str.endswith(("/", "\\")) or md_arg.is_dir():
@@ -406,6 +433,8 @@ def _legacy_main(argv: list[str] | None = None) -> int:
 
     # --- Optional registry ---
     if args.append_registry:
+        import alpha_lab.registry as _registry
+
         # Access DEFAULT_REGISTRY_PATH at call time (not import time) so that
         # tests can monkeypatch the module attribute reliably.
         # Pass the resolved file path so the registry captures the actual note,
@@ -475,7 +504,10 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     composite = real_case_kinds.add_parser(
         "composite",
-        help="Route to the composite real-case CLI (supports --evaluation-profile).",
+        help=(
+            "Composite real-case CLI. Off the daily price-volume scope; "
+            f"requires {_OFF_SCOPE_ENV_VAR}=1 to run."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     composite.add_argument("action", choices=["run"])
@@ -483,10 +515,13 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     model_factor = real_case_kinds.add_parser(
         "model-factor",
-        help="Route to the model-factor real-case CLI (supports --evaluation-profile).",
+        help=(
+            "Model-factor real-case CLI. Off the daily price-volume scope; "
+            f"requires {_OFF_SCOPE_ENV_VAR}=1 to run."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    model_factor.add_argument("action", choices=["run"])
+    model_factor.add_argument("action", choices=["run", "run-batch"])
     model_factor.add_argument("args", nargs=argparse.REMAINDER)
 
     campaign = top.add_parser(
@@ -799,6 +834,17 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     build_data_parser(data)
 
+    model_idea = top.add_parser(
+        "model-idea",
+        help="Generate model-research prompts from local context (Batch 3 session mode).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    model_idea.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to 'alpha-lab model-idea' (use 'alpha-lab model-idea --help').",
+    )
+
     return parser
 
 
@@ -823,11 +869,13 @@ def unified_main(argv: list[str] | None = None) -> int:
             return single_factor_main(forwarded)
 
         if args.real_case_kind == "composite":
+            _require_off_scope_acknowledgment("composite")
             from alpha_lab.real_cases.composite.cli import main as composite_main
 
             return composite_main(forwarded)
 
         if args.real_case_kind == "model-factor":
+            _require_off_scope_acknowledgment("model-factor")
             from alpha_lab.real_cases.model_factor.cli import main as model_factor_main
 
             return model_factor_main(forwarded)
@@ -981,6 +1029,11 @@ def unified_main(argv: list[str] | None = None) -> int:
         from alpha_lab.data_store.cli import main as data_main
 
         return data_main(resolved_argv_for_data(args))
+
+    if args.top_command == "model-idea":
+        from alpha_lab.research_bridge.model_idea import main as model_idea_main
+
+        return model_idea_main(args.args)
 
     parser.error(f"unsupported top-level command: {args.top_command!r}")
 

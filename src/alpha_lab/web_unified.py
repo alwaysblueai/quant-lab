@@ -7,30 +7,50 @@ Evolved from web_cockpit.py; provides the ``start_unified_server`` entry-point.
 from __future__ import annotations
 
 import datetime as dt
+import difflib
+import gc
+import hashlib
 import json
 import math
+import os
 import re
+import shlex
+import shutil
+import subprocess
+import sys
 import threading
+import time
 import traceback
 import uuid
 import webbrowser
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from csv import DictReader
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
-from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLabExperimentError
+from alpha_lab.exceptions import (
+    AlphaLabConfigError,
+    AlphaLabDataError,
+    AlphaLabExperimentError,
+    AlphaLabIOError,
+)
 from alpha_lab.factor_recipe import factor_registry
+from alpha_lab.real_cases.common_io import (
+    ensure_parquet_tabular_frame,
+    resolve_tabular_frame_path,
+)
+from alpha_lab.real_cases.model_factor.spec import load_model_factor_case_spec
 from alpha_lab.real_cases.single_factor.pipeline import (
     SingleFactorBatchParallelConfig,
+    SingleFactorCaseRunResult,
     SingleFactorInputBundle,
     load_standard_inputs,
     run_single_factor_case,
-    run_single_factor_cases,
 )
 from alpha_lab.real_cases.single_factor.spec import (
     SingleFactorCaseSpec,
@@ -39,6 +59,24 @@ from alpha_lab.real_cases.single_factor.spec import (
 from alpha_lab.reporting.renderers import write_case_report
 from alpha_lab.research_bridge.categories import get_category_profile, list_categories
 from alpha_lab.research_bridge.graph_view import VaultGraph
+from alpha_lab.research_bridge.model_idea import (
+    apply_spec_patch_hint as model_lab_apply_spec_patch_hint,
+)
+from alpha_lab.research_bridge.model_idea import (
+    explore_model_idea as model_lab_explore_idea,
+)
+from alpha_lab.research_bridge.model_idea import (
+    list_model_idea_sessions as list_model_lab_idea_sessions,
+)
+from alpha_lab.research_bridge.model_idea import (
+    read_model_idea_session as read_model_lab_idea_session,
+)
+from alpha_lab.research_bridge.model_idea import (
+    record_model_idea_response as record_model_lab_idea_response,
+)
+from alpha_lab.research_bridge.model_idea import (
+    save_model_idea_session as save_model_lab_idea_session,
+)
 from alpha_lab.research_bridge.models import (
     load_project_config,
     load_yaml_document,
@@ -57,14 +95,81 @@ from alpha_lab.research_bridge.service import (
 from alpha_lab.research_bridge.service import (
     explore_idea as bridge_explore_idea,
 )
+from alpha_lab.research_bridge.sessions import (
+    list_explore_sessions as list_alpha_explore_sessions,
+)
+from alpha_lab.research_bridge.sessions import (
+    read_explore_session as read_alpha_explore_session,
+)
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     CAMPAIGN_PROFILE_COMPARE_DEFAULTS,
     RESEARCH_EVALUATION_PROFILE_LABELS,
 )
-from alpha_lab.vault_export import resolve_vault_root
+from alpha_lab.vault_export import export_to_vault, resolve_vault_root
 
-RunStatus = Literal["queued", "running", "succeeded", "failed"]
+RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+RunWorkflow = Literal["single_factor", "model_factor"]
+_MODEL_LAB_PROJECT_SLUG = "__model_lab__"
+_MODEL_LAB_COMPARE_METRIC_KEYS: tuple[str, ...] = (
+    "model_family",
+    "factor_verdict",
+    "mean_ic",
+    "ic_ir",
+    "mean_rank_ic",
+    "rank_ic_ir",
+    "mean_long_short_turnover",
+    "long_short_ir",
+    "cost_aware_long_short_ir",
+    "max_drawdown",
+    "ls_max_drawdown",
+    "coverage_mean",
+)
+_MODEL_LAB_MAX_COMPARE_RUNS: int = 8
+_MODEL_LAB_SOURCE_SPECS: tuple[dict[str, str], ...] = (
+    {
+        "key": "core",
+        "label": "model_factor/core.py",
+        "path": "src/alpha_lab/model_factor/core.py",
+        "description": "训练循环、窗口切分、ModelFamily、_build_estimator 都在这里。",
+        "focus": "先看 build_model_factor、TrainingSpec、_build_estimator。",
+    },
+    {
+        "key": "pipeline",
+        "label": "real_cases/model_factor/pipeline.py",
+        "path": "src/alpha_lab/real_cases/model_factor/pipeline.py",
+        "description": "端到端 case 执行入口：读数据、训练、评估、导出 artifact。",
+        "focus": "先看 run_model_factor_case 和 progress_callback 的阶段划分。",
+    },
+    {
+        "key": "spec",
+        "label": "real_cases/model_factor/spec.py",
+        "path": "src/alpha_lab/real_cases/model_factor/spec.py",
+        "description": "YAML/JSON spec 合同解析与路径解析。",
+        "focus": "先看 ModelFactorCaseSpec、load_model_factor_case_spec、resolve_spec_paths。",
+    },
+    {
+        "key": "artifacts",
+        "label": "real_cases/model_factor/artifacts.py",
+        "path": "src/alpha_lab/real_cases/model_factor/artifacts.py",
+        "description": "metrics、training_log、feature_importance 等 artifact 的写出逻辑。",
+        "focus": "先看 export_artifact_bundle 和 metrics_payload 的组织方式。",
+    },
+    {
+        "key": "cli",
+        "label": "real_cases/model_factor/cli.py",
+        "path": "src/alpha_lab/real_cases/model_factor/cli.py",
+        "description": "CLI 入口和运行参数，对应终端命令的行为。",
+        "focus": "先看 main 和 run_model_factor_case 的调用方式。",
+    },
+    {
+        "key": "model_lab_ui",
+        "label": "web_model_lab.html",
+        "path": "src/alpha_lab/web_model_lab.html",
+        "description": "当前这个本地研究平台的前端模板。",
+        "focus": "先看 spec 编辑器、run 队列、artifact/source viewer 的 JS。",
+    },
+)
 
 # Maximum bytes read from any text file served to the browser.
 # Prevents the server from reading/sending huge artifacts that would freeze the UI.
@@ -78,12 +183,24 @@ _FRONTEND_BATCH_WINDOW_SECONDS: float = 0.20
 _FRONTEND_BATCH_MAX_WORKERS: int = 4
 _FRONTEND_BATCH_FACTORS_PER_WORKER: int = 2
 _FRONTEND_INPUT_BUNDLE_CACHE_MAX_ITEMS: int = 8
+_MODEL_LAB_BATCH_MAX_WORKERS: int = 3
+_MODEL_LAB_BATCH_DEFAULT_WORKERS: int = 1
+_MODEL_LAB_SUBPROCESS_POLL_SECONDS: float = 0.5
 _RUN_OVERVIEW_MAX_CSV_ROWS: int = 20000
 
 _RUN_SUMMARY_COMPACT_KEYS: tuple[str, ...] = (
     "research_evaluation_profile",
     "factor_name",
     "factor_verdict",
+    "campaign_triage",
+    "promotion_decision",
+    "portfolio_validation_recommendation",
+    "level12_transition_label",
+    "evaluation_title",
+    "evaluation_action",
+    "evaluation_next_step",
+    "model_family",
+    "mean_ic",
     "mean_rank_ic",
     "rank_ic_ir",
     "ic_ir",
@@ -113,6 +230,52 @@ _ARTIFACT_FALLBACK_FILENAMES: dict[str, str] = {
     "research_tearsheet_pdf": "research_tearsheet.pdf",
     "metrics": "metrics.json",
     "summary": "summary.md",
+}
+
+# Names used to recover an artifact when the path stored on the run record
+# is stale (e.g., output dir moved) or the key was never registered. Keys
+# without an entry here fall back to "<key>.csv" / "<key>.json" heuristics.
+_ARTIFACT_DISK_FILENAMES: dict[str, str] = {
+    "research_tearsheet": "research_tearsheet.json",
+    "research_tearsheet_pdf": "research_tearsheet.pdf",
+    "metrics": "metrics.json",
+    "summary": "summary.md",
+    "case_report": "case_report.md",
+    "experiment_card": "experiment_card.md",
+    "integrity_report_markdown": "integrity_report.md",
+    "integrity_report_json": "integrity_report.json",
+    "portfolio_validation_markdown": "level2_portfolio_validation/portfolio_validation.md",
+    "portfolio_validation_summary": "level2_portfolio_validation/portfolio_validation_summary.json",
+    "portfolio_validation_metrics": "level2_portfolio_validation/portfolio_validation_metrics.json",
+    "portfolio_validation_package": "level2_portfolio_validation/portfolio_validation_package.json",
+    "signal_validation_json": "signal_validation.json",
+    "backtest_result_json": "backtest_result.json",
+    "group_returns": "group_returns.csv",
+    "quantile_returns": "quantile_returns.csv",
+    "ic_decay": "ic_decay.csv",
+    "ic_significance": "ic_significance.json",
+    "ic_timeseries": "ic_timeseries.csv",
+    "factor_autocorrelation": "factor_autocorrelation.csv",
+    "rolling_stability": "rolling_stability.csv",
+    "turnover": "turnover.csv",
+    "coverage": "coverage.csv",
+    "purged_kfold_summary": "purged_kfold_summary.json",
+    "purged_kfold_folds": "purged_kfold_folds.csv",
+    "run_manifest": "run_manifest.json",
+    "factor_definition": "factor_definition.md",
+    "factor_definition_json": "factor_definition.json",
+    "portfolio_recipe_json": "portfolio_recipe.json",
+    "diagnostics": "diagnostics.json",
+    "training_log": "training_log.csv",
+    "feature_importance": "feature_importance.csv",
+    "model_definition_json": "model_definition.json",
+}
+
+# Some artifact keys refer to the same on-disk file under different names.
+# When the requested key is missing/stale, try the synonym before giving up.
+_ARTIFACT_KEY_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "group_returns": ("quantile_returns",),
+    "quantile_returns": ("group_returns",),
 }
 
 # ---------------------------------------------------------------------------
@@ -211,6 +374,21 @@ class _RunRecord:
     error_message: str | None = None
     error_hint: str | None = None
     error: str | None = None
+    workflow: RunWorkflow = "single_factor"
+    note: str | None = None
+
+    def _artifact_paths_for_api(self) -> dict[str, str]:
+        """Return artifact paths that are actually retrievable by endpoint."""
+        resolved_paths: dict[str, str] = {}
+        for raw_key in self.artifact_paths.keys():
+            key = str(raw_key or "").strip()
+            if not key:
+                continue
+            resolved = _resolve_run_artifact_for_endpoint(self, key)
+            if resolved is None:
+                continue
+            resolved_paths[key] = str(resolved)
+        return resolved_paths
 
     def clone(self) -> _RunRecord:
         return _RunRecord(
@@ -240,9 +418,12 @@ class _RunRecord:
             error_message=self.error_message,
             error_hint=self.error_hint,
             error=self.error,
+            workflow=self.workflow,
+            note=self.note,
         )
 
     def to_payload(self) -> dict[str, object]:
+        artifact_paths = self._artifact_paths_for_api()
         return {
             "run_id": self.run_id,
             "project_slug": self.project_slug,
@@ -261,7 +442,7 @@ class _RunRecord:
             "progress_percent": self.progress_percent,
             "progress_message": self.progress_message,
             "progress_events": [dict(item) for item in self.progress_events],
-            "artifact_paths": dict(self.artifact_paths),
+            "artifact_paths": artifact_paths,
             "summary": dict(self.summary),
             "summarize_feedback_path": self.summarize_feedback_path,
             "summarize_draft_path": self.summarize_draft_path,
@@ -270,10 +451,13 @@ class _RunRecord:
             "error_message": self.error_message,
             "error_hint": self.error_hint,
             "error": self.error,
+            "workflow": self.workflow,
+            "note": self.note,
         }
 
     def to_compact_payload(self) -> dict[str, object]:
         # Lightweight payload for run polling.
+        artifact_paths = self._artifact_paths_for_api()
         return {
             "run_id": self.run_id,
             "project_slug": self.project_slug,
@@ -292,7 +476,7 @@ class _RunRecord:
             "progress_percent": self.progress_percent,
             "progress_message": self.progress_message,
             "progress_events": [dict(item) for item in self.progress_events[-2:]],
-            "artifact_paths": {key: True for key in self.artifact_paths.keys()},
+            "artifact_paths": {key: True for key in artifact_paths.keys()},
             "summary": _compact_metrics_summary(self.summary),
             "summarize_feedback_path": self.summarize_feedback_path,
             "summarize_draft_path": self.summarize_draft_path,
@@ -302,6 +486,8 @@ class _RunRecord:
             "error_hint": self.error_hint,
             "error": self.error,
             "_compact": True,
+            "workflow": self.workflow,
+            "note": self.note,
         }
 
 
@@ -315,6 +501,30 @@ class _RunTask:
     evaluation_profile: str
     output_root_dir: str | None
     render_report: bool
+    workflow: RunWorkflow = "single_factor"
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class _SubprocessCaseRunResult:
+    output_dir: Path
+    artifact_paths: Mapping[str, Path]
+
+
+class _ModelLabSubprocessError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int | None,
+        hint: str,
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.hint = hint
+
+
+RunSuccessResult = SingleFactorCaseRunResult | _SubprocessCaseRunResult
 
 
 @dataclass
@@ -327,6 +537,7 @@ class _RunStore:
     def __init__(self) -> None:
         self._records: dict[str, _RunRecord] = {}
         self._tasks: dict[str, _RunTask] = {}
+        self._cancel_requests: set[str] = set()
         self._input_bundle_cache: dict[
             tuple[str, str | None, str, int, int],
             _InputBundleCacheEntry,
@@ -349,6 +560,8 @@ class _RunStore:
             evaluation_profile=task.evaluation_profile,
             output_root_dir=task.output_root_dir,
             render_report=task.render_report,
+            workflow=task.workflow,
+            note=task.note,
             updated_at_utc=submitted_at,
             progress_percent=0,
             progress_message="已提交到队列，等待调度",
@@ -374,11 +587,18 @@ class _RunStore:
             self._hydrate_summary_locked(record)
             return record.clone()
 
-    def list_records(self, *, project_slug: str | None = None) -> list[_RunRecord]:
+    def list_records(
+        self,
+        *,
+        project_slug: str | None = None,
+        workflow: RunWorkflow | None = None,
+    ) -> list[_RunRecord]:
         with self._lock:
             for record in self._records.values():
                 self._hydrate_summary_locked(record)
             records = [rec.clone() for rec in self._records.values()]
+        if workflow is not None:
+            records = [item for item in records if item.workflow == workflow]
         if project_slug is None:
             return sorted(records, key=lambda item: item.submitted_at_utc, reverse=True)
         filtered = [item for item in records if item.project_slug == project_slug]
@@ -408,7 +628,10 @@ class _RunStore:
         if metrics_path is None:
             return
         try:
-            record.summary = _extract_metrics_summary(metrics_path)
+            record.summary = _extract_metrics_summary(
+                metrics_path,
+                run_status=record.status,
+            )
         except Exception:
             # Keep run listing resilient even if one metrics file is malformed.
             return
@@ -417,7 +640,45 @@ class _RunStore:
         with self._lock:
             record = self._records.pop(run_id, None)
             self._tasks.pop(run_id, None)
+            self._cancel_requests.discard(run_id)
             return record.clone() if record is not None else None
+
+    def request_cancel_and_delete(self, run_id: str) -> dict[str, object]:
+        """Cancel a run and request deletion.
+
+        Queued / terminal runs are removed immediately. Running runs are flagged
+        for cancellation — the worker finalizer sees the flag, skips state
+        updates, and cleans up the output_dir once the current stage returns.
+        """
+        with self._lock:
+            record = self._records.get(run_id)
+            if record is None:
+                self._tasks.pop(run_id, None)
+                self._cancel_requests.discard(run_id)
+                return {"immediate": True, "prior_status": None, "output_dir": None}
+            self._tasks.pop(run_id, None)
+            prior_status = record.status
+            output_dir = record.output_dir
+            if prior_status == "running":
+                self._cancel_requests.add(run_id)
+                record.status = "cancelled"
+                self._push_progress_locked(
+                    record,
+                    message="已请求取消：当前阶段结束后将自动清理产物",
+                    percent=record.progress_percent,
+                )
+                return {
+                    "immediate": False,
+                    "prior_status": prior_status,
+                    "output_dir": output_dir,
+                }
+            self._records.pop(run_id, None)
+            self._cancel_requests.discard(run_id)
+            return {
+                "immediate": True,
+                "prior_status": prior_status,
+                "output_dir": output_dir,
+            }
 
     def attach_summary(
         self,
@@ -530,24 +791,36 @@ class _RunStore:
             if not queued_with_records:
                 return []
             started_at = _utc_now_iso()
-            grouped: dict[tuple[str, str], list[_RunTask]] = {}
+            grouped: dict[tuple[RunWorkflow, str, str], list[_RunTask]] = {}
             for task, _record in sorted(
                 queued_with_records,
                 key=lambda item: item[1].submitted_at_utc,
             ):
                 key = (
+                    task.workflow,
                     task.evaluation_profile,
                     task.output_root_dir or "",
                 )
                 grouped.setdefault(key, []).append(task)
             ordered_groups = list(grouped.values())
             for tasks in ordered_groups:
+                workflow = tasks[0].workflow
                 batch_message = (
-                    "已进入前端批量调度窗口，等待复用输入与并行执行"
-                    if len(tasks) > 1
-                    else "任务已启动，准备执行 single-factor pipeline"
+                    "已进入前端调度窗口，按 run_id 隔离产物并复用输入缓存"
+                    if len(tasks) > 1 and workflow == "single_factor"
+                    else (
+                        "已进入模型批量调度窗口，准备并行执行"
+                        if len(tasks) > 1 and workflow == "model_factor"
+                        else (
+                            "任务已启动，准备执行模型因子训练与评估"
+                            if workflow == "model_factor"
+                            else "任务已启动，准备执行 single-factor pipeline"
+                        )
+                    )
                 )
-                batch_percent = 1 if len(tasks) > 1 else 2
+                batch_percent = (
+                    1 if len(tasks) > 1 and workflow in {"single_factor", "model_factor"} else 2
+                )
                 for task in tasks:
                     record = self._records.get(task.run_id)
                     if record is None:
@@ -562,58 +835,71 @@ class _RunStore:
             return ordered_groups
 
     def _execute_task_group(self, tasks: list[_RunTask]) -> None:
+        if tasks and tasks[0].workflow == "model_factor":
+            self._execute_model_factor_task_group(tasks)
+            return
+        self._execute_single_factor_task_group(tasks)
+
+    def _execute_single_factor_task_group(self, tasks: list[_RunTask]) -> None:
+        if len(tasks) > 1:
+            for task in tasks:
+                self._push_progress(
+                    task.run_id,
+                    message="按 run_id 隔离输出目录，逐个执行以避免同名 case 覆盖历史产物",
+                    percent=4,
+                )
+        for task in tasks:
+            self._execute_single_task(task, allow_fallback=False)
+
+    def _execute_model_factor_task_group(self, tasks: list[_RunTask]) -> None:
         if len(tasks) <= 1:
             if tasks:
                 self._execute_single_task(tasks[0], allow_fallback=False)
             return
 
-        batch_config = _build_frontend_batch_parallel_config(len(tasks))
+        if self._model_factor_batch_has_output_conflict(tasks):
+            for task in tasks:
+                self._push_progress(
+                    task.run_id,
+                    message="检测到相同 output_dir，为避免产物互相覆盖，自动回退到串行执行",
+                    percent=4,
+                )
+            for task in tasks:
+                self._execute_single_task(task, allow_fallback=False)
+            return
+
+        worker_slots = _build_model_lab_batch_worker_count(len(tasks))
+        if worker_slots <= 1:
+            for task in tasks:
+                self._execute_single_task(task, allow_fallback=False)
+            return
+
         batch_message = (
-            f"前端批量调度命中，共 {len(tasks)} 个实验，"
-            f"mode={batch_config.mode} workers={batch_config.max_workers or 1} "
-            f"chunk={batch_config.factors_per_worker}"
+            f"模型批量调度命中，共 {len(tasks)} 个实验，并行 workers={worker_slots}"
         )
         for task in tasks:
             self._push_progress(task.run_id, message=batch_message, percent=4)
 
-        try:
-            results = run_single_factor_cases(
-                [task.spec_path for task in tasks],
-                output_root_dir=tasks[0].output_root_dir,
-                evaluation_profile=tasks[0].evaluation_profile,
-                vault_export_mode="skip",
-                batch_parallel_config=batch_config,
-                reuse_input_bundle=True,
-                progress_callback=lambda message, percent: self._push_batch_progress(
-                    tasks,
-                    message=message,
-                    percent=percent,
-                ),
-            )
-        except Exception:
-            for task in tasks:
-                self._push_progress(
-                    task.run_id,
-                    message="前端批量执行失败，自动回退到逐个执行",
-                    percent=6,
-                )
-            for task in tasks:
-                self._execute_single_task(task, allow_fallback=False)
-            return
+        with ThreadPoolExecutor(max_workers=worker_slots) as executor:
+            futures = [
+                executor.submit(self._execute_single_task, task, allow_fallback=False)
+                for task in tasks
+            ]
+            for future in futures:
+                future.result()
 
-        if len(results) != len(tasks):
-            for task in tasks:
-                self._push_progress(
-                    task.run_id,
-                    message="批量结果数量异常，自动回退到逐个执行",
-                    percent=6,
-                )
-            for task in tasks:
-                self._execute_single_task(task, allow_fallback=False)
-            return
+    def _model_factor_batch_has_output_conflict(self, tasks: list[_RunTask]) -> bool:
+        seen_output_dirs: set[str] = set()
+        for task in tasks:
+            output_dir = self._resolve_model_factor_task_output_dir(task)
+            if output_dir in seen_output_dirs:
+                return True
+            seen_output_dirs.add(output_dir)
+        return False
 
-        for task, result in zip(tasks, results, strict=True):
-            self._finalize_success(task=task, result=result)
+    def _resolve_model_factor_task_output_dir(self, task: _RunTask) -> str:
+        root_dir, case_dir_name = _resolve_model_factor_web_output_parts(task)
+        return str((root_dir / case_dir_name).resolve())
 
     def _push_batch_progress(
         self,
@@ -624,6 +910,185 @@ class _RunStore:
     ) -> None:
         for task in tasks:
             self._push_progress(task.run_id, message=message, percent=percent)
+
+    def _execute_model_factor_subprocess_task(
+        self,
+        task: _RunTask,
+        *,
+        progress_callback: Any,
+    ) -> _SubprocessCaseRunResult:
+        spec_path = Path(task.spec_path).expanduser().resolve()
+        output_dir = Path(self._resolve_model_factor_task_output_dir(task)).expanduser().resolve()
+        log_dir = output_dir / "_web_run_logs" / task.run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_path = log_dir / "stdout.log"
+        stderr_path = log_dir / "stderr.log"
+        status_path = log_dir / "status.json"
+        artifact_paths = {
+            "subprocess_stdout": stdout_path,
+            "subprocess_stderr": stderr_path,
+            "subprocess_status": status_path,
+        }
+        cli_cmd = _build_model_lab_subprocess_command(task=task, spec_path=spec_path)
+        cmd = _wrap_command_with_time(cli_cmd)
+        started_at = _utc_now_iso()
+        _write_json_file(
+            status_path,
+            {
+                "status": "starting",
+                "run_id": task.run_id,
+                "case_name": task.case_name,
+                "workflow": task.workflow,
+                "started_at_utc": started_at,
+                "command": cli_cmd,
+                "effective_command": cmd,
+                "cwd": str(Path.cwd().resolve()),
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
+            },
+        )
+        with self._lock:
+            record = self._records.get(task.run_id)
+            if record is not None:
+                record.output_dir = str(output_dir)
+                record.artifact_paths.update(
+                    {key: str(path) for key, path in artifact_paths.items()}
+                )
+                self._push_progress_locked(
+                    record,
+                    message="已启动隔离子进程执行模型因子实验",
+                    percent=8,
+                )
+
+        env = _build_model_lab_subprocess_env()
+        start_monotonic = time.monotonic()
+        try:
+            with stdout_path.open("ab") as stdout, stderr_path.open("ab") as stderr:
+                proc = subprocess.Popen(  # noqa: S603 - argv is built without shell=True.
+                    cmd,
+                    cwd=str(Path.cwd().resolve()),
+                    env=env,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                _write_json_file(
+                    status_path,
+                    {
+                        "status": "running",
+                        "run_id": task.run_id,
+                        "case_name": task.case_name,
+                        "pid": proc.pid,
+                        "started_at_utc": started_at,
+                        "command": cli_cmd,
+                        "effective_command": cmd,
+                        "cwd": str(Path.cwd().resolve()),
+                        "stdout_log": str(stdout_path),
+                        "stderr_log": str(stderr_path),
+                    },
+                )
+                progress_callback(
+                    message=(
+                        f"模型因子子进程运行中 pid={proc.pid}；日志写入 "
+                        f"{stdout_path.name}/{stderr_path.name}"
+                    ),
+                    percent=30,
+                )
+                returncode = self._wait_for_model_factor_subprocess(
+                    task=task,
+                    proc=proc,
+                )
+        except Exception as exc:
+            _annotate_exception_with_model_lab_subprocess_artifacts(
+                exc,
+                output_dir=output_dir,
+                artifact_paths=artifact_paths,
+            )
+            raise
+
+        finished_at = _utc_now_iso()
+        elapsed_seconds = round(time.monotonic() - start_monotonic, 3)
+        peak_rss_kb = _parse_time_peak_rss_kb(stderr_path)
+        status_payload: dict[str, object] = {
+            "status": "succeeded" if returncode == 0 else "failed",
+            "run_id": task.run_id,
+            "case_name": task.case_name,
+            "returncode": returncode,
+            "started_at_utc": started_at,
+            "finished_at_utc": finished_at,
+            "elapsed_seconds": elapsed_seconds,
+            "peak_rss_kb": peak_rss_kb,
+            "command": cli_cmd,
+            "effective_command": cmd,
+            "cwd": str(Path.cwd().resolve()),
+            "stdout_log": str(stdout_path),
+            "stderr_log": str(stderr_path),
+        }
+        _write_json_file(status_path, status_payload)
+
+        if returncode != 0:
+            stderr_tail = _read_text_tail(stderr_path)
+            stdout_tail = _read_text_tail(stdout_path)
+            hint = _model_lab_subprocess_failure_hint(
+                returncode=returncode,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+            )
+            message = _format_model_lab_subprocess_failure(
+                command=cmd,
+                returncode=returncode,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+                elapsed_seconds=elapsed_seconds,
+                peak_rss_kb=peak_rss_kb,
+            )
+            subprocess_error = _ModelLabSubprocessError(
+                message,
+                returncode=returncode,
+                hint=hint,
+            )
+            _annotate_exception_with_model_lab_subprocess_artifacts(
+                subprocess_error,
+                output_dir=output_dir,
+                artifact_paths=artifact_paths,
+            )
+            raise subprocess_error
+
+        manifest_paths = _load_model_factor_artifact_paths_from_manifest(output_dir)
+        return _SubprocessCaseRunResult(
+            output_dir=output_dir,
+            artifact_paths={**manifest_paths, **artifact_paths},
+        )
+
+    def _wait_for_model_factor_subprocess(
+        self,
+        *,
+        task: _RunTask,
+        proc: subprocess.Popen[bytes],
+    ) -> int:
+        last_heartbeat = time.monotonic()
+        while True:
+            returncode = proc.poll()
+            if returncode is not None:
+                return int(returncode)
+            with self._lock:
+                cancelled = task.run_id in self._cancel_requests or task.run_id not in self._tasks
+            if cancelled:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                raise RuntimeError("模型因子子进程已按用户请求取消")
+            now = time.monotonic()
+            if now - last_heartbeat >= 30:
+                self._push_progress(
+                    task.run_id,
+                    message=f"模型因子子进程仍在运行 pid={proc.pid}",
+                    percent=30,
+                )
+                last_heartbeat = now
+            time.sleep(_MODEL_LAB_SUBPROCESS_POLL_SECONDS)
 
     def _execute_single_task(
         self,
@@ -645,7 +1110,11 @@ class _RunStore:
                 record.started_at_utc = _utc_now_iso()
                 self._push_progress_locked(
                     record,
-                    message="任务已启动，准备执行 single-factor pipeline",
+                    message=(
+                        "任务已启动，准备执行模型因子训练与评估"
+                        if stored_task.workflow == "model_factor"
+                        else "任务已启动，准备执行 single-factor pipeline"
+                    ),
                     percent=2,
                 )
         try:
@@ -657,80 +1126,143 @@ class _RunStore:
                     percent=percent,
                 )
 
-            spec = load_single_factor_case_spec(Path(task.spec_path).resolve())
-            bundle, _ = self._load_cached_input_bundle(spec)
-            result = run_single_factor_case(
-                spec,
-                output_root_dir=task.output_root_dir,
-                evaluation_profile=task.evaluation_profile,
-                vault_export_mode="skip",
-                progress_callback=progress_callback,
-                input_bundle=bundle,
-            )
-            self._finalize_success(task=task, result=result)
+            run_result: RunSuccessResult
+            if task.workflow == "model_factor":
+                run_result = self._execute_model_factor_subprocess_task(
+                    task,
+                    progress_callback=progress_callback,
+                )
+            else:
+                spec = load_single_factor_case_spec(Path(task.spec_path).resolve())
+                bundle, _ = self._load_cached_input_bundle(spec)
+                run_result = run_single_factor_case(
+                    spec,
+                    output_root_dir=_resolve_single_factor_web_output_root_dir(
+                        task,
+                        spec=spec,
+                    ),
+                    evaluation_profile=task.evaluation_profile,
+                    vault_export_mode="skip",
+                    progress_callback=progress_callback,
+                    input_bundle=bundle,
+                )
+            self._finalize_success(task=task, result=run_result)
         except Exception as exc:
             error_payload = _build_run_error_payload(exc)
+            output_dir_from_exc = _coerce_finite_or_text(getattr(exc, "model_lab_output_dir", None))
+            artifact_paths_from_exc: dict[str, str] = {}
+            raw_artifacts_from_exc = getattr(exc, "model_lab_artifact_paths", None)
+            if isinstance(raw_artifacts_from_exc, dict):
+                for key, value in raw_artifacts_from_exc.items():
+                    key_text = str(key or "").strip()
+                    value_text = _coerce_finite_or_text(value)
+                    if key_text and value_text:
+                        artifact_paths_from_exc[key_text] = value_text
             with self._lock:
-                stored = self._records[run_id]
-                stored.status = "failed"
-                stored.finished_at_utc = _utc_now_iso()
-                stored.updated_at_utc = stored.finished_at_utc
-                stored.progress_message = f"失败于：{stored.progress_message or '未知阶段'}"
-                stored.progress_events = [
-                    *stored.progress_events[-7:],
-                    {
-                        "ts": stored.finished_at_utc,
-                        "message": stored.progress_message,
-                        "percent": stored.progress_percent,
-                    },
-                ]
-                stored.error_type = error_payload["error_type"]
-                stored.error_message = error_payload["error_message"]
-                stored.error_hint = error_payload["error_hint"]
-                stored.error = _format_run_error_text(
-                    stage=stored.progress_message,
-                    error_type=error_payload["error_type"],
-                    error_message=error_payload["error_message"],
-                    error_hint=error_payload["error_hint"],
-                    traceback_text=traceback.format_exc(limit=20),
-                )
+                stored = self._records.get(run_id)
+                if stored is None or run_id in self._cancel_requests:
+                    self._records.pop(run_id, None)
+                    self._cancel_requests.discard(run_id)
+                    self._tasks.pop(run_id, None)
+                    cancelled_output = (
+                        stored.output_dir if stored is not None else output_dir_from_exc
+                    )
+                else:
+                    cancelled_output = None
+                    if output_dir_from_exc and not stored.output_dir:
+                        stored.output_dir = output_dir_from_exc
+                    if artifact_paths_from_exc:
+                        stored.artifact_paths = {
+                            **stored.artifact_paths,
+                            **artifact_paths_from_exc,
+                        }
+                    stored.status = "failed"
+                    stored.finished_at_utc = _utc_now_iso()
+                    stored.updated_at_utc = stored.finished_at_utc
+                    stored.progress_message = f"失败于：{stored.progress_message or '未知阶段'}"
+                    stored.progress_events = [
+                        *stored.progress_events[-7:],
+                        {
+                            "ts": stored.finished_at_utc,
+                            "message": stored.progress_message,
+                            "percent": stored.progress_percent,
+                        },
+                    ]
+                    stored.error_type = error_payload["error_type"]
+                    stored.error_message = error_payload["error_message"]
+                    stored.error_hint = error_payload["error_hint"]
+                    stored.error = _format_run_error_text(
+                        stage=stored.progress_message,
+                        error_type=error_payload["error_type"],
+                        error_message=error_payload["error_message"],
+                        error_hint=error_payload["error_hint"],
+                        traceback_text=traceback.format_exc(limit=20),
+                    )
+            if cancelled_output:
+                _safe_rmtree(cancelled_output)
         finally:
             with self._lock:
                 self._tasks.pop(run_id, None)
+            if task.workflow == "model_factor":
+                gc.collect()
 
-    def _finalize_success(self, *, task: _RunTask, result: Any) -> None:
+    def _finalize_success(self, *, task: _RunTask, result: RunSuccessResult) -> None:
         run_id = task.run_id
+        artifact_paths_map = cast(Mapping[str, Path], result.artifact_paths)
+        with self._lock:
+            if run_id in self._cancel_requests or run_id not in self._records:
+                self._records.pop(run_id, None)
+                self._cancel_requests.discard(run_id)
+                self._tasks.pop(run_id, None)
+                cancelled_output = str(result.output_dir) if result.output_dir else None
+            else:
+                cancelled_output = None
+        if cancelled_output:
+            _safe_rmtree(cancelled_output)
+            return
         self._push_progress(run_id, message="整理产物清单", percent=93)
-        artifact_paths = {key: str(path) for key, path in result.artifact_paths.items()}
+        artifact_paths = {key: str(path) for key, path in artifact_paths_map.items()}
         if task.render_report:
             self._push_progress(run_id, message="生成 case report", percent=96)
             report_path = write_case_report(result.output_dir, overwrite=True)
             artifact_paths["case_report"] = str(report_path)
         self._push_progress(run_id, message="提取关键指标摘要", percent=98)
-        summary = _extract_metrics_summary(result.artifact_paths.get("metrics"))
+        summary = _extract_metrics_summary(
+            artifact_paths_map.get("metrics"),
+            run_status="succeeded",
+        )
         with self._lock:
-            stored = self._records[run_id]
-            stored.status = "succeeded"
-            stored.finished_at_utc = _utc_now_iso()
-            stored.updated_at_utc = stored.finished_at_utc
-            stored.output_dir = str(result.output_dir)
-            stored.progress_percent = 100
-            stored.progress_message = "运行完成"
-            stored.progress_events = [
-                *stored.progress_events[-7:],
-                {
-                    "ts": stored.finished_at_utc,
-                    "message": "运行完成",
-                    "percent": 100,
-                },
-            ]
-            stored.artifact_paths = artifact_paths
-            stored.summary = summary
-            stored.error_type = None
-            stored.error_message = None
-            stored.error_hint = None
-            stored.error = None
-            self._tasks.pop(run_id, None)
+            stored = self._records.get(run_id)
+            if stored is None or run_id in self._cancel_requests:
+                self._records.pop(run_id, None)
+                self._cancel_requests.discard(run_id)
+                self._tasks.pop(run_id, None)
+                cancelled_output = str(result.output_dir) if result.output_dir else None
+            else:
+                cancelled_output = None
+                stored.status = "succeeded"
+                stored.finished_at_utc = _utc_now_iso()
+                stored.updated_at_utc = stored.finished_at_utc
+                stored.output_dir = str(result.output_dir)
+                stored.progress_percent = 100
+                stored.progress_message = "运行完成"
+                stored.progress_events = [
+                    *stored.progress_events[-7:],
+                    {
+                        "ts": stored.finished_at_utc,
+                        "message": "运行完成",
+                        "percent": 100,
+                    },
+                ]
+                stored.artifact_paths = artifact_paths
+                stored.summary = summary
+                stored.error_type = None
+                stored.error_message = None
+                stored.error_hint = None
+                stored.error = None
+                self._tasks.pop(run_id, None)
+        if cancelled_output:
+            _safe_rmtree(cancelled_output)
 
 
 def _build_run_error_payload(exc: Exception) -> dict[str, str]:
@@ -744,6 +1276,8 @@ def _build_run_error_payload(exc: Exception) -> dict[str, str]:
         )
     elif isinstance(exc, AlphaLabConfigError):
         hint = "检查 case spec、evaluation profile、neutralization 配置是否完整且取值合法。"
+    elif isinstance(exc, _ModelLabSubprocessError):
+        hint = exc.hint
     elif isinstance(exc, ValueError):
         hint = "检查参数取值、日期格式、空值以及 YAML/JSON/CSV 内容是否合法。"
     elif isinstance(exc, KeyError):
@@ -769,6 +1303,257 @@ def _build_frontend_batch_parallel_config(
         max_workers=worker_slots,
         factors_per_worker=_FRONTEND_BATCH_FACTORS_PER_WORKER,
     )
+
+
+def _build_model_lab_batch_worker_count(n_tasks: int) -> int:
+    if n_tasks <= 0:
+        return 1
+    requested_workers = _parse_positive_int_env("ALPHA_LAB_MODEL_LAB_MAX_WORKERS")
+    configured_workers = (
+        requested_workers
+        if requested_workers is not None
+        else _MODEL_LAB_BATCH_DEFAULT_WORKERS
+    )
+    cpu_count = max(1, os.cpu_count() or 1)
+    # Model-factor runs are memory-heavy and many estimators are internally threaded.
+    # Default to serial execution; opt in with ALPHA_LAB_MODEL_LAB_MAX_WORKERS.
+    baseline_cap = 1 if cpu_count <= 1 else max(2, cpu_count // 2)
+    worker_cap = min(_MODEL_LAB_BATCH_MAX_WORKERS, baseline_cap, configured_workers)
+    return max(1, min(worker_cap, n_tasks))
+
+
+def _parse_positive_int_env(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _build_model_lab_subprocess_command(
+    *,
+    task: _RunTask,
+    spec_path: Path,
+) -> list[str]:
+    output_root_dir, _case_dir_name = _resolve_model_factor_web_output_parts(
+        task,
+        spec_path=spec_path,
+    )
+    cmd = [
+        sys.executable,
+        "-m",
+        "alpha_lab.real_cases.model_factor.cli",
+        "run",
+        str(spec_path),
+        "--evaluation-profile",
+        task.evaluation_profile,
+        "--vault-export-mode",
+        "skip",
+        "--output-root-dir",
+        str(output_root_dir),
+    ]
+    return cmd
+
+
+def _resolve_model_factor_web_output_parts(
+    task: _RunTask,
+    *,
+    spec_path: Path | None = None,
+) -> tuple[Path, str]:
+    resolved_spec_path = Path(spec_path or task.spec_path).expanduser().resolve()
+    try:
+        spec = load_model_factor_case_spec(resolved_spec_path)
+        base_root = (
+            Path(task.output_root_dir).expanduser().resolve()
+            if task.output_root_dir is not None
+            else Path(spec.output.root_dir).expanduser().resolve()
+        )
+        case_dir_name = spec.name
+    except Exception:
+        base_root = Path(task.output_root_dir or "__default_output_root__").expanduser().resolve()
+        case_dir_name = _safe_slug(task.case_name)
+
+    return base_root / "_web_runs" / _safe_slug(task.run_id), case_dir_name
+
+
+def _resolve_single_factor_web_output_root_dir(
+    task: _RunTask,
+    *,
+    spec: SingleFactorCaseSpec | None = None,
+    spec_path: Path | None = None,
+) -> Path:
+    try:
+        resolved_spec = spec
+        if resolved_spec is None:
+            resolved_spec_path = Path(spec_path or task.spec_path).expanduser().resolve()
+            resolved_spec = load_single_factor_case_spec(resolved_spec_path)
+        base_root = (
+            Path(task.output_root_dir).expanduser().resolve()
+            if task.output_root_dir is not None
+            else Path(resolved_spec.output.root_dir).expanduser().resolve()
+        )
+    except Exception:
+        base_root = Path(task.output_root_dir or "__default_output_root__").expanduser().resolve()
+    return base_root / "_web_runs" / _safe_slug(task.run_id)
+
+
+def _build_model_lab_subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault("ALPHA_LAB_MODEL_LAB_CHILD", "1")
+    thread_count = str(_parse_positive_int_env("ALPHA_LAB_MODEL_LAB_THREADS") or 1)
+    for key in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "BLIS_NUM_THREADS",
+    ):
+        env[key] = thread_count
+    return env
+
+
+def _wrap_command_with_time(cmd: list[str]) -> list[str]:
+    time_bin = shutil.which("time")
+    if os.name != "nt" and time_bin:
+        return [time_bin, "-v", *cmd]
+    return list(cmd)
+
+
+def _write_json_file(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _read_text_tail(path: Path, *, max_bytes: int = 16 * 1024) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_bytes))
+            return handle.read(max_bytes).decode("utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _parse_time_peak_rss_kb(stderr_path: Path) -> int | None:
+    tail = _read_text_tail(stderr_path, max_bytes=64 * 1024)
+    match = re.search(r"Maximum resident set size \\(kbytes\\):\\s*(\\d+)", tail)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _load_model_factor_artifact_paths_from_manifest(output_dir: Path) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    manifest_path = output_dir / "run_manifest.json"
+    if manifest_path.exists():
+        paths["run_manifest"] = manifest_path
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        outputs = payload.get("outputs") if isinstance(payload, dict) else None
+        if isinstance(outputs, dict):
+            for key, value in outputs.items():
+                key_text = str(key or "").strip()
+                value_text = _coerce_finite_or_text(value)
+                if not key_text or not value_text:
+                    continue
+                candidate = Path(value_text).expanduser()
+                if not candidate.is_absolute():
+                    candidate = output_dir / candidate
+                paths[key_text] = candidate.resolve()
+
+    fallback_filenames = {
+        **_ARTIFACT_FALLBACK_FILENAMES,
+        "run_manifest": "run_manifest.json",
+        "diagnostics": "diagnostics.json",
+        "training_log": "training_log.csv",
+        "feature_importance": "feature_importance.csv",
+        "model_definition_json": "model_definition.json",
+        "experiment_card": "experiment_card.md",
+    }
+    for key, filename in fallback_filenames.items():
+        candidate = output_dir / filename
+        if candidate.exists():
+            paths.setdefault(key, candidate.resolve())
+    return paths
+
+
+def _annotate_exception_with_model_lab_subprocess_artifacts(
+    exc: Exception,
+    *,
+    output_dir: Path,
+    artifact_paths: Mapping[str, Path],
+) -> None:
+    existing_raw = getattr(exc, "model_lab_artifact_paths", None)
+    existing: dict[str, str] = {}
+    if isinstance(existing_raw, dict):
+        existing = {str(key): str(value) for key, value in existing_raw.items()}
+    try:
+        exc.model_lab_output_dir = str(output_dir)  # type: ignore[attr-defined]
+        exc.model_lab_artifact_paths = {  # type: ignore[attr-defined]
+            **existing,
+            **{key: str(path) for key, path in artifact_paths.items()},
+        }
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _model_lab_subprocess_failure_hint(
+    *,
+    returncode: int | None,
+    stderr_tail: str,
+    stdout_tail: str,
+) -> str:
+    combined_tail = f"{stderr_tail}\n{stdout_tail}".lower()
+    if returncode in {137, -9} or "killed" in combined_tail or "out of memory" in combined_tail:
+        return (
+            "模型因子子进程很可能被 OOM killer 杀掉。优先降低数据窗口/特征数量，"
+            "保持 ALPHA_LAB_MODEL_LAB_MAX_WORKERS=1，或继续提高 WSL memory/swap。"
+        )
+    return (
+        "模型因子子进程已失败，但 web 前端进程仍保持存活。请打开 subprocess_stderr、"
+        "subprocess_stdout 和 diagnostics artifact 查看具体异常。"
+    )
+
+
+def _format_model_lab_subprocess_failure(
+    *,
+    command: list[str],
+    returncode: int | None,
+    stdout_tail: str,
+    stderr_tail: str,
+    elapsed_seconds: float,
+    peak_rss_kb: int | None,
+) -> str:
+    lines = [
+        "model-factor subprocess failed",
+        f"returncode: {returncode}",
+        f"elapsed_seconds: {elapsed_seconds}",
+        f"peak_rss_kb: {peak_rss_kb}",
+        f"command: {_format_shell_command(command)}",
+    ]
+    if stderr_tail:
+        lines.extend(["", "stderr_tail:", stderr_tail])
+    if stdout_tail:
+        lines.extend(["", "stdout_tail:", stdout_tail])
+    return "\n".join(lines).rstrip()
+
+
+def _format_shell_command(command: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
 
 
 def _format_run_error_text(
@@ -808,6 +1593,10 @@ class _UnifiedService:
     def projects_root(self) -> Path:
         return (self.vault_root / PROJECTS_DIRNAME).resolve()
 
+    @property
+    def model_lab_specs_root(self) -> Path:
+        return (self.workspace_root / "configs" / "real_cases" / "model_factor").resolve()
+
     # ---- Dashboard --------------------------------------------------------
 
     def dashboard(self) -> dict[str, object]:
@@ -840,6 +1629,655 @@ class _UnifiedService:
                 if str(project.get("next_action", "")).strip()
             ][:10],
         }
+
+    # ---- Model Lab -------------------------------------------------------
+
+    def list_model_lab_specs(self) -> list[dict[str, object]]:
+        specs_root = self.model_lab_specs_root
+        if not specs_root.exists():
+            return []
+        rows: list[dict[str, object]] = []
+        for path in sorted(specs_root.iterdir()):
+            if not path.is_file() or path.suffix.lower() not in {".yaml", ".yml", ".json"}:
+                continue
+            raw_spec = _read_yaml_document_safe(str(path))
+            lineage_meta = _build_spec_lineage_meta(path, raw_spec)
+            item: dict[str, object] = {
+                "name": path.name,
+                "path": str(path),
+                "mtime_utc": _iso_from_timestamp(path.stat().st_mtime),
+                "version": lineage_meta["version"],
+                "lineage": lineage_meta["lineage"],
+                "copied_from": lineage_meta["copied_from"],
+                "file_signature": lineage_meta["file_signature"],
+            }
+            try:
+                spec = load_model_factor_case_spec(path)
+                item.update(
+                    {
+                        "valid": True,
+                        "case_name": spec.name,
+                        "factor_name": spec.factor_name,
+                        "model_family": spec.model.family,
+                        "feature_count": len(spec.feature_columns),
+                        "target_horizon": int(spec.target.horizon),
+                        "features_path": spec.features_path,
+                        "prices_path": spec.prices_path,
+                    }
+                )
+            except Exception as exc:
+                item.update({"valid": False, "error": str(exc)})
+            rows.append(item)
+        return rows
+
+    def read_model_lab_spec(self, spec_name: str) -> dict[str, object]:
+        spec_path = self._resolve_model_lab_spec_path(spec_name)
+        raw_spec = _read_yaml_document_safe(str(spec_path))
+        lineage_meta = _build_spec_lineage_meta(spec_path, raw_spec)
+        payload: dict[str, object] = {
+            "name": spec_path.name,
+            "path": str(spec_path),
+            "content": _read_text_with_limit(spec_path, limit_bytes=_MAX_TEXT_BYTES),
+            "size_bytes": spec_path.stat().st_size,
+            "version": lineage_meta["version"],
+            "lineage": lineage_meta["lineage"],
+            "copied_from": lineage_meta["copied_from"],
+            "file_signature": lineage_meta["file_signature"],
+            "mtime_utc": _iso_from_timestamp(spec_path.stat().st_mtime),
+        }
+        try:
+            spec = load_model_factor_case_spec(spec_path)
+            payload["meta"] = {
+                "case_name": spec.name,
+                "factor_name": spec.factor_name,
+                "model_family": spec.model.family,
+                "feature_count": len(spec.feature_columns),
+                "target_horizon": int(spec.target.horizon),
+                "output_root_dir": str(spec.output.root_dir),
+                "version": lineage_meta["version"],
+                "lineage": lineage_meta["lineage"],
+                "copied_from": lineage_meta["copied_from"],
+                "file_signature": lineage_meta["file_signature"],
+                "updated_at_utc": _iso_from_timestamp(spec_path.stat().st_mtime),
+                "feature_preprocess": {
+                    "missing_policy": spec.feature_preprocess.missing_policy,
+                    "scale_features": spec.feature_preprocess.scale_features,
+                    "cross_sectional_transform": spec.feature_preprocess.cross_sectional_transform,
+                    "cross_sectional_group_scope": (
+                        spec.feature_preprocess.cross_sectional_group_scope
+                    ),
+                    "industry_group_column": spec.feature_preprocess.industry_group_column,
+                },
+                "model_selection": {
+                    "enabled": spec.model_selection.enabled,
+                    "n_splits": spec.model_selection.n_splits,
+                    "embargo_pct": spec.model_selection.embargo_pct,
+                    "metric": spec.model_selection.metric,
+                    "turnover_penalty_lambda": spec.model_selection.turnover_penalty_lambda,
+                    "turnover_bucket_quantile": spec.model_selection.turnover_bucket_quantile,
+                    "candidate_count": len(spec.model_selection.candidates),
+                    "candidate_families": sorted(
+                        {candidate.family for candidate in spec.model_selection.candidates}
+                    ),
+                },
+            }
+        except Exception as exc:
+            payload["meta"] = {"valid": False, "error": str(exc)}
+        return payload
+
+    def list_model_lab_sources(self) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for item in _MODEL_LAB_SOURCE_SPECS:
+            path = self._resolve_model_lab_source_path(item["key"])
+            rows.append(
+                {
+                    "key": item["key"],
+                    "label": item["label"],
+                    "path": str(path),
+                    "description": item["description"],
+                    "focus": item["focus"],
+                    "exists": path.exists(),
+                }
+            )
+        return rows
+
+    def read_model_lab_source(self, source_key: str) -> dict[str, object]:
+        item = next((row for row in _MODEL_LAB_SOURCE_SPECS if row["key"] == source_key), None)
+        if item is None:
+            raise FileNotFoundError(f"model-lab source not found: {source_key}")
+        path = self._resolve_model_lab_source_path(source_key)
+        text = _read_text_with_limit(path, limit_bytes=_MAX_REPORT_TEXT_BYTES)
+        return {
+            "key": item["key"],
+            "label": item["label"],
+            "description": item["description"],
+            "focus": item["focus"],
+            "path": str(path),
+            "content": text,
+            "size_bytes": path.stat().st_size,
+            "line_count": text.count("\n") + (0 if not text else 1),
+        }
+
+    def explore_model_lab_idea(self, payload: dict[str, object]) -> dict[str, object]:
+        idea = str(payload.get("idea") or "").strip()
+        if not idea:
+            raise ValueError("idea is required")
+        mode = str(payload.get("mode") or "explore").strip().lower() or "explore"
+        stage = _optional_text(payload.get("stage"))
+        top_k = max(1, min(_as_int(payload.get("top_k"), default=6), 20))
+        memory_limit = max(0, min(_as_int(payload.get("memory_limit"), default=3), 20))
+        save_session = bool(payload.get("save_session", True))
+        session_id = _optional_text(payload.get("session_id"))
+        parent_session_id = _optional_text(payload.get("parent_session_id"))
+        inject_recent_drift = bool(payload.get("inject_recent_drift", False))
+        spec_name = _optional_text(payload.get("spec_name"))
+        spec_path: str | None = None
+        if spec_name is not None:
+            spec_path = str(self._resolve_model_lab_spec_path(spec_name))
+
+        result = model_lab_explore_idea(
+            idea=idea,
+            mode=mode,
+            spec=spec_path,
+            workspace_root=self.workspace_root,
+            vault_root=self.vault_root,
+            top_k=top_k,
+            memory_limit=memory_limit,
+            stage=stage,
+            inject_recent_drift=inject_recent_drift,
+            parent_session_id=parent_session_id,
+        )
+        session_summary: dict[str, object] | None = None
+        if save_session:
+            session_summary = save_model_lab_idea_session(
+                payload=result,
+                workspace_root=self.workspace_root,
+                session_id=session_id,
+                parent_session_id=parent_session_id,
+            )
+        return {
+            "ok": True,
+            "spec_name": spec_name or "",
+            "session_saved": bool(session_summary),
+            "session": session_summary,
+            **result,
+        }
+
+    def record_model_lab_idea_response(self, payload: dict[str, object]) -> dict[str, object]:
+        session_id = str(payload.get("session_id") or "").strip()
+        response_text = str(payload.get("response_text") or "")
+        if not session_id:
+            raise ValueError("session_id is required")
+        if not response_text.strip():
+            raise ValueError("response_text is required")
+        report = record_model_lab_idea_response(
+            session_id=session_id,
+            response_text=response_text,
+            workspace_root=self.workspace_root,
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "lint_report": report.to_dict(),
+        }
+
+    def apply_model_lab_spec_patch_hint(self, payload: dict[str, object]) -> dict[str, object]:
+        spec_content = str(payload.get("spec_content") or "")
+        if not spec_content.strip():
+            raise ValueError("spec_content is required")
+        patch_hint_raw = payload.get("patch_hint")
+        if not isinstance(patch_hint_raw, dict):
+            raise ValueError("patch_hint must be an object")
+        yaml = _require_yaml()
+        spec_payload = yaml.safe_load(spec_content)
+        if not isinstance(spec_payload, dict):
+            raise ValueError("spec_content must decode to a YAML object")
+        spec_dict = {str(key): value for key, value in spec_payload.items()}
+        patch_hint = {str(key): value for key, value in patch_hint_raw.items()}
+        merged = model_lab_apply_spec_patch_hint(spec_dict, patch_hint)
+        merged_text = str(yaml.safe_dump(merged, sort_keys=False, allow_unicode=True))
+        return {
+            "ok": True,
+            "content": merged_text,
+            "patch_summary": str(patch_hint.get("summary") or "").strip(),
+            "requires_code_change": bool(patch_hint.get("requires_code_change", False)),
+        }
+
+    def list_model_lab_idea_sessions(self, *, limit: int = 20) -> list[dict[str, object]]:
+        normalized_limit = max(1, min(int(limit), 200))
+        return list_model_lab_idea_sessions(
+            workspace_root=self.workspace_root,
+            limit=normalized_limit,
+        )
+
+    def read_model_lab_idea_session(self, session_id: str) -> dict[str, object]:
+        return read_model_lab_idea_session(
+            session_id=session_id,
+            workspace_root=self.workspace_root,
+        )
+
+    def update_model_lab_spec(
+        self,
+        spec_name: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        spec_path = self._resolve_model_lab_spec_path(spec_name)
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            raise ValueError("content is required")
+        temp_path = Path("/tmp") / f"alpha_lab_model_lab_{uuid.uuid4().hex}{spec_path.suffix}"
+        temp_path.write_text(content, encoding="utf-8")
+        try:
+            spec = load_model_factor_case_spec(temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        spec_path.write_text(content, encoding="utf-8")
+        return {
+            "ok": True,
+            "name": spec_path.name,
+            "case_name": spec.name,
+            "factor_name": spec.factor_name,
+            "model_family": spec.model.family,
+            "feature_count": len(spec.feature_columns),
+        }
+
+    def submit_model_lab_run(self, payload: dict[str, object]) -> dict[str, object]:
+        spec_name = str(payload.get("spec_name") or "").strip()
+        if not spec_name:
+            raise ValueError("spec_name is required")
+        spec_path = self._resolve_model_lab_spec_path(spec_name)
+        spec = load_model_factor_case_spec(spec_path)
+        _preflight_model_lab_spec_inputs(spec)
+        task = _RunTask(
+            run_id=uuid.uuid4().hex,
+            project_slug=_MODEL_LAB_PROJECT_SLUG,
+            case_name=spec.name,
+            round_id=None,
+            spec_path=str(spec_path),
+            evaluation_profile=str(payload.get("evaluation_profile") or "default_research"),
+            output_root_dir=_optional_text(payload.get("output_root_dir")),
+            render_report=bool(payload.get("render_report", True)),
+            workflow="model_factor",
+            note=_optional_text(payload.get("note")),
+        )
+        submitted = self.run_store.submit(task).to_payload()
+        return {"ok": True, **submitted}
+
+    def duplicate_model_lab_spec(
+        self,
+        spec_name: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        source_path = self._resolve_model_lab_spec_path(spec_name)
+        target_name = _optional_text(payload.get("target_name"))
+        if target_name is None:
+            raise ValueError("target_name is required")
+        target_name = _safe_spec_filename(target_name)
+        overwrite = bool(payload.get("overwrite", False))
+        target_path = (self.model_lab_specs_root / target_name).resolve()
+        root = self.model_lab_specs_root.resolve()
+        if not str(target_path).startswith(str(root) + "/") and target_path != root:
+            raise PermissionError("invalid target spec path")
+        if target_path.exists() and not overwrite:
+            raise FileNotFoundError(f"target spec already exists: {target_name}")
+        source_payload = _read_yaml_document_safe(str(source_path))
+        if isinstance(source_payload, dict):
+            payload_copy: dict[str, object] = {
+                key: value for key, value in source_payload.items() if isinstance(key, str)
+            }
+            sync_identifiers = bool(payload.get("sync_identifiers", True))
+            sync_factor_name = bool(payload.get("sync_factor_name", True))
+            target_stem = Path(target_path.name).stem
+            if sync_identifiers:
+                payload_copy["name"] = target_stem
+                if sync_factor_name:
+                    payload_copy["factor_name"] = _derive_factor_name_from_spec_stem(target_stem)
+            source_lineage = _extract_spec_lineage(payload_copy)
+            source_version = _coerce_spec_version(payload_copy.get("version"))
+            payload_copy["copied_from"] = source_path.name
+            payload_copy["lineage"] = {
+                **source_lineage,
+                "copied_from": source_path.name,
+                "copied_at": _utc_now_iso(),
+                "source_version": str(source_version) if source_version is not None else "",
+            }
+            payload_copy["version"] = _next_spec_version(source_version)
+            target_path.write_text(
+                _dump_spec_payload(payload_copy, target_path.suffix.lower()),
+                encoding="utf-8",
+            )
+        else:
+            target_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return {
+            "ok": True,
+            "source": source_path.name,
+            "name": target_path.name,
+            "path": str(target_path),
+            "overwrite": overwrite,
+        }
+
+    def delete_model_lab_spec(self, spec_name: str) -> dict[str, object]:
+        spec_path = self._resolve_model_lab_spec_path(spec_name)
+        if spec_path.suffix.lower() not in {".yaml", ".yml"}:
+            raise ValueError("仅支持删除 .yaml/.yml spec 文件")
+
+        resolved_spec_path = spec_path.resolve()
+        blocking_runs: list[dict[str, str]] = []
+        for run in self.run_store.list_records(workflow="model_factor"):
+            run_spec_path = Path(str(run.spec_path)).expanduser().resolve(strict=False)
+            if run_spec_path != resolved_spec_path:
+                continue
+            if run.status not in {"queued", "running"}:
+                continue
+            blocking_runs.append(
+                {
+                    "run_id": run.run_id,
+                    "status": run.status,
+                }
+            )
+        if blocking_runs:
+            preview = ", ".join(
+                f"{item['run_id'][:10]}({item['status']})" for item in blocking_runs[:5]
+            )
+            more = "" if len(blocking_runs) <= 5 else f" +{len(blocking_runs) - 5}"
+            raise ValueError(
+                "该 spec 正被排队/运行中的 run 引用，无法删除；请先取消对应 run："
+                f" {preview}{more}"
+            )
+
+        spec_path.unlink(missing_ok=False)
+        remaining_specs = self.list_model_lab_specs()
+        next_spec_name = str(remaining_specs[0].get("name") or "") if remaining_specs else ""
+        return {
+            "ok": True,
+            "deleted": True,
+            "name": spec_path.name,
+            "path": str(spec_path),
+            "remaining_count": len(remaining_specs),
+            "next_spec_name": next_spec_name,
+        }
+
+    def diff_model_lab_specs(self, payload: dict[str, object]) -> dict[str, object]:
+        left_name = _optional_text(payload.get("left"))
+        right_name = _optional_text(payload.get("right"))
+        if left_name is None or right_name is None:
+            raise ValueError("left and right spec names are required")
+        ignore_metadata = bool(payload.get("ignore_metadata", True))
+        left_path = self._resolve_model_lab_spec_path(left_name)
+        right_path = self._resolve_model_lab_spec_path(right_name)
+        left_text = left_path.read_text(encoding="utf-8").splitlines()
+        right_text = right_path.read_text(encoding="utf-8").splitlines()
+        semantic_equal_ignoring_meta = False
+        left_payload = _read_yaml_document_safe(str(left_path))
+        right_payload = _read_yaml_document_safe(str(right_path))
+        if ignore_metadata and isinstance(left_payload, dict) and isinstance(right_payload, dict):
+            semantic_equal_ignoring_meta = _strip_spec_diff_metadata(
+                left_payload
+            ) == _strip_spec_diff_metadata(right_payload)
+        unified = "\n".join(
+            difflib.unified_diff(
+                left_text,
+                right_text,
+                fromfile=left_path.name,
+                tofile=right_path.name,
+                lineterm="",
+            )
+        )
+        if semantic_equal_ignoring_meta:
+            unified = ""
+        return {
+            "ok": True,
+            "left": left_path.name,
+            "right": right_path.name,
+            "unified": unified,
+            "has_difference": bool(unified.strip()),
+            "semantic_equal_ignoring_metadata": semantic_equal_ignoring_meta,
+            "ignore_metadata": ignore_metadata,
+        }
+
+    def compare_model_lab_runs(self, payload: dict[str, object]) -> dict[str, object]:
+        run_ids_raw = payload.get("run_ids")
+        if not isinstance(run_ids_raw, list):
+            raise ValueError("run_ids must be a list")
+        run_ids = [str(item).strip() for item in run_ids_raw if str(item).strip()]
+        if len(run_ids) < 2:
+            raise ValueError("at least 2 run ids are required")
+        if len(run_ids) > _MODEL_LAB_MAX_COMPARE_RUNS:
+            raise ValueError(
+                f"最多支持 {_MODEL_LAB_MAX_COMPARE_RUNS} 个 run 对比"
+            )
+
+        seen: set[str] = set()
+        ordered_run_ids: list[str] = []
+        for run_id in run_ids:
+            if run_id in seen:
+                continue
+            seen.add(run_id)
+            ordered_run_ids.append(run_id)
+
+        records: list[_RunRecord] = []
+        for run_id in ordered_run_ids:
+            run = self.get_model_lab_run(run_id)
+            if run.workflow != "model_factor":
+                raise ValueError(f"非 model-lab run 不支持对比: {run_id}")
+            records.append(run)
+
+        top_k_features = _as_int(payload.get("top_k_features"), default=20)
+        if top_k_features <= 0:
+            top_k_features = 20
+        top_k_features = max(1, min(top_k_features, 200))
+
+        top_features_by_run: dict[str, list[str]] = {}
+        metric_rows: list[dict[str, object]] = []
+        ic_series_by_run: dict[str, dict[str, float]] = {}
+        turnover_series_by_run: dict[str, dict[str, float]] = {}
+        failure_rows: list[dict[str, object]] = []
+        leakage_rows: list[dict[str, object]] = []
+
+        collected_by_run_id: dict[str, dict[str, object]] = {}
+        max_workers = min(len(records), _MODEL_LAB_MAX_COMPARE_RUNS)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_run_id = {
+                pool.submit(
+                    _collect_model_lab_run_compare_payload,
+                    run,
+                    top_k_features,
+                ): run.run_id
+                for run in records
+            }
+            for future in future_to_run_id:
+                run_id = future_to_run_id[future]
+                collected_by_run_id[run_id] = future.result()
+
+        for run in records:
+            collected = collected_by_run_id[run.run_id]
+            top_features_by_run[run.run_id] = cast(
+                list[str], collected["top_features"]
+            )
+            failure_rows.append(
+                cast(dict[str, object], collected["failure_snapshot"])
+            )
+            metric_rows.append(cast(dict[str, object], collected["metric_row"]))
+            ic_series_by_run[run.run_id] = cast(
+                dict[str, float], collected["ic_series"]
+            )
+            turnover_series_by_run[run.run_id] = cast(
+                dict[str, float], collected["turnover_series"]
+            )
+            leakage_rows.append(cast(dict[str, object], collected["leakage"]))
+
+        comparison = _build_top_feature_stability(top_features_by_run, run_count=len(records))
+        compare_dates = _build_rank_ic_merge_rows(ic_series_by_run)
+        turnover_dates = _build_metric_timeseries_rows(turnover_series_by_run)
+        severity_by_run: dict[str, str] = {}
+        for item in leakage_rows:
+            integrity_summary = item.get("integrity_summary")
+            run_id_value = item.get("run_id")
+            highest_severity: object = "pass"
+            if isinstance(integrity_summary, Mapping):
+                highest_severity = (
+                    integrity_summary.get("highest_severity") or "pass"
+                )
+            severity_by_run[str(run_id_value or "")] = str(highest_severity)
+        return {
+            "ok": True,
+            "run_count": len(records),
+            "requested_run_count": len(run_ids),
+            "run_ids": [run.run_id for run in records],
+            "case_names": [run.case_name for run in records],
+            "case_name_by_run_id": {run.run_id: run.case_name for run in records},
+            "run_failures": failure_rows,
+            "metric_columns": list(_MODEL_LAB_COMPARE_METRIC_KEYS),
+            "metric_rows": metric_rows,
+            "top_features_by_run": top_features_by_run,
+            "feature_stability": comparison,
+            "ic_series": compare_dates,
+            "turnover_series": turnover_dates,
+            "leakage": {
+                "runs": leakage_rows,
+                "top_k_features": top_k_features,
+                "severity_by_run": severity_by_run,
+            },
+        }
+
+    def list_model_lab_runs(
+        self,
+        *,
+        compact: bool = False,
+        status_filter: str | None = None,
+        case_filter: str | None = None,
+        note_filter: str | None = None,
+    ) -> list[dict[str, object]]:
+        records = self.run_store.list_records(workflow="model_factor")
+        status = (status_filter or "").strip().lower()
+        case = (case_filter or "").strip().lower()
+        note = (note_filter or "").strip().lower()
+        if status:
+            records = [item for item in records if str(item.status).lower() == status]
+        if case:
+            records = [item for item in records if case in str(item.case_name).lower()]
+        if note:
+            records = [item for item in records if note in str(item.note or "").lower()]
+        payloads: list[dict[str, object]] = []
+        for item in records:
+            row = item.to_compact_payload() if compact else item.to_payload()
+            summary = _ensure_run_summary(item)
+            action, next_step = _derive_evaluation_action_and_next_step(
+                summary,
+                run_status=item.status,
+            )
+            row["summary"] = _compact_metrics_summary(summary) if compact else dict(summary)
+            row["factor_name"] = _resolve_run_factor_label(item)
+            row["evaluation_title"] = _resolve_run_evaluation_title(item)
+            row["evaluation_action"] = (
+                _coerce_finite_or_text(summary.get("evaluation_action")) or action
+            )
+            row["evaluation_next_step"] = (
+                _coerce_finite_or_text(summary.get("evaluation_next_step")) or next_step
+            )
+            payloads.append(row)
+        return payloads
+
+    def get_model_lab_run(self, run_id: str) -> _RunRecord:
+        run = self.run_store.get(run_id)
+        if run is None or run.workflow != "model_factor":
+            raise FileNotFoundError(f"model-lab run not found: {run_id}")
+        return run
+
+    def delete_model_lab_run(self, run_id: str) -> dict[str, object]:
+        record = self.get_model_lab_run(run_id)
+        outcome = self.run_store.request_cancel_and_delete(run_id)
+        deleted_paths: list[str] = []
+        if outcome.get("immediate") and outcome.get("output_dir"):
+            if _safe_rmtree(str(outcome["output_dir"])):
+                deleted_paths.append(str(outcome["output_dir"]))
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "prior_status": record.status,
+            "cancelled": not bool(outcome.get("immediate")),
+            "deleted_paths": deleted_paths,
+            "message": (
+                "已请求取消：当前阶段结束后将自动清理产物。"
+                if not outcome.get("immediate")
+                else "已删除。"
+            ),
+        }
+
+    def export_model_lab_run_experiment_card(
+        self,
+        *,
+        run_id: str,
+        mode: str = "versioned",
+    ) -> dict[str, object]:
+        run = self.get_model_lab_run(run_id)
+        if run.workflow != "model_factor":
+            raise ValueError("only model_factor runs support experiment-card export")
+        if run.status != "succeeded":
+            raise ValueError("run must be succeeded before exporting experiment card")
+
+        source_paths: dict[str, str | Path | None] = {
+            "experiment_card_path": _resolve_run_artifact_path(
+                run,
+                artifact_key="experiment_card",
+                fallback_name="experiment_card.md",
+            ),
+            "summary_path": _resolve_run_artifact_path(
+                run,
+                artifact_key="summary",
+                fallback_name="summary.md",
+            ),
+            "manifest_path": _resolve_run_artifact_path(
+                run,
+                artifact_key="run_manifest",
+                fallback_name="run_manifest.json",
+            ),
+        }
+        result = export_to_vault(
+            source_paths=source_paths,
+            case_name=run.case_name,
+            vault_root=self.vault_root,
+            mode=mode,
+        )
+        return {
+            "ok": result.success,
+            "run_id": run_id,
+            "case_name": run.case_name,
+            "status": result.status,
+            "success": result.success,
+            "target_paths": list(result.target_paths),
+            "mode_used": result.mode_used,
+            "error": result.error,
+        }
+
+    def _resolve_model_lab_spec_path(self, spec_name: str) -> Path:
+        raw = str(spec_name or "").strip()
+        if not raw:
+            raise ValueError("spec_name must be non-empty")
+        candidate = (self.model_lab_specs_root / raw).resolve()
+        root = self.model_lab_specs_root
+        if not str(candidate).startswith(str(root)):
+            raise PermissionError("invalid spec path")
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError(f"model-lab spec not found: {raw}")
+        return candidate
+
+    def _resolve_model_lab_source_path(self, source_key: str) -> Path:
+        item = next((row for row in _MODEL_LAB_SOURCE_SPECS if row["key"] == source_key), None)
+        if item is None:
+            raise FileNotFoundError(f"model-lab source not found: {source_key}")
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            (self.workspace_root / item["path"]).resolve(),
+            (repo_root / item["path"]).resolve(),
+        ]
+        allowed_roots = [self.workspace_root.resolve(), repo_root.resolve()]
+        for candidate in candidates:
+            if not any(str(candidate).startswith(str(root)) for root in allowed_roots):
+                continue
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        raise FileNotFoundError(f"model-lab source file not found for key={source_key}")
 
     # ---- Knowledge Ops ----------------------------------------------------
 
@@ -1025,13 +2463,71 @@ class _UnifiedService:
         idea: str,
         mode: str,
         project_slug: str | None = None,
+        *,
+        stage: str | None = None,
+        available_data: list[str] | None = None,
+        inject_recent_drift: bool = False,
+        persist_session: bool = False,
+        parent_session_id: str | None = None,
     ) -> dict[str, object]:
         return bridge_explore_idea(
             vault_root=self.vault_root,
             idea=idea,
             mode=mode,
             project_slug=project_slug,
+            stage=stage,
+            available_data=available_data,
+            workspace_root=self.workspace_root,
+            inject_recent_drift=inject_recent_drift,
+            persist_session=persist_session,
+            parent_session_id=parent_session_id,
         ).to_payload()
+
+    def record_explore_response(
+        self,
+        session_id: str,
+        response_text: str,
+    ) -> dict[str, object]:
+        """Run lint on an externally-produced LLM response and persist it.
+
+        Closes the prompt-improvement loop from the web UI: user pastes
+        the response back, we lint it, store it on the session row so
+        next ``explore_idea`` call can read recent violations + upstream
+        sections from it.
+        """
+        from alpha_lab.research_bridge.sessions import (
+            record_explore_response as bridge_record_response,
+        )
+
+        sid = str(session_id or "").strip()
+        text = str(response_text or "")
+        if not sid:
+            raise ValueError("session_id is required")
+        if not text.strip():
+            raise ValueError("response_text is required")
+        report = bridge_record_response(
+            session_id=sid,
+            response_text=text,
+            workspace_root=self.workspace_root,
+        )
+        return {
+            "ok": True,
+            "session_id": sid,
+            "lint_report": report.to_dict(),
+        }
+
+    def list_explore_sessions(self, *, limit: int = 20) -> list[dict[str, object]]:
+        normalized_limit = max(1, min(int(limit), 200))
+        return list_alpha_explore_sessions(
+            workspace_root=self.workspace_root,
+            limit=normalized_limit,
+        )
+
+    def read_explore_session(self, session_id: str) -> dict[str, object]:
+        return read_alpha_explore_session(
+            session_id=session_id,
+            workspace_root=self.workspace_root,
+        )
 
     # ---- Graph / Preflight ------------------------------------------------
 
@@ -1618,7 +3114,7 @@ class _UnifiedService:
         import shutil
 
         deleted_paths: list[str] = []
-        # 1. Delete output_dir (dist/bridge_runs/{case_name}/)
+        # 1. Delete the recorded run output directory.
         if record.output_dir:
             output_dir = Path(record.output_dir)
             if output_dir.exists() and output_dir.is_dir():
@@ -1768,10 +3264,29 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
         if path == "/":
             self._send_html(_index_html())
             return
+        if path == "/model-lab":
+            self._send_html(_model_lab_html())
+            return
 
         # Dashboard
         if path == "/api/dashboard":
             self._send_json(self.svc.dashboard())
+            return
+        if path == "/api/model-lab/specs":
+            self._send_json({"specs": self.svc.list_model_lab_specs()})
+            return
+        if path == "/api/model-lab/sources":
+            self._send_json({"sources": self.svc.list_model_lab_sources()})
+            return
+        if path == "/api/model-lab/idea-explorer/sessions":
+            query = parse_qs(parsed.query)
+            limit = _as_int((query.get("limit") or ["20"])[0], default=20)
+            self._send_json({"sessions": self.svc.list_model_lab_idea_sessions(limit=limit)})
+            return
+        if path == "/api/vault/explore-sessions":
+            query = parse_qs(parsed.query)
+            limit = _as_int((query.get("limit") or ["20"])[0], default=20)
+            self._send_json({"sessions": self.svc.list_explore_sessions(limit=limit)})
             return
 
         # Project list
@@ -1812,6 +3327,70 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
 
         # Project-scoped routes
         parts = _path_parts(path)
+        if len(parts) >= 3 and parts[0] == "api" and parts[1] == "model-lab":
+            try:
+                if len(parts) == 4 and parts[2] == "specs":
+                    self._send_json(self.svc.read_model_lab_spec(parts[3]))
+                    return
+                if len(parts) == 4 and parts[2] == "sources":
+                    self._send_json(self.svc.read_model_lab_source(parts[3]))
+                    return
+                if (
+                    len(parts) == 5
+                    and parts[2] == "idea-explorer"
+                    and parts[3] == "sessions"
+                ):
+                    self._send_json(self.svc.read_model_lab_idea_session(parts[4]))
+                    return
+                if len(parts) == 3 and parts[2] == "runs":
+                    compact_query = parse_qs(parsed.query).get("compact") or [""]
+                    compact_raw = str(compact_query[0]).strip().lower()
+                    compact = compact_raw in {"1", "true", "yes", "y"}
+                    query = parse_qs(parsed.query)
+                    self._send_json(
+                        {
+                            "runs": self.svc.list_model_lab_runs(
+                                compact=compact,
+                                status_filter=str(query.get("status", [""])[0]),
+                                case_filter=str(query.get("case", [""])[0]),
+                                note_filter=str(query.get("note", [""])[0]),
+                            )
+                        }
+                    )
+                    return
+                if len(parts) == 4 and parts[2] == "runs":
+                    self._send_json(self.svc.get_model_lab_run(parts[3]).to_payload())
+                    return
+                if len(parts) == 5 and parts[2] == "runs" and parts[4] == "overview":
+                    self._handle_get_model_lab_run_overview(run_id=parts[3])
+                    return
+                if len(parts) == 6 and parts[2] == "runs" and parts[4] == "artifact":
+                    artifact_query = parse_qs(parsed.query or "")
+                    download = str(artifact_query.get("download", ["0"])[0]).strip().lower() in {
+                        "1",
+                        "true",
+                        "yes",
+                    }
+                    self._handle_get_model_lab_run_artifact(
+                        run_id=parts[3],
+                        artifact_key=parts[5],
+                        download=download,
+                    )
+                    return
+            except Exception as exc:
+                self._send_error_payload(exc)
+                return
+        if (
+            len(parts) == 4
+            and parts[0] == "api"
+            and parts[1] == "vault"
+            and parts[2] == "explore-sessions"
+        ):
+            try:
+                self._send_json(self.svc.read_explore_session(parts[3]))
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "projects":
             slug = parts[2]
             try:
@@ -1906,7 +3485,37 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 idea = str(payload.get("idea") or "").strip()
                 mode = str(payload.get("mode") or "free").strip()
                 project_slug = str(payload.get("project_slug") or "").strip() or None
-                self._send_json(self.svc.explore_idea(idea, mode, project_slug))
+                stage = str(payload.get("stage") or "").strip() or None
+                raw_available = payload.get("available_data")
+                available_data = (
+                    [str(item).strip() for item in raw_available if str(item).strip()]
+                    if isinstance(raw_available, list)
+                    else None
+                )
+                inject_recent_drift = bool(payload.get("inject_recent_drift", False))
+                persist_session = bool(payload.get("persist_session", False))
+                parent_session_id = (
+                    str(payload.get("parent_session_id") or "").strip() or None
+                )
+                self._send_json(
+                    self.svc.explore_idea(
+                        idea,
+                        mode,
+                        project_slug,
+                        stage=stage,
+                        available_data=available_data,
+                        inject_recent_drift=inject_recent_drift,
+                        persist_session=persist_session,
+                        parent_session_id=parent_session_id,
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/record-explore-response":
+                session_id = str(payload.get("session_id") or "").strip()
+                response_text = str(payload.get("response_text") or "")
+                self._send_json(
+                    self.svc.record_explore_response(session_id, response_text)
+                )
                 return
             if parsed.path == "/api/vault/preflight":
                 self._send_json(self.svc.run_preflight_check(payload))
@@ -1917,6 +3526,38 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/projects":
                 created = self.svc.create_project(payload)
                 self._send_json(created, status=HTTPStatus.CREATED)
+                return
+            if parsed.path == "/api/model-lab/idea-explorer/explore":
+                self._send_json(self.svc.explore_model_lab_idea(payload))
+                return
+            if parsed.path == "/api/model-lab/idea-explorer/apply-patch-hint":
+                self._send_json(self.svc.apply_model_lab_spec_patch_hint(payload))
+                return
+            if parsed.path == "/api/model-lab/idea-explorer/record-response":
+                self._send_json(self.svc.record_model_lab_idea_response(payload))
+                return
+            if parsed.path == "/api/model-lab/runs":
+                self._send_json(self.svc.submit_model_lab_run(payload))
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "runs"
+                and parts[4] == "export-card"
+            ):
+                self._send_json(
+                    self.svc.export_model_lab_run_experiment_card(
+                        run_id=parts[3],
+                        mode=str(payload.get("mode") or "versioned").strip() or "versioned",
+                    )
+                )
+                return
+            if parsed.path == "/api/model-lab/runs/compare":
+                self._send_json(self.svc.compare_model_lab_runs(payload))
+                return
+            if parsed.path == "/api/model-lab/specs/diff":
+                self._send_json(self.svc.diff_model_lab_specs(payload))
                 return
             if len(parts) >= 3 and parts[0] == "api" and parts[1] == "projects":
                 slug = parts[2]
@@ -1951,6 +3592,33 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"ok": False, "error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
+    def do_PUT(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        parts = _path_parts(parsed.path)
+        payload = self._read_json_body_or_empty()
+        try:
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "specs"
+            ):
+                self._send_json(self.svc.update_model_lab_spec(parts[3], payload))
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "specs"
+                and parts[4] == "duplicate"
+            ):
+                self._send_json(self.svc.duplicate_model_lab_spec(parts[3], payload))
+                return
+        except Exception as exc:
+            self._send_error_payload(exc)
+            return
+        self._send_json({"ok": False, "error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
     def do_PATCH(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         parts = _path_parts(parsed.path)
@@ -1976,6 +3644,22 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             # DELETE /api/custom-factors/{name}
             if len(parts) == 3 and parts[0] == "api" and parts[1] == "custom-factors":
                 self._send_json(self.svc.delete_custom_factor(parts[2]))
+                return
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "specs"
+            ):
+                self._send_json(self.svc.delete_model_lab_spec(parts[3]))
+                return
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "runs"
+            ):
+                self._send_json(self.svc.delete_model_lab_run(parts[3]))
                 return
             # DELETE /api/projects/{slug}/runs/{run_id}
             if (
@@ -2009,17 +3693,16 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 status=HTTPStatus.NOT_FOUND,
             )
             return
-        path_text = run.artifact_paths.get(artifact_key)
-        if not path_text:
-            self._send_json(
-                {"ok": False, "error": f"artifact key not found: {artifact_key}"},
-                status=HTTPStatus.NOT_FOUND,
+        artifact_path = _resolve_run_artifact_for_endpoint(run, artifact_key)
+        if artifact_path is None:
+            registered = bool(run.artifact_paths.get(artifact_key))
+            error_text = (
+                f"artifact file not found for key: {artifact_key}"
+                if registered
+                else f"artifact key not found: {artifact_key}"
             )
-            return
-        artifact_path = Path(path_text).resolve()
-        if not artifact_path.exists() or not artifact_path.is_file():
             self._send_json(
-                {"ok": False, "error": f"artifact file not found: {artifact_path}"},
+                {"ok": False, "error": error_text},
                 status=HTTPStatus.NOT_FOUND,
             )
             return
@@ -2072,6 +3755,71 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 "snapshot": snapshot,
             }
         )
+
+    def _handle_get_model_lab_run_artifact(
+        self,
+        *,
+        run_id: str,
+        artifact_key: str,
+        download: bool = False,
+    ) -> None:
+        run = self.svc.get_model_lab_run(run_id)
+        self._send_run_artifact(run=run, artifact_key=artifact_key, download=download)
+
+    def _handle_get_model_lab_run_overview(self, *, run_id: str) -> None:
+        run = self.svc.get_model_lab_run(run_id)
+        snapshot = _build_run_overview_snapshot(run)
+        self._send_json(
+            {"ok": True, "run_id": run_id, "summary": dict(run.summary), "snapshot": snapshot}
+        )
+
+    def _send_run_artifact(
+        self,
+        *,
+        run: _RunRecord,
+        artifact_key: str,
+        download: bool = False,
+    ) -> None:
+        artifact_path = _resolve_run_artifact_for_endpoint(run, artifact_key)
+        if artifact_path is None:
+            registered = bool(run.artifact_paths.get(artifact_key))
+            error_text = (
+                f"artifact file not found for key: {artifact_key}"
+                if registered
+                else f"artifact key not found: {artifact_key}"
+            )
+            self._send_json(
+                {"ok": False, "error": error_text},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+        file_size = artifact_path.stat().st_size
+        ctype = _guess_content_type(artifact_path)
+        if "text" in ctype or "json" in ctype:
+            raw = artifact_path.read_bytes()
+            if len(raw) > _MAX_TEXT_BYTES:
+                self._send_json(
+                    {
+                        "error": "artifact too large to display inline",
+                        "size_bytes": file_size,
+                        "limit_bytes": _MAX_TEXT_BYTES,
+                        "path": str(artifact_path),
+                    },
+                    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                )
+                return
+            content = raw
+        else:
+            content = artifact_path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header(
+            "Content-Disposition",
+            f'{"attachment" if download else "inline"}; filename="{artifact_path.name}"',
+        )
+        self.end_headers()
+        self.wfile.write(content)
 
     def _read_json_body_or_empty(self) -> dict[str, object]:
         length_text = self.headers.get("Content-Length", "").strip()
@@ -2240,6 +3988,21 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _read_text_with_limit(path: Path, *, limit_bytes: int) -> str:
+    file_size = path.stat().st_size
+    with path.open("rb") as fh:
+        raw = fh.read(limit_bytes + 1)
+    if len(raw) <= limit_bytes and file_size <= limit_bytes:
+        return raw.decode("utf-8", errors="replace")
+    raise AlphaLabDataError(
+        f"file too large to edit inline: {path} ({file_size} bytes, limit {limit_bytes})"
+    )
+
+
+def _iso_from_timestamp(timestamp: float) -> str:
+    return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat().replace("+00:00", "Z")
+
+
 def _list_draft_summaries(drafts_dir: Path) -> list[dict[str, object]]:
     if not drafts_dir.exists():
         return []
@@ -2309,7 +4072,11 @@ def _read_text_preview(path: Path, *, limit_bytes: int) -> str:
     return content.rstrip() + f"\n\n> [内容已截断 — 显示前 {limit_kb} KB，文件共 {size_kb} KB]"
 
 
-def _extract_metrics_summary(metrics_path: Path | None) -> dict[str, object]:
+def _extract_metrics_summary(
+    metrics_path: Path | None,
+    *,
+    run_status: str | None = None,
+) -> dict[str, object]:
     if metrics_path is None or not metrics_path.exists():
         return {}
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
@@ -2323,7 +4090,10 @@ def _extract_metrics_summary(metrics_path: Path | None) -> dict[str, object]:
     # Keep all available metric fields so the UI can:
     # 1) render a strict compact set in quick-screen mode, and
     # 2) render a full metric surface in full-evaluation mode.
-    return {str(key): value for key, value in metrics.items()}
+    return _enrich_evaluation_summary(
+        {str(key): value for key, value in metrics.items()},
+        run_status=run_status,
+    )
 
 
 def _read_json_artifact(path: Path | None) -> dict[str, object] | None:
@@ -2367,6 +4137,84 @@ def _read_csv_artifact_rows(path: Path | None) -> list[dict[str, str]]:
     return rows
 
 
+def _read_partition_rows(
+    run: _RunRecord,
+    alias_paths: tuple[tuple[str, str], ...],
+) -> list[dict[str, str]]:
+    for artifact_key, fallback_name in alias_paths:
+        rows = _read_csv_artifact_rows(
+            _resolve_run_artifact_path(
+                run,
+                artifact_key=artifact_key,
+                fallback_name=fallback_name,
+            )
+        )
+        if rows:
+            return rows
+    return []
+
+
+def _load_model_factor_portfolio_validation_snapshot(
+    run: _RunRecord,
+) -> dict[str, object]:
+    summary_payload = _read_json_artifact(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="portfolio_validation_summary",
+            fallback_name="level2_portfolio_validation/portfolio_validation_summary.json",
+        )
+    )
+    metrics_payload = _read_json_artifact(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="portfolio_validation_metrics",
+            fallback_name="level2_portfolio_validation/portfolio_validation_metrics.json",
+        )
+    )
+    package_payload = _read_json_artifact(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="portfolio_validation_package",
+            fallback_name="level2_portfolio_validation/portfolio_validation_package.json",
+        )
+    )
+    summary = summary_payload if isinstance(summary_payload, dict) else {}
+    metrics = metrics_payload if isinstance(metrics_payload, dict) else {}
+    package = package_payload if isinstance(package_payload, dict) else {}
+    return {
+        "summary": summary,
+        "metrics": metrics,
+        "package": package,
+        "status": _coerce_finite_or_text(summary.get("validation_status"))
+        or _coerce_finite_or_text(summary.get("recommendation"))
+        or "not_available",
+        "portfolio_validation_recommendation": _coerce_finite_or_text(
+            summary.get("recommendation")
+        ),
+        "has_data": bool(summary or metrics or package),
+    }
+
+
+def _build_run_failure_snapshot(run: _RunRecord) -> dict[str, object]:
+    message = run.error_message or ""
+    raw = run.error or ""
+    hint = run.error_hint or ""
+    has_error = (
+        run.status == "failed"
+        and bool((message or "").strip() or (raw or "").strip() or (hint or "").strip())
+    )
+    return {
+        "run_id": run.run_id,
+        "case_name": run.case_name,
+        "status": run.status,
+        "error_type": run.error_type,
+        "error_message": message,
+        "error_hint": hint,
+        "error": raw,
+        "has_error": has_error,
+    }
+
+
 def _build_run_overview_snapshot(run: _RunRecord) -> dict[str, object]:
     group_rows = _read_csv_artifact_rows(
         _resolve_run_artifact_path(
@@ -2384,6 +4232,8 @@ def _build_run_overview_snapshot(run: _RunRecord) -> dict[str, object]:
             )
         )
     return {
+        "failure": _build_run_failure_snapshot(run),
+        "portfolioValidation": _load_model_factor_portfolio_validation_snapshot(run),
         "backtest": _read_json_artifact(
             _resolve_run_artifact_path(
                 run,
@@ -2434,6 +4284,42 @@ def _build_run_overview_snapshot(run: _RunRecord) -> dict[str, object]:
                 fallback_name="coverage.csv",
             )
         ),
+        "industryRows": _read_partition_rows(
+            run,
+            (
+                ("industry_returns", "industry_returns.csv"),
+                ("industry_group_returns", "industry_group_returns.csv"),
+                ("group_returns_by_industry", "group_returns_by_industry.csv"),
+                ("returns_by_industry", "returns_by_industry.csv"),
+                ("conditional_ic_by_industry", "conditional_ic_by_industry.csv"),
+            ),
+        ),
+        "sizeRows": _read_partition_rows(
+            run,
+            (
+                ("size_returns", "size_returns.csv"),
+                ("size_group_returns", "size_group_returns.csv"),
+                ("group_returns_by_size", "group_returns_by_size.csv"),
+                ("returns_by_size", "returns_by_size.csv"),
+                ("cross_section_size", "conditional_ic_by_cross_section_size.csv"),
+                (
+                    "conditional_ic_by_cross_section_size",
+                    "conditional_ic_by_cross_section_size.csv",
+                ),
+                ("conditional_ic_by_size", "conditional_ic_by_size.csv"),
+            ),
+        ),
+        "regimeRows": _read_partition_rows(
+            run,
+            (
+                ("regime_returns", "regime_returns.csv"),
+                ("group_returns_by_regime", "group_returns_by_regime.csv"),
+                ("returns_by_regime", "returns_by_regime.csv"),
+                ("volatility_regime_returns", "volatility_regime_returns.csv"),
+                ("regime_group_returns", "regime_group_returns.csv"),
+            ),
+        ),
+        "integrity": _load_model_factor_run_leakage_summary(run),
     }
 
 
@@ -2463,6 +4349,33 @@ def _load_run_rank_ic_timeseries(run: _RunRecord) -> dict[str, float]:
         return {}
 
 
+def _load_run_turnover_timeseries(run: _RunRecord) -> dict[str, float]:
+    path = _resolve_run_artifact_path(
+        run, artifact_key="turnover", fallback_name="turnover.csv"
+    )
+    if path is None:
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            reader = DictReader(fh)
+            rows: dict[str, float] = {}
+            for row in reader:
+                date = str((row or {}).get("date") or "").strip()
+                if not date:
+                    continue
+                value = _coerce_finite_float((row or {}).get("turnover"))
+                if value is None:
+                    value = _coerce_finite_float((row or {}).get("mean_turnover"))
+                if value is None:
+                    value = _coerce_finite_float((row or {}).get("value"))
+                if value is None:
+                    continue
+                rows[date] = value
+            return rows
+    except Exception:
+        return {}
+
+
 def _resolve_run_artifact_path(
     run: _RunRecord,
     *,
@@ -2481,6 +4394,40 @@ def _resolve_run_artifact_path(
     return None
 
 
+def _resolve_run_artifact_for_endpoint(
+    run: _RunRecord, artifact_key: str
+) -> Path | None:
+    """Locate an artifact file for the per-key download endpoint.
+
+    Falls back, in order, to: the registered path for `artifact_key`, the
+    canonical filename under `output_dir`, and any registered synonym keys
+    (e.g., `group_returns` ↔ `quantile_returns`). Returns None when nothing
+    on disk matches.
+    """
+
+    def _lookup(key: str) -> Path | None:
+        path_text = run.artifact_paths.get(key)
+        if path_text:
+            path = Path(path_text).expanduser().resolve()
+            if path.exists() and path.is_file():
+                return path
+        fallback_name = _ARTIFACT_DISK_FILENAMES.get(key)
+        if fallback_name and run.output_dir:
+            fallback = Path(run.output_dir).expanduser().resolve() / fallback_name
+            if fallback.exists() and fallback.is_file():
+                return fallback
+        return None
+
+    direct = _lookup(artifact_key)
+    if direct is not None:
+        return direct
+    for synonym in _ARTIFACT_KEY_SYNONYMS.get(artifact_key, ()):
+        recovered = _lookup(synonym)
+        if recovered is not None:
+            return recovered
+    return None
+
+
 def _resolve_run_factor_label(run: _RunRecord) -> str:
     summary_name = str(run.summary.get("factor_name") or "").strip()
     if summary_name:
@@ -2495,6 +4442,748 @@ def _resolve_run_factor_label(run: _RunRecord) -> str:
         except Exception:
             pass
     return run.case_name
+
+
+def _resolve_run_evaluation_title(run: _RunRecord) -> str:
+    summary = _ensure_run_summary(run)
+    title = _coerce_finite_or_text(summary.get("evaluation_title")) or _pick_evaluation_title(
+        summary
+    )
+    if title:
+        return title
+    status_label = {
+        "queued": "queued",
+        "running": "running",
+        "succeeded": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }.get(str(run.status or "").strip().lower())
+    if status_label:
+        return status_label
+    fallback = _coerce_finite_or_text(run.status)
+    return fallback or "-"
+
+
+def _read_run_payload(path: Path | None) -> dict[str, object] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _coerce_finite_or_text(value: object) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        text = str(value).strip()
+        return text or None
+    return None
+
+
+def _pick_evaluation_title(summary: Mapping[str, object]) -> str | None:
+    transition = _coerce_finite_or_text(summary.get("level12_transition_label"))
+    if transition and not _is_inconclusive_transition(transition):
+        return transition
+    for key in (
+        "promotion_decision",
+        "campaign_triage",
+        "factor_verdict",
+        "portfolio_validation_recommendation",
+    ):
+        value = _coerce_finite_or_text(summary.get(key))
+        if value:
+            return value
+    if transition:
+        return transition
+    return None
+
+
+def _is_inconclusive_transition(value: str) -> bool:
+    return value.strip().lower() == "inconclusive transition"
+
+
+def _derive_evaluation_action_and_next_step(
+    summary: Mapping[str, object],
+    *,
+    run_status: str | None = None,
+) -> tuple[str, str]:
+    status = str(run_status or "").strip().lower()
+    if status in {"failed", "cancelled"}:
+        return "STOP", "先查看报错并修复数据或配置后再重跑。"
+    if status in {"queued", "running"}:
+        return "HOLD", "运行中，完成后再依据结论决定是否推进。"
+
+    promotion = str(_coerce_finite_or_text(summary.get("promotion_decision")) or "").strip().lower()
+    recommendation = str(
+        _coerce_finite_or_text(summary.get("portfolio_validation_recommendation")) or ""
+    ).strip().lower()
+    triage = str(_coerce_finite_or_text(summary.get("campaign_triage")) or "").strip().lower()
+    verdict = str(_coerce_finite_or_text(summary.get("factor_verdict")) or "").strip().lower()
+    transition = str(
+        _coerce_finite_or_text(summary.get("level12_transition_label")) or ""
+    ).strip().lower()
+
+    if (
+        promotion == "blocked from level 2"
+        or triage == "drop for now"
+        or verdict in {"weak / noisy", "fails basic robustness"}
+    ):
+        if promotion == "blocked from level 2":
+            return "STOP", "先处理 promotion blockers，再用 default_research 复跑验证。"
+        if triage == "drop for now":
+            return "STOP", "建议先重做因子或特征方案，再决定是否继续该方向。"
+        return "STOP", "先修复核心稳健性问题（IC、覆盖率、子区间）后再重跑。"
+
+    if recommendation == "credible at portfolio level" or transition in {
+        "confirmed at portfolio level",
+        "improved at portfolio level",
+    }:
+        return "GO", "进入候选池并开展组合约束与交易成本复核。"
+    if promotion == "promote to level 2":
+        return "GO", "已满足晋级门槛，下一步执行 Level 2 组合验证。"
+    if (
+        triage in {"advance to level 2", "strong level 1 candidate"}
+        and verdict == "strong candidate"
+    ):
+        return "GO", "优先进入下一轮验证，并补齐组合层证据。"
+
+    if recommendation == "needs portfolio refinement":
+        return "HOLD", "优先优化换手、成本与集中度，再复跑组合验证。"
+    if recommendation == "not evaluated (not promoted)" or transition == "inconclusive transition":
+        return "HOLD", "当前未形成明确转化结论，先提升到 Promote to Level 2。"
+    if triage in {"fragile / monitor", "needs refinement"} or verdict in {
+        "promising but fragile",
+        "mixed evidence",
+    }:
+        return "HOLD", "先补充滚动稳定性与不确定性证据，再判断推进。"
+
+    return "HOLD", "维持观察，补充关键诊断后再决策。"
+
+
+def _enrich_evaluation_summary(
+    summary: Mapping[str, object],
+    *,
+    run_status: str | None = None,
+) -> dict[str, object]:
+    enriched = {str(key): value for key, value in summary.items()}
+    title = _pick_evaluation_title(enriched)
+    action, next_step = _derive_evaluation_action_and_next_step(
+        enriched,
+        run_status=run_status,
+    )
+    if title:
+        enriched["evaluation_title"] = title
+    enriched["evaluation_action"] = action
+    enriched["evaluation_next_step"] = next_step
+    return enriched
+
+
+def _read_yaml_document_safe(path_text: str) -> dict[str, object] | None:
+    try:
+        payload = load_yaml_document(Path(path_text))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _coerce_spec_version(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 1 else None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        version = int(value)
+        return version if version >= 1 and float(version) == value else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            version = int(text)
+        except ValueError:
+            return None
+        return version if version >= 1 else None
+    return None
+
+
+def _next_spec_version(value: int | None) -> int:
+    if value is None or value < 1:
+        return 1
+    return value + 1
+
+
+def _coerce_lineage_history(value: object) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        lineage_entries: list[dict[str, object]] = []
+        for key, item_value in value.items():
+            candidate = _coerce_lineage_item(item_value)
+            if candidate:
+                candidate["event_key"] = str(key).strip()
+                lineage_entries.append(candidate)
+        return lineage_entries
+    if not isinstance(value, (list, tuple)):
+        return []
+    lineage_entries_from_iterable: list[dict[str, object]] = []
+    for item in value:
+        candidate = _coerce_lineage_item(item)
+        if candidate:
+            lineage_entries_from_iterable.append(candidate)
+    return lineage_entries_from_iterable
+
+
+def _coerce_lineage_item(raw_item: object) -> dict[str, object] | None:
+    if isinstance(raw_item, dict):
+        payload: dict[str, object] = {}
+        for key, value in raw_item.items():
+            if not isinstance(key, str):
+                continue
+            name = key.strip()
+            if not name:
+                continue
+            payload[name] = value
+        return payload
+    if isinstance(raw_item, str):
+        text = raw_item.strip()
+        if not text:
+            return None
+        return {"raw": text}
+    return None
+
+
+def _extract_spec_lineage(payload: dict[str, object]) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        return {}
+    raw_lineage = payload.get("lineage")
+    if isinstance(raw_lineage, dict):
+        lineage: dict[str, object] = {}
+        for key, value in raw_lineage.items():
+            if isinstance(key, str):
+                name = key.strip()
+                if name:
+                    lineage[name] = value
+        history = _coerce_lineage_history(raw_lineage.get("history"))
+        if history:
+            lineage["history"] = history
+        return lineage
+    if isinstance(raw_lineage, (list, tuple)):
+        return {"history": _coerce_lineage_history(raw_lineage)}
+    if isinstance(raw_lineage, str):
+        text = raw_lineage.strip()
+        if text:
+            return {"history": [{"raw": text}]}
+    return {}
+
+
+def _build_spec_lineage_meta(
+    spec_path: Path,
+    raw_spec: dict[str, object] | None,
+) -> dict[str, object]:
+    payload = raw_spec or {}
+    lineage = _extract_spec_lineage(payload)
+    copied_from = _coerce_finite_or_text(payload.get("copied_from"))
+    version = _coerce_spec_version(payload.get("version"))
+    if version is None:
+        version = 1
+    return {
+        "version": version,
+        "lineage": lineage,
+        "copied_from": copied_from or "",
+        "file_signature": _file_signature(spec_path),
+    }
+
+
+def _dump_spec_payload(payload: object, suffix: str) -> str:
+    normalized: dict[str, object] | list[object]
+    if isinstance(payload, dict):
+        normalized = payload
+    elif isinstance(payload, list):
+        normalized = cast(list[object], payload)
+    elif isinstance(payload, (str, bytes)):
+        return str(payload)
+    else:
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    if suffix == ".json":
+        return json.dumps(normalized, ensure_ascii=False, indent=2)
+
+    yaml = _require_yaml()
+    return str(yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True))
+
+
+def _derive_factor_name_from_spec_stem(stem: str) -> str:
+    raw = str(stem or "").strip()
+    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", raw).strip("_").lower()
+    return normalized or "model_factor_copy"
+
+
+def _strip_spec_diff_metadata(payload: dict[str, object]) -> dict[str, object]:
+    stripped = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"copied_from", "lineage", "version"}
+    }
+    return stripped
+
+
+def _preflight_model_lab_spec_inputs(spec: object) -> None:
+    prices_path = str(getattr(spec, "prices_path", "") or "").strip()
+    features_path = str(getattr(spec, "features_path", "") or "").strip()
+    feature_columns = list(getattr(spec, "feature_columns", ()) or ())
+
+    if not prices_path or not features_path:
+        raise ValueError("model-lab preflight requires non-empty prices_path/features_path")
+
+    failures: list[str] = []
+    prices_resolved: Path | None = None
+    features_resolved: Path | None = None
+
+    try:
+        prices_resolved = resolve_tabular_frame_path(prices_path, object_name="prices")
+    except Exception as exc:
+        failures.append(str(exc))
+    try:
+        feature_storage = ensure_parquet_tabular_frame(
+            features_path,
+            object_name="features",
+        )
+        features_resolved = feature_storage.path
+    except Exception as exc:
+        failures.append(str(exc))
+
+    universe_payload = getattr(spec, "universe", None)
+    universe_path = str(getattr(universe_payload, "path", "") or "").strip()
+    universe_col = str(
+        getattr(universe_payload, "in_universe_column", "in_universe") or "in_universe"
+    )
+    if universe_path:
+        try:
+            _ = resolve_tabular_frame_path(universe_path, object_name="universe")
+        except Exception as exc:
+            failures.append(str(exc))
+
+    if prices_resolved is not None:
+        try:
+            _preflight_tabular_columns(
+                prices_resolved,
+                required_columns=("date", "asset", "close"),
+                object_name="prices",
+            )
+        except Exception as exc:
+            failures.append(str(exc))
+
+    if features_resolved is not None:
+        required_feature_columns = ("date", "asset", *tuple(str(col) for col in feature_columns))
+        try:
+            _preflight_tabular_columns(
+                features_resolved,
+                required_columns=required_feature_columns,
+                object_name="features",
+            )
+        except Exception as exc:
+            failures.append(str(exc))
+
+    if universe_path:
+        try:
+            universe_resolved = resolve_tabular_frame_path(universe_path, object_name="universe")
+            _preflight_tabular_columns(
+                universe_resolved,
+                required_columns=("date", "asset", universe_col),
+                object_name="universe",
+            )
+        except Exception as exc:
+            failures.append(str(exc))
+
+    if failures:
+        bullet_lines = "\n".join(f"- {item}" for item in failures)
+        raise AlphaLabIOError(
+            "model-lab 启动前检查失败，请先修复数据/路径后再运行：\n" + bullet_lines
+        )
+
+
+def _preflight_tabular_columns(
+    path: Path,
+    *,
+    required_columns: tuple[str, ...],
+    object_name: str,
+) -> None:
+    required = tuple(
+        dict.fromkeys(str(col).strip() for col in required_columns if str(col).strip())
+    )
+    if not required:
+        return
+
+    suffix = path.suffix.lower()
+    import pandas as pd
+
+    if suffix == ".csv":
+        try:
+            columns = [str(col) for col in pd.read_csv(path, nrows=0).columns]
+        except Exception as exc:
+            raise AlphaLabDataError(f"{object_name} 无法读取 CSV 头部: {path} ({exc})") from exc
+        missing = [col for col in required if col not in set(columns)]
+        if missing:
+            raise AlphaLabDataError(
+                f"{object_name} 缺少必需列: {missing} ({path})"
+            )
+        return
+
+    if suffix not in {".parquet", ".pq"}:
+        raise AlphaLabIOError(f"{object_name} 文件后缀不支持: {path}")
+
+    try:
+        import pyarrow.parquet as pq  # type: ignore[import-untyped]
+
+        schema_columns = set(str(name) for name in pq.read_schema(path).names)
+        missing = [col for col in required if col not in schema_columns]
+        if missing:
+            raise AlphaLabDataError(
+                f"{object_name} 缺少必需列: {missing} ({path})"
+            )
+        return
+    except ImportError:
+        pass
+    except Exception as exc:
+        raise AlphaLabDataError(f"{object_name} 无法读取 Parquet schema: {path} ({exc})") from exc
+
+    # Fallback when pyarrow schema is unavailable: read the selected columns.
+    try:
+        pd.read_parquet(path, columns=list(required))
+    except Exception as exc:
+        raise AlphaLabDataError(
+            f"{object_name} Parquet 列检查失败，请确认列存在且可读取: {path} ({exc})"
+        ) from exc
+
+
+def _file_signature(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1 << 20)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()[:16]
+
+
+def _extract_model_from_spec(spec_path: str) -> str:
+    payload = _read_yaml_document_safe(spec_path)
+    if payload is None:
+        return ""
+    model_payload = payload.get("model")
+    if isinstance(model_payload, dict):
+        model = _coerce_finite_or_text(model_payload.get("family"))
+        if model:
+            return model
+    return _coerce_finite_or_text(payload.get("model_family")) or ""
+
+
+def _coerce_feature_list(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+        if parts:
+            return parts
+        return [part.strip() for part in raw.split(";") if part.strip()]
+    return []
+
+
+def _ensure_run_summary(run: _RunRecord) -> dict[str, object]:
+    summary: dict[str, object] = dict(run.summary)
+    if summary:
+        return _enrich_evaluation_summary(summary, run_status=run.status)
+
+    metrics_payload = _read_run_payload(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="metrics",
+            fallback_name="metrics.json",
+        )
+    )
+    if metrics_payload is None:
+        return summary
+
+    source = metrics_payload.get("metrics")
+    metrics = source if isinstance(source, dict) else metrics_payload
+    if isinstance(metrics, dict):
+        summary = {str(key): value for key, value in metrics.items()}
+    return _enrich_evaluation_summary(summary, run_status=run.status)
+
+
+def _resolve_run_model_family(run: _RunRecord) -> str:
+    summary = _ensure_run_summary(run)
+    model_family = _coerce_finite_or_text(summary.get("model_family"))
+    if model_family:
+        return model_family
+
+    model_definition_payload = _read_run_payload(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="model_definition_json",
+            fallback_name="model_definition.json",
+        )
+    )
+    if isinstance(model_definition_payload, dict):
+        value = _coerce_finite_or_text(model_definition_payload.get("model_family"))
+        if value:
+            return value
+
+    manifest_payload = _read_run_payload(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="run_manifest",
+            fallback_name="run_manifest.json",
+        )
+    )
+    if isinstance(manifest_payload, dict):
+        inputs = manifest_payload.get("inputs")
+        if isinstance(inputs, dict):
+            value = _coerce_finite_or_text(inputs.get("model_family"))
+            if value:
+                return value
+
+    value = _extract_model_from_spec(run.spec_path)
+    return value or "-"
+
+
+def _extract_model_factor_top_features(run: _RunRecord, *, top_k: int) -> list[str]:
+    summary = _ensure_run_summary(run)
+    for key in ("model_top_features", "top_features"):
+        features = _coerce_feature_list(summary.get(key))
+        if features:
+            return features[:top_k]
+
+    feature_path = _resolve_run_artifact_path(
+        run,
+        artifact_key="feature_importance",
+        fallback_name="feature_importance.csv",
+    )
+    if feature_path is None:
+        return []
+
+    rows = _read_csv_artifact_rows(feature_path)
+    with_importance: list[tuple[str, float]] = []
+    for row in rows:
+        feature = str(row.get("feature") or "").strip()
+        if not feature:
+            continue
+        importance = _coerce_finite_float(row.get("mean_abs_importance"))
+        if importance is None:
+            importance = _coerce_finite_float(row.get("latest_importance"))
+        if importance is None:
+            importance = 0.0
+        with_importance.append((feature, importance))
+
+    with_importance.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    return [item[0] for item in with_importance[:top_k]]
+
+
+def _collect_model_lab_run_compare_payload(
+    run: _RunRecord,
+    top_k_features: int,
+) -> dict[str, object]:
+    summary = _ensure_run_summary(run)
+    metric_row: dict[str, object] = {
+        "run_id": run.run_id,
+        "case_name": run.case_name,
+        "note": run.note or "",
+        "factor_name": _resolve_run_factor_label(run),
+        "status": run.status,
+        "model_family": _resolve_run_model_family(run),
+    }
+    for key in _MODEL_LAB_COMPARE_METRIC_KEYS:
+        if key == "factor_verdict":
+            value = summary.get(key) or summary.get("factor_verdict")
+        else:
+            value = summary.get(key)
+        if value is not None:
+            metric_row[key] = value
+
+    return {
+        "top_features": _extract_model_factor_top_features(run, top_k=top_k_features),
+        "failure_snapshot": _build_run_failure_snapshot(run),
+        "metric_row": metric_row,
+        "ic_series": _load_run_rank_ic_timeseries(run),
+        "turnover_series": _load_run_turnover_timeseries(run),
+        "leakage": _load_model_factor_run_leakage_summary(run),
+    }
+
+
+def _build_top_feature_stability(
+    top_features_by_run: dict[str, list[str]],
+    *,
+    run_count: int,
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    pairwise_scores: list[float] = []
+    run_ids = list(top_features_by_run.keys())
+
+    for left_index in range(len(run_ids)):
+        left = run_ids[left_index]
+        left_set = set(top_features_by_run.get(left, []))
+        for right_index in range(left_index + 1, len(run_ids)):
+            right = run_ids[right_index]
+            right_set = set(top_features_by_run.get(right, []))
+            union = left_set | right_set
+            intersection = left_set & right_set
+            if union:
+                jaccard = len(intersection) / len(union)
+            elif left_set or right_set:
+                jaccard = 0.0
+            else:
+                jaccard = 1.0
+            rows.append(
+                {
+                    "run_a": left,
+                    "run_b": right,
+                    "n_features_a": len(left_set),
+                    "n_features_b": len(right_set),
+                    "n_overlap": len(intersection),
+                    "n_union": len(union),
+                    "jaccard": jaccard,
+                }
+            )
+            if union:
+                pairwise_scores.append(jaccard)
+
+    rows.sort(
+        key=lambda item: float(_coerce_finite_float(item.get("jaccard")) or 0.0),
+        reverse=True,
+    )
+    if pairwise_scores:
+        mean_jaccard = sum(pairwise_scores) / len(pairwise_scores)
+        min_jaccard = min(pairwise_scores)
+        max_jaccard = max(pairwise_scores)
+    else:
+        mean_jaccard = None
+        min_jaccard = None
+        max_jaccard = None
+
+    return {
+        "run_count": run_count,
+        "pair_count": len(rows),
+        "pairwise": rows,
+        "mean_jaccard": mean_jaccard,
+        "min_jaccard": min_jaccard,
+        "max_jaccard": max_jaccard,
+    }
+
+
+def _build_rank_ic_merge_rows(
+    ic_series_by_run: dict[str, dict[str, float]],
+) -> list[dict[str, object]]:
+    rows = _build_metric_timeseries_rows(ic_series_by_run)
+    for row in rows:
+        row["mean_rank_ic"] = row.pop("mean_value", None)
+    return rows
+
+
+def _build_metric_timeseries_rows(
+    metric_series_by_run: dict[str, dict[str, float]],
+) -> list[dict[str, object]]:
+    all_dates: set[str] = set()
+    for series in metric_series_by_run.values():
+        all_dates.update(series.keys())
+
+    rows: list[dict[str, object]] = []
+    for date in sorted(all_dates):
+        row: dict[str, object] = {"date": date}
+        date_values: list[float] = []
+        for run_id, series in metric_series_by_run.items():
+            value = series.get(date)
+            if value is None:
+                continue
+            key = f"run:{run_id}"
+            row[key] = value
+            date_values.append(value)
+        row["n_runs"] = len(date_values)
+        row["mean_value"] = sum(date_values) / len(date_values) if date_values else None
+        rows.append(row)
+    return rows
+
+
+def _load_model_factor_run_leakage_summary(run: _RunRecord) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "run_id": run.run_id,
+        "case_name": run.case_name,
+        "factor_name": _resolve_run_factor_label(run),
+        "status": run.status,
+        "integrity_summary": {},
+        "integrity_checks": [],
+    }
+
+    manifest_payload = _read_run_payload(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="run_manifest",
+            fallback_name="run_manifest.json",
+        )
+    )
+    if isinstance(manifest_payload, dict):
+        integrity_summary = manifest_payload.get("integrity_summary")
+        if isinstance(integrity_summary, dict):
+            summary["integrity_summary"] = {
+                "n_checks": integrity_summary.get("n_checks"),
+                "n_pass": integrity_summary.get("n_pass"),
+                "n_warn": integrity_summary.get("n_warn"),
+                "n_fail": integrity_summary.get("n_fail"),
+                "highest_severity": integrity_summary.get("highest_severity"),
+            }
+
+    integrity_payload = _read_run_payload(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="integrity_report_json",
+            fallback_name="integrity_report.json",
+        )
+    )
+    if isinstance(integrity_payload, dict):
+        integrity_summary = integrity_payload.get("summary")
+        if isinstance(integrity_summary, dict):
+            summary["integrity_summary"] = {
+                "n_checks": integrity_summary.get("n_checks"),
+                "n_pass": integrity_summary.get("n_pass"),
+                "n_warn": integrity_summary.get("n_warn"),
+                "n_fail": integrity_summary.get("n_fail"),
+                "highest_severity": integrity_summary.get("highest_severity"),
+            }
+        checks = integrity_payload.get("checks")
+        if isinstance(checks, list):
+            parsed: list[dict[str, object]] = []
+            for item in checks:
+                if not isinstance(item, dict):
+                    continue
+                check_name = str(item.get("check_name") or "").strip()
+                if not check_name:
+                    continue
+                parsed.append(
+                    {
+                        "check_name": check_name,
+                        "status": str(item.get("status") or "").strip(),
+                        "severity": str(item.get("severity") or "").strip(),
+                        "module_name": _coerce_finite_or_text(item.get("module_name")),
+                        "object_name": _coerce_finite_or_text(item.get("object_name")),
+                    }
+                )
+            summary["integrity_checks"] = parsed
+
+    return summary
 
 
 def _resolve_run_dsr_pvalue(run: _RunRecord) -> float | None:
@@ -2690,6 +5379,51 @@ def _safe_slug(value: str) -> str:
     return normalized
 
 
+_MODEL_LAB_SPEC_NAME_PATTERN = re.compile(r"^stock_[a-z0-9]+(?:_[a-z0-9]+)*\.ya?ml$")
+_MODEL_LAB_SPEC_STEM_MAX_LEN = 30
+_MODEL_LAB_SPEC_NAME_HINT = (
+    f"spec 文件名必须符合 stock_{{name}}.yaml，name 仅允许小写字母/数字，下划线分段，"
+    f"文件名（不含后缀）≤ {_MODEL_LAB_SPEC_STEM_MAX_LEN} 字符；"
+    f"例如 stock_ridge.yaml、stock_gbdt_smoke.yaml"
+)
+
+
+def _safe_spec_filename(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("target_name is required")
+
+    # 阻止目录穿越并保留可读的文件名语义
+    safe_name = re.sub(r"[/\\\\]+", "", raw)
+    if not safe_name:
+        raise ValueError("target_name is invalid")
+
+    # 仅允许基本文件名字符
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "-", safe_name)
+    safe_name = re.sub(r"-{2,}", "-", safe_name).strip("-._")
+    if not safe_name:
+        raise ValueError("target_name is invalid")
+
+    stem = Path(safe_name).stem
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in {".yaml", ".yml"}:
+        suffix = ".yaml"
+
+    # 规范化命名：统一 stock_{name}.yaml 以防止出现过长 / 旧式命名
+    stem_norm = stem.lower().replace("-", "_").replace(".", "_")
+    stem_norm = re.sub(r"_{2,}", "_", stem_norm).strip("_")
+    if not stem_norm:
+        raise ValueError("target_name is invalid")
+    if not stem_norm.startswith("stock_"):
+        stem_norm = f"stock_{stem_norm}"
+    if len(stem_norm) > _MODEL_LAB_SPEC_STEM_MAX_LEN:
+        raise ValueError(_MODEL_LAB_SPEC_NAME_HINT)
+    normalized = f"{stem_norm}{suffix}"
+    if not _MODEL_LAB_SPEC_NAME_PATTERN.match(normalized):
+        raise ValueError(_MODEL_LAB_SPEC_NAME_HINT)
+    return normalized
+
+
 def _path_parts(path: str) -> list[str]:
     return [unquote(part) for part in path.split("/") if part]
 
@@ -2717,6 +5451,21 @@ def _safe_limit(value: str, *, default: int) -> int:
 
 def _utc_now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def _safe_rmtree(path_text: str | None) -> bool:
+    if not path_text:
+        return False
+    import shutil
+
+    try:
+        target = Path(path_text)
+        if target.exists() and target.is_dir():
+            shutil.rmtree(target)
+            return True
+    except OSError:
+        return False
+    return False
 
 
 def _file_mtime_ns(path_text: str | None) -> int:
@@ -2781,6 +5530,8 @@ def _md_render_js() -> str:
 # Cached inline HTML template cache path.
 _INDEX_HTML_TEMPLATE_PATH = Path(__file__).with_name("web_unified_index.html")
 _INDEX_HTML_TEMPLATE: str | None = None
+_MODEL_LAB_HTML_TEMPLATE_PATH = Path(__file__).with_name("web_model_lab.html")
+_MODEL_LAB_HTML_TEMPLATE: str | None = None
 
 
 def _load_index_html_template() -> str:
@@ -2797,3 +5548,14 @@ def _index_html() -> str:
 
 def _index_html_raw() -> str:
     return _load_index_html_template()
+
+
+def _load_model_lab_html_template() -> str:
+    global _MODEL_LAB_HTML_TEMPLATE
+    if _MODEL_LAB_HTML_TEMPLATE is None:
+        _MODEL_LAB_HTML_TEMPLATE = _MODEL_LAB_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return _MODEL_LAB_HTML_TEMPLATE
+
+
+def _model_lab_html() -> str:
+    return _load_model_lab_html_template().replace("@@MD_RENDER_JS@@", _md_render_js())

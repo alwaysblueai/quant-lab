@@ -352,7 +352,7 @@ def test_prepare_spec_for_data_source_reuses_cached_inputs(tmp_path: Path, monke
         data_asset_limit=10,
         tushare_token=None,
         render_report=False,
-        output_root_dir="dist/web_ui_runs",
+        output_root_dir=str(tmp_path / "runs"),
     )
 
     cache_root = tmp_path / "source_cache"
@@ -426,7 +426,7 @@ def test_prepare_spec_for_data_source_uses_tushare_slice_preset_defaults(
         data_asset_limit=50,
         tushare_token="token_x",
         render_report=False,
-        output_root_dir="dist/web_ui_runs",
+        output_root_dir=str(tmp_path / "runs"),
         data_slice_preset="robust",
     )
     rewritten = _prepare_spec_for_data_source(
@@ -855,7 +855,7 @@ def test_frontend_batch_parallel_config_prefers_process_mode() -> None:
     assert config.factors_per_worker == 2
 
 
-def test_web_run_store_batches_frontend_runs(
+def test_web_run_store_isolates_frontend_run_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _WebRunStore(
@@ -863,56 +863,13 @@ def test_web_run_store_batches_frontend_runs(
         upload_root=tmp_path / "uploads",
         default_output_root=tmp_path / "runs",
     )
-    batch_calls: list[list[str]] = []
-    batch_modes: list[str] = []
     single_calls: list[str] = []
-
-    def _fake_batch(
-        specs_or_paths,
-        *,
-        output_root_dir=None,
-        evaluation_profile="default_research",
-        vault_export_mode="skip",
-        batch_parallel_config=None,
-        reuse_input_bundle=True,
-        **kwargs,
-    ):
-        del output_root_dir, evaluation_profile, vault_export_mode, kwargs
-        batch_calls.append([str(item) for item in specs_or_paths])
-        batch_modes.append(
-            batch_parallel_config.mode if batch_parallel_config is not None else "none"
-        )
-        assert reuse_input_bundle is True
-        results = []
-        for spec_path in specs_or_paths:
-            spec_obj = Path(spec_path)
-            run_dir = tmp_path / "batch_results" / spec_obj.stem
-            run_dir.mkdir(parents=True, exist_ok=True)
-            metrics_path = run_dir / "metrics.json"
-            metrics_path.write_text(
-                json.dumps(
-                    {
-                        "metrics": {
-                            "factor_verdict": "Pass",
-                            "mean_ic": 0.12,
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            results.append(
-                SimpleNamespace(
-                    output_dir=run_dir,
-                    artifact_paths={"metrics": metrics_path},
-                )
-            )
-        return results
+    single_output_roots: list[Path] = []
 
     def _fake_single(*args, **kwargs):
-        del kwargs
         spec_obj = Path(args[0])
         single_calls.append(str(spec_obj))
+        single_output_roots.append(Path(str(kwargs["output_root_dir"])))
         run_dir = tmp_path / "single_results" / spec_obj.stem
         run_dir.mkdir(parents=True, exist_ok=True)
         metrics_path = run_dir / "metrics.json"
@@ -926,7 +883,6 @@ def test_web_run_store_batches_frontend_runs(
             artifact_paths={"metrics": metrics_path},
         )
 
-    monkeypatch.setattr(web_ui, "run_single_factor_cases", _fake_batch)
     monkeypatch.setattr(web_ui, "run_single_factor_case", _fake_single)
 
     spec1 = _write(
@@ -949,7 +905,7 @@ def test_web_run_store_batches_frontend_runs(
         data_asset_limit=None,
         tushare_token=None,
         render_report=False,
-        output_root_dir="dist/web_ui_runs",
+        output_root_dir=str(tmp_path / "runs"),
     )
     task2 = _RunTask(
         run_id="run_2",
@@ -962,7 +918,7 @@ def test_web_run_store_batches_frontend_runs(
         data_asset_limit=None,
         tushare_token=None,
         render_report=False,
-        output_root_dir="dist/web_ui_runs",
+        output_root_dir=str(tmp_path / "runs"),
     )
 
     with store._lock:
@@ -973,7 +929,7 @@ def test_web_run_store_batches_frontend_runs(
             evaluation_profile="exploratory_screening",
             data_source="manual",
             render_report=False,
-            output_root_dir="dist/web_ui_runs",
+            output_root_dir=str(tmp_path / "runs"),
             spec_path=str(spec1),
         )
         store._records["run_2"] = _WebRunRecord(
@@ -983,7 +939,7 @@ def test_web_run_store_batches_frontend_runs(
             evaluation_profile="exploratory_screening",
             data_source="manual",
             render_report=False,
-            output_root_dir="dist/web_ui_runs",
+            output_root_dir=str(tmp_path / "runs"),
             spec_path=str(spec2),
         )
         store._tasks["run_1"] = task1
@@ -993,7 +949,8 @@ def test_web_run_store_batches_frontend_runs(
 
     assert store.get("run_1") is not None
     assert store.get("run_2") is not None
-    assert len(batch_calls) == 1
-    assert batch_modes == ["process"]
-    assert len(batch_calls[0]) == 2
-    assert single_calls == []
+    assert single_calls == [str(spec1), str(spec2)]
+    assert single_output_roots == [
+        (tmp_path / "runs" / "_web_runs" / "run_1").resolve(),
+        (tmp_path / "runs" / "_web_runs" / "run_2").resolve(),
+    ]

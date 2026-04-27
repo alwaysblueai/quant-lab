@@ -1621,6 +1621,337 @@
       color: #ffffff;
     }
     .idea-prompt-hint { font-style: italic; color: var(--muted); font-size: 15px; margin: -4px 0 16px 0; }
+    .idea-textarea {
+      min-height: 180px;
+      margin-bottom: 0;
+    }
+    .idea-stage-panel {
+      margin-top: 14px;
+      background: var(--bg);
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .idea-stage-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .idea-stage-title {
+      font-weight: 700;
+      color: var(--ink);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .idea-stage-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .idea-stage-item input {
+      width: auto;
+      margin: 0;
+    }
+    .idea-stage-note {
+      font-size: 11px;
+      line-height: 1.4;
+      flex: 1;
+      min-width: 220px;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
+      margin: 0;
+    }
+    .idea-stage-row.idea-stage-toggles {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .idea-toolbar {
+      margin-top: 16px;
+      margin-bottom: 0;
+      align-items: center;
+    }
+    .idea-flash {
+      min-height: 18px;
+      margin-top: 8px;
+      font-size: 12px;
+      display: none;
+    }
+    .idea-results-wrap {
+      display: none;
+      margin-top: 16px;
+      background: var(--bg);
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .idea-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+    .idea-section-title {
+      display: block;
+      font-size: 15px;
+      color: var(--brand-dark);
+      margin-bottom: 8px;
+    }
+    .idea-session-list {
+      display: grid;
+      gap: 6px;
+      max-height: 460px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .idea-session-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 7px 10px;
+      cursor: pointer;
+      display: grid;
+      gap: 3px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .idea-session-item:hover {
+      border-color: var(--line-hover);
+      background: var(--panel);
+    }
+    .idea-session-item.active {
+      border-color: var(--brand);
+      box-shadow: inset 0 0 0 1px var(--brand);
+    }
+    .idea-card-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .idea-card-title {
+      font-size: 15px;
+      color: var(--ink);
+    }
+    .idea-reason-chip {
+      display: inline-block;
+      background: var(--chip-bg, var(--brand-soft));
+      color: var(--chip-fg, var(--brand-dark));
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 12px;
+      margin-right: 3px;
+    }
+    .idea-card-meta {
+      margin-top: 2px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .idea-type-chip {
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .idea-lifecycle-chip {
+      font-size: 13px;
+    }
+    .idea-meta-chip {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .idea-card-summary {
+      font-size: 14px;
+      color: var(--ink);
+      margin-top: 2px;
+    }
+    .idea-card-snippet {
+      margin-top: 2px;
+    }
+    .idea-card-snippet summary {
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .idea-card-snippet div {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .idea-summary-pane {
+      min-width: 0;
+      display: none;
+    }
+    .idea-tab-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .idea-tab-btn {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      padding: 4px 10px;
+      font-size: 12px;
+      line-height: 1.3;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .idea-tab-btn.active {
+      opacity: 1;
+      border-color: var(--brand);
+      box-shadow: inset 0 0 0 1px var(--brand);
+      color: var(--brand-dark);
+      font-weight: 700;
+    }
+    .idea-summary {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+      max-height: 520px;
+      overflow: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .idea-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .idea-preview-title {
+      font-size: 15px;
+      color: var(--brand-dark);
+    }
+    .idea-preview-body {
+      font-size: 15px;
+      max-height: 600px;
+      overflow: auto;
+      padding: 8px 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .idea-placeholder {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 20px 0;
+      text-align: center;
+    }
+    .idea-prompt-details {
+      margin-top: 10px;
+    }
+    .idea-prompt-summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--brand);
+      font-size: 15px;
+    }
+    .idea-prompt {
+      max-height: 320px;
+      overflow: auto;
+      margin-top: 6px;
+      font-size: 14px;
+    }
+    .idea-record-panel {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .idea-record-panel textarea {
+      min-height: 140px;
+      resize: vertical;
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .idea-record-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .idea-record-session {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .idea-record-status {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .idea-lint-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--muted);
+    }
+    .idea-lint-pill.ok {
+      background: var(--ok-soft);
+      border-color: rgba(22, 163, 74, 0.22);
+      color: var(--ok);
+    }
+    .idea-lint-pill.error {
+      background: var(--bad-soft);
+      border-color: rgba(220, 38, 38, 0.22);
+      color: var(--error);
+    }
+    .idea-lint-pill.warning {
+      background: var(--warn-soft);
+      border-color: rgba(202, 138, 4, 0.22);
+      color: var(--warn);
+    }
+    .idea-lint-list {
+      width: 100%;
+      display: grid;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .idea-lint-item {
+      padding: 5px 7px;
+      border-left: 3px solid var(--line);
+      border-radius: 0 6px 6px 0;
+      background: var(--bg);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .idea-lint-item.error {
+      border-left-color: var(--error);
+      background: var(--bad-soft);
+    }
+    .idea-lint-item.warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
     .bridge-layout {
       display: grid;
       grid-template-columns: minmax(0, 7fr) minmax(var(--bridge-snapshot-min), 3fr);
@@ -1882,6 +2213,10 @@
     .section-tag { color: var(--muted); background: var(--bg); }
     .idea-prompt-hint { color: var(--muted); }
     @media (max-width: 56.25rem) {
+      .inspiration-workspace {
+        flex-direction: column;
+        gap: 12px;
+      }
       .bridge-layout {
         grid-template-columns: 1fr;
         gap: 16px;
@@ -1899,6 +2234,13 @@
       }
       .explore-mode-key {
         width: 48px;
+      }
+      .idea-layout {
+        grid-template-columns: 1fr;
+      }
+      .idea-session-list,
+      .idea-summary {
+        max-height: 360px;
       }
       .workspace-dual {
         grid-template-columns: 1fr;
@@ -1945,6 +2287,7 @@
         <h2>快捷操作</h2>
         <button class="ghost small sidebar-action-btn" id="refreshProjectBtn">刷新上下文包</button>
         <button class="ghost small sidebar-action-btn" id="btnOpenCreateProject">新建项目</button>
+        <button class="ghost small sidebar-action-btn" id="btnOpenModelLab" onclick="window.location.href='/model-lab'">打开 Model Lab</button>
         <div id="sidebarStatus" style="margin-top:6px;font-size: 13px;color:var(--muted);min-height:16px"></div>
       </div>
     </aside>
@@ -2146,16 +2489,16 @@
             <!-- Step 1: Idea Lab -->
             <div class="panel panel-inspiration">
               <span class="section-tag">Step 1: Project Hypothesis</span>
-              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器</h2>
+              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器 / Model Idea Explore</h2>
               <p class="idea-prompt-hint">先把模糊假设压成当前研究方向，再决定是否值得进入 current case</p>
               
               <div class="inspiration-workspace">
                 <div class="inspiration-input-area">
-                  <textarea id="exploreIdea" style="min-height:180px" placeholder="例：我想基于非对称的波动率建立一个反转策略…"></textarea>
+                  <textarea id="exploreIdea" class="idea-textarea" placeholder="例：我想基于非对称的波动率建立一个反转策略…"></textarea>
                 </div>
                 
                 <div class="explore-mode-panel">
-                  <div style="background:var(--bg);padding:16px;border-radius:12px;border:1px solid var(--line)">
+                  <div class="idea-summary">
                     <label class="explore-mode-option">
                       <input type="radio" name="exploreMode" value="start" checked>
                       <span class="explore-mode-key">Kickoff</span>
@@ -2186,39 +2529,96 @@
                 </div>
               </div>
               
-              <div class="toolbar" style="margin-top:16px">
+              <div class="idea-stage-panel">
+                <div class="idea-stage-row">
+                  <span class="idea-stage-title">研究阶段</span>
+                  <label class="idea-stage-item">
+                    <input type="radio" name="exploreStage" value="mechanism_discovery" checked>
+                    <span>Mechanism Discovery</span>
+                  </label>
+                  <label class="idea-stage-item">
+                    <input type="radio" name="exploreStage" value="signal_mapping">
+                    <span>Signal Mapping</span>
+                  </label>
+                  <label class="idea-stage-item">
+                    <input type="radio" name="exploreStage" value="validation_kill_tests">
+                    <span>Validation &amp; Kill Tests</span>
+                  </label>
+                  <span class="idea-stage-note muted">
+                    Mode 控制约束强度；Stage 控制研究动作。同一标签在三个 stage 角色不同：护栏 / 控制项 / 审计靶子。
+                  </span>
+                </div>
+              </div>
+
+              <div class="idea-stage-row idea-stage-toggles">
+                <label class="idea-stage-item">
+                  <input type="checkbox" id="exploreInjectDrift" checked>
+                  <span>注入最近 lint 漂移（需 workspace）</span>
+                </label>
+                <label class="idea-stage-item">
+                  <input type="checkbox" id="explorePersistSession" checked>
+                  <span>持久化本次 session（用于回灌）</span>
+                </label>
+              </div>
+
+              <div class="toolbar idea-toolbar">
                 <button class="action" id="btnExploreIdea">启动探索 (Explore)</button>
                 <button class="ghost small accent" id="btnCopyExplorePrompt" style="display:none">复制 AI 上下文</button>
+                <button class="ghost small" id="btnExploreApplyProject">应用到项目假设</button>
+                <button class="ghost small" id="btnExploreFillPreflight">填入预检</button>
+                <button class="ghost small" id="btnExploreGenerateFactorDraft">生成 Factor Draft</button>
+                <button class="ghost small" id="btnRefreshExploreSessions">刷新会话</button>
               </div>
-              <div id="exploreResults" style="display:none;margin-top:16px;background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--line)">
-                <div class="row" style="align-items:flex-start;gap:16px">
-                  <div style="flex:1;min-width:0">
-                    <strong style="font-size: 15px;color:var(--brand-dark)">关联知识卡片</strong>
-                    <div id="exploreCardList" style="margin-top:8px"></div>
+              <div class="idea-stage-panel">
+                <div class="idea-record-toolbar">
+                  <strong class="idea-section-title" style="margin:0">历史会话</strong>
+                  <span class="muted" style="font-size:12px">点击会话可恢复 prompt / response / lint，用作下一阶段 parent session。</span>
+                </div>
+                <div id="exploreSessionList" class="idea-session-list" style="margin-top:8px">
+                  <div class="muted">暂无已保存会话。</div>
+                </div>
+              </div>
+              <div id="exploreStageHint" class="idea-flash muted"></div>
+              <div id="exploreResults" class="idea-results-wrap">
+                <div class="idea-layout">
+                  <div>
+                    <strong class="idea-section-title">关联知识卡片</strong>
+                    <div id="exploreCardList" class="idea-session-list"></div>
                   </div>
-                  <div id="exploreRightPane" style="flex:1;min-width:0;display:none">
-                    <div id="exploreRightTabs" style="display:flex;gap:4px;margin-bottom:8px">
-                      <button id="exploreTabCard" class="ghost small" style="opacity:0.5" onclick="switchExploreRightTab('card')">卡片内容</button>
-                      <button id="exploreTabConstraint" class="ghost small" style="opacity:0.5;display:none" onclick="switchExploreRightTab('constraint')">图谱约束</button>
+                  <div id="exploreRightPane" class="idea-summary-pane">
+                    <div id="exploreRightTabs" class="idea-tab-row">
+                      <button id="exploreTabCard" class="idea-tab-btn" onclick="switchExploreRightTab('card')">卡片内容</button>
+                      <button id="exploreTabConstraint" class="idea-tab-btn" style="display:none" onclick="switchExploreRightTab('constraint')">图谱约束</button>
                     </div>
                     <div id="exploreCardPreview" style="display:none">
-                      <div id="exploreCardPreviewHeader" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                        <strong id="exploreCardPreviewTitle" style="font-size: 15px;color:var(--brand-dark)"></strong>
+                      <div id="exploreCardPreviewHeader" class="idea-preview-header">
+                        <strong id="exploreCardPreviewTitle" class="idea-preview-title"></strong>
                         <button class="ghost small accent" onclick="$('cardViewName').value=$('exploreCardPreviewTitle').dataset.path||'';$('btnReadCard').click();switchView('view-knowledge')">在知识库中打开</button>
                       </div>
-                      <div id="exploreCardPreviewBody" style="font-size: 15px;max-height:600px;overflow:auto;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px"></div>
+                      <div id="exploreCardPreviewBody" class="idea-preview-body"></div>
                     </div>
                     <div id="exploreConstraintBox" style="display:none">
-                      <strong style="font-size: 15px;color:var(--brand-dark)">图谱约束分析</strong>
+                      <strong class="idea-section-title">图谱约束分析</strong>
                       <div id="exploreConstraintReport" style="margin-top:8px;font-size: 15px"></div>
                     </div>
-                    <div id="exploreRightPlaceholder" style="color:var(--muted);font-size: 14px;padding:20px 0;text-align:center">← 点击左侧卡片查看内容</div>
+                    <div id="exploreRightPlaceholder" class="idea-placeholder">← 点击左侧卡片查看内容</div>
                   </div>
                 </div>
-                <details style="margin-top:10px">
-                  <summary style="cursor:pointer;font-weight:bold;color:var(--brand);font-size: 15px">GPT 上下文 Prompt（点击展开）</summary>
-                  <pre id="explorePromptBox" style="max-height:320px;overflow:auto;margin-top:6px;font-size: 14px"></pre>
+                <details class="idea-prompt-details">
+                  <summary class="idea-prompt-summary">GPT 上下文 Prompt（点击展开）</summary>
+                  <pre id="explorePromptBox" class="idea-prompt"></pre>
                 </details>
+                <div id="exploreRecordPanel" class="idea-record-panel">
+                  <strong class="idea-section-title">响应回灌</strong>
+                  <textarea id="exploreResponseText" placeholder="把外部 LLM 返回的研究输出粘贴到这里，用于 lint、结构化切片和下一阶段串联。"></textarea>
+                  <div class="idea-record-toolbar">
+                    <button class="ghost small accent" id="btnRecordExploreResponse" disabled>回灌响应</button>
+                    <span id="exploreRecordSession" class="idea-record-session">尚未生成可回灌 session</span>
+                  </div>
+                  <div id="exploreRecordStatus" class="idea-record-status">
+                    生成 prompt 后，可以把 LLM 响应粘贴回来。
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -2271,7 +2671,7 @@
                     <label style="margin-top:8px">因子描述</label>
                     <input id="cfDescription" placeholder="非对称波动率反转因子 — 下行波动高于上行时做多反转" />
                     <label style="margin-top:8px">因子代码 (Python)</label>
-                    <textarea id="cfCode" style="min-height:260px;font-family:var(--mono);font-size: 13px;line-height:1.5;tab-size:4;white-space:pre;overflow-wrap:normal;overflow-x:auto" placeholder="def builder(prices, *, window=20, skip_recent=5, min_periods=None, **kwargs):
+                    <textarea id="cfCode" style="min-height:1040px;font-family:var(--mono);font-size: 13px;line-height:1.5;tab-size:4;white-space:pre;overflow-wrap:normal;overflow-x:auto" placeholder="def builder(prices, *, window=20, skip_recent=5, min_periods=None, **kwargs):
     import numpy as np
     import pandas as pd
 
@@ -2348,9 +2748,16 @@
                   <div class="toolbar" style="margin-bottom:12px">
                     <button class="ghost small" id="btnRefreshRuns">REFRESH_QUEUE</button>
                     <button class="ghost small" id="btnAutoRefresh">AUTO_REFRESH: 5s</button>
+                    <button class="ghost small" id="btnCompareRuns">COMPARE_SELECTED_RUNS</button>
+                    <button class="ghost small" id="btnClearRunCompare">CLEAR_SELECTION</button>
+                    <span id="runCompareSelectedCount" class="muted" style="align-self:center;font-size:12px;">已选 0 个 run</span>
                   </div>
                   <p class="muted" style="margin:0 0 16px 0;font-size: 14px">状态：queued → running → succeeded / failed。成功后点“刷新结果”更新 Latest Result 与 Decision Log。</p>
                   <div id="runTable" style="margin-bottom:16px;overflow-x:auto"></div>
+                  <div class="hub-section-title">Run Compare</div>
+                  <div id="runCompareBox" class="md-box" style="margin-bottom:16px;background:var(--bg);color:var(--ink);padding:12px;border-radius:8px;font-size: 14px;border:1px solid var(--line)">
+                    <span class="muted">勾选至少 2 个已完成 run，然后点击 COMPARE_SELECTED_RUNS。</span>
+                  </div>
                   <div class="hub-section-title">项目级诊断</div>
                   <div class="toolbar" style="margin-bottom:12px">
                     <button class="ghost small" id="btnRefreshProjectDiagnostics">REFRESH_PROJECT_DIAGNOSTICS</button>
@@ -2596,8 +3003,13 @@
       overviewSnapshotInFlight: new Map(),
       csvParseCache: new Map(),
       artifactRawText: "",
+      runCompareIds: [],
       categories: [],          // [{key, display_name_zh, form_fields, ...}]
       currentCategoryKey: "factor_recipe",
+      exploreSessionId: "",
+      selectedExploreSessionId: "",
+      exploreSessions: [],
+      exploreSessionPayload: null,
     };
 
     const RUNS_AUTO_REFRESH_ACTIVE_MS = 3000;
@@ -2695,9 +3107,10 @@
     }
 
     // ========== API helper ==========
-    async function api(path, method = "GET", body = null) {
+    async function api(path, method = "GET", body = null, options = {}) {
       const controller = new AbortController();
-      const tId = setTimeout(() => controller.abort(), 15000);
+      const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+      const tId = setTimeout(() => controller.abort(), timeoutMs);
       const opts = { method, headers: {}, signal: controller.signal };
       if (body !== null) {
         opts.headers["Content-Type"] = "application/json";
@@ -3339,16 +3752,22 @@
     function renderRunTable(runs) {
       if (!runs.length) {
         $("runTable").innerHTML = "<div class='muted'>暂无运行记录。</div>";
+        state.runCompareIds = [];
+        updateRunCompareSelectedCount();
         return;
       }
+      const runIdSet = new Set(runs.map((item) => String(item.run_id || "")));
+      state.runCompareIds = state.runCompareIds.filter((runId) => runIdSet.has(runId));
       $("runTable").innerHTML = `<div class="run-table-wrap"><table class="run-table">
-        <thead><tr><th>run_id</th><th>case</th><th>profile</th><th>status</th><th>metrics</th><th>artifacts</th><th>actions</th></tr></thead>
+        <thead><tr><th>compare</th><th>run_id</th><th>case</th><th>profile</th><th>status</th><th>metrics</th><th>artifacts</th><th>actions</th></tr></thead>
         <tbody>${runs.map(r => {
           const shortId = r.run_id.slice(0, 10);
           const metricsHtml = renderMetricsSummary(r.summary || {}, r, { compact: true });
           const artifactHtml = renderArtifactLinks(r);
           const progressHtml = renderRunProgress(r);
           const eventTrailHtml = renderRunEventTrail(r);
+          const canCompare = String(r.status || "") === "succeeded";
+          const checked = canCompare && state.runCompareIds.includes(String(r.run_id || ""));
           const alreadySummarized = Boolean(r.summarize_draft_path);
           const errorText = r.status === "failed"
             ? (r.error || "运行失败，但后端没有返回详细错误信息。")
@@ -3359,7 +3778,7 @@
           const failedStage = r.progress_message || "未知阶段";
           const errorRow = r.status === "failed"
             ? `<tr>
-                <td colspan="7" style="padding:8px 10px 12px 10px">
+                <td colspan="8" style="padding:8px 10px 12px 10px">
                   <div class="run-error-box">
                     <strong>Run Error</strong>
                     <div class="run-error-summary">
@@ -3377,6 +3796,16 @@
               </tr>`
             : "";
           return `<tr>
+            <td style="text-align:center;vertical-align:top;padding-top:10px;">
+              <input
+                type="checkbox"
+                data-action="toggleRunCompare"
+                data-run-id="${escAttr(r.run_id)}"
+                ${checked ? "checked" : ""}
+                ${canCompare ? "" : "disabled"}
+                title="${canCompare ? "选择用于对比" : "仅支持对比已完成 run"}"
+              />
+            </td>
             <td class="run-id-cell"><code>${shortId}</code></td>
             <td class="run-case-cell"><code>${r.case_name}</code></td>
             <td class="muted run-profile-cell">${r.evaluation_profile}</td>
@@ -3399,6 +3828,506 @@
             </td>
           </tr>${errorRow}`;
         }).join("")}</tbody></table></div>`;
+      updateRunCompareSelectedCount();
+    }
+
+    function updateRunCompareSelectedCount() {
+      const el = $("runCompareSelectedCount");
+      if (!el) return;
+      const count = Array.isArray(state.runCompareIds) ? state.runCompareIds.length : 0;
+      el.textContent = `已选 ${count} 个 run`;
+    }
+
+    const RUN_COMPARE_MAX_RUNS = 8;
+    const RUN_COMPARE_COLORS = [
+      "#4477AA", "#EE6677", "#228833", "#CCBB44",
+      "#66CCEE", "#AA3377", "#BBBBBB", "#EE9944",
+    ];
+
+    function resetRunComparePanel() {
+      const box = $("runCompareBox");
+      if (!box) return;
+      box.innerHTML = "<span class='muted'>勾选至少 2 个已完成 run，然后点击 COMPARE_SELECTED_RUNS。</span>";
+    }
+
+    function setRunCompareSelection(runId, checked) {
+      const id = String(runId || "").trim();
+      if (!id) return false;
+      const selected = new Set(Array.isArray(state.runCompareIds) ? state.runCompareIds : []);
+      if (checked) {
+        if (!selected.has(id) && selected.size >= RUN_COMPARE_MAX_RUNS) {
+          sidebarMsg(`最多同时对比 ${RUN_COMPARE_MAX_RUNS} 个 run`, true);
+          return false;
+        }
+        selected.add(id);
+      } else {
+        selected.delete(id);
+      }
+      state.runCompareIds = Array.from(selected);
+      updateRunCompareSelectedCount();
+      return true;
+    }
+
+    function clearRunCompareSelection({ resetPanel = false } = {}) {
+      state.runCompareIds = [];
+      document.querySelectorAll('input[data-action="toggleRunCompare"]').forEach((node) => {
+        if (node instanceof HTMLInputElement) node.checked = false;
+      });
+      updateRunCompareSelectedCount();
+      if (resetPanel) resetRunComparePanel();
+    }
+
+    function normalizeComparePath(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      return text.replace(/\\\\+/g, "/").replace(/\/+/g, "/");
+    }
+
+    function normalizeCompareToken(value) {
+      return String(value || "").trim().toLowerCase();
+    }
+
+    function readNestedValue(source, path) {
+      const keys = Array.isArray(path) ? path : [];
+      let cursor = source;
+      for (const key of keys) {
+        if (!cursor || typeof cursor !== "object") return null;
+        cursor = cursor[key];
+      }
+      return cursor === undefined ? null : cursor;
+    }
+
+    async function loadRunManifestPayload(run) {
+      if (!run || !run.run_id) return {};
+      try {
+        const artifact = await fetchArtifactText(run.run_id, "run_manifest");
+        const parsed = JSON.parse(String(artifact && artifact.text ? artifact.text : "{}"));
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function buildRunCompareContract(run, manifest) {
+      const summary = run && run.summary && typeof run.summary === "object" ? run.summary : {};
+      const profileFromSummary = String(summary.research_evaluation_profile || "").trim();
+      const manifestObj = manifest && typeof manifest === "object" ? manifest : {};
+      const spec = manifestObj.spec && typeof manifestObj.spec === "object" ? manifestObj.spec : {};
+      const inputs = manifestObj.inputs && typeof manifestObj.inputs === "object" ? manifestObj.inputs : {};
+      return {
+        run_id: String(run && run.run_id ? run.run_id : ""),
+        case_name: String(run && run.case_name ? run.case_name : ""),
+        status: String(run && run.status ? run.status : ""),
+        workflow: String(run && run.workflow ? run.workflow : ""),
+        evaluation_profile: String(run && run.evaluation_profile ? run.evaluation_profile : profileFromSummary),
+        target_horizon: toFiniteNumber(readNestedValue(spec, ["target", "horizon"])),
+        rebalance_frequency: String(readNestedValue(spec, ["rebalance_frequency"]) || ""),
+        prices_path: normalizeComparePath(readNestedValue(inputs, ["prices_path"])),
+        universe_path: normalizeComparePath(
+          readNestedValue(inputs, ["universe_path"]) || readNestedValue(spec, ["universe", "path"]) || "",
+        ),
+      };
+    }
+
+    function collectDistinctNonEmpty(values, normalizer = (v) => String(v || "").trim()) {
+      const seen = new Set();
+      for (const value of values || []) {
+        const normalized = normalizer(value);
+        if (!normalized) continue;
+        seen.add(normalized);
+      }
+      return Array.from(seen.values());
+    }
+
+    function validateRunCompareContracts(contracts) {
+      const rows = Array.isArray(contracts) ? contracts : [];
+      const mismatches = [];
+      const workflowDistinct = collectDistinctNonEmpty(rows.map((item) => item.workflow), normalizeCompareToken);
+      if (workflowDistinct.length > 1) {
+        mismatches.push(`workflow 不一致：${workflowDistinct.join(" / ")}`);
+      }
+      const profileDistinct = collectDistinctNonEmpty(rows.map((item) => item.evaluation_profile), normalizeCompareToken);
+      if (profileDistinct.length > 1) {
+        mismatches.push(`evaluation_profile 不一致：${profileDistinct.join(" / ")}`);
+      }
+      const horizonDistinct = collectDistinctNonEmpty(
+        rows.map((item) => item.target_horizon),
+        (value) => {
+          const n = toFiniteNumber(value);
+          return n === null ? "" : String(Number(n));
+        },
+      );
+      if (horizonDistinct.length > 1) {
+        mismatches.push(`target.horizon 不一致：${horizonDistinct.join(" / ")}`);
+      }
+      const rebalanceDistinct = collectDistinctNonEmpty(
+        rows.map((item) => item.rebalance_frequency),
+        normalizeCompareToken,
+      );
+      if (rebalanceDistinct.length > 1) {
+        mismatches.push(`rebalance_frequency 不一致：${rebalanceDistinct.join(" / ")}`);
+      }
+      const pricesDistinct = collectDistinctNonEmpty(rows.map((item) => item.prices_path), normalizeComparePath);
+      if (pricesDistinct.length > 1) {
+        mismatches.push("prices_path 不一致（数据窗口或数据源不同）");
+      }
+      const universeDistinct = collectDistinctNonEmpty(rows.map((item) => item.universe_path), normalizeComparePath);
+      if (universeDistinct.length > 1) {
+        mismatches.push("universe.path 不一致（选股域不同）");
+      }
+      return {
+        ok: mismatches.length === 0,
+        mismatches,
+      };
+    }
+
+    function extractSeriesFromRows(rows, valueKeys) {
+      const out = [];
+      const source = Array.isArray(rows) ? rows : [];
+      for (const row of source) {
+        if (!row || typeof row !== "object") continue;
+        const date = normalizeChartDate(row.date || row.score_date || row.trade_date || row.dt || "");
+        if (!date) continue;
+        let value = null;
+        for (const key of valueKeys) {
+          value = toFiniteNumber(row[key]);
+          if (value !== null) break;
+        }
+        if (value === null) continue;
+        out.push({ date, value: Number(value) });
+      }
+      out.sort((a, b) => {
+        const da = parseAxisDate(a.date);
+        const db = parseAxisDate(b.date);
+        if (da && db) return da - db;
+        return String(a.date).localeCompare(String(b.date));
+      });
+      return out;
+    }
+
+    function extractNavSeries(snapshot) {
+      const backtest = snapshot && snapshot.backtest && typeof snapshot.backtest === "object"
+        ? snapshot.backtest
+        : {};
+      const summary = backtest && backtest.summary && typeof backtest.summary === "object"
+        ? backtest.summary
+        : {};
+      const navPoints = Array.isArray(summary.nav_points) ? summary.nav_points : [];
+      const out = [];
+      for (const item of navPoints) {
+        if (Array.isArray(item) && item.length >= 2) {
+          const date = normalizeChartDate(item[0]);
+          const value = toFiniteNumber(item[1]);
+          if (date && value !== null) out.push({ date, value: Number(value) });
+          continue;
+        }
+        if (item && typeof item === "object") {
+          const date = normalizeChartDate(item.date || item.trade_date || item.dt || "");
+          const value = toFiniteNumber(item.value ?? item.nav ?? item.y);
+          if (date && value !== null) out.push({ date, value: Number(value) });
+        }
+      }
+      out.sort((a, b) => {
+        const da = parseAxisDate(a.date);
+        const db = parseAxisDate(b.date);
+        if (da && db) return da - db;
+        return String(a.date).localeCompare(String(b.date));
+      });
+      return out;
+    }
+
+    function buildRunCompareAxisDates(seriesByRunId, runIds) {
+      const all = new Set();
+      for (const runId of runIds) {
+        const rows = Array.isArray(seriesByRunId[runId]) ? seriesByRunId[runId] : [];
+        for (const row of rows) {
+          const date = String((row && row.date) || "").trim();
+          if (!date) continue;
+          all.add(date);
+        }
+      }
+      const dates = Array.from(all.values());
+      dates.sort((a, b) => {
+        const da = parseAxisDate(a);
+        const db = parseAxisDate(b);
+        if (da && db) return da - db;
+        return String(a).localeCompare(String(b));
+      });
+      return dates;
+    }
+
+    function buildRunCompareChart(title, runIds, labelsByRunId, seriesByRunId, yLabel) {
+      const axisDates = buildRunCompareAxisDates(seriesByRunId, runIds);
+      if (axisDates.length < 2) {
+        return `<div class="artifact-chart-card"><p class="artifact-chart-title">${escHtml(title)}</p><div class="muted">数据不足，无法绘制时序对比。</div></div>`;
+      }
+      const dateIndex = new Map(axisDates.map((date, idx) => [date, idx + 1]));
+      const lines = [];
+      runIds.forEach((runId, idx) => {
+        const rows = Array.isArray(seriesByRunId[runId]) ? seriesByRunId[runId] : [];
+        const points = rows
+          .map((row) => ({ x: dateIndex.get(row.date), y: toFiniteNumber(row.value) }))
+          .filter((point) => Number.isFinite(Number(point.x)) && point.y !== null)
+          .map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+        if (points.length < 2) return;
+        const shortRun = String(runId || "").slice(0, 8);
+        const caseLabel = String((labelsByRunId && labelsByRunId[runId]) || runId || "");
+        lines.push({
+          label: `${caseLabel} (${shortRun})`,
+          color: RUN_COMPARE_COLORS[idx % RUN_COMPARE_COLORS.length],
+          points,
+        });
+      });
+      if (!lines.length) {
+        return `<div class="artifact-chart-card"><p class="artifact-chart-title">${escHtml(title)}</p><div class="muted">没有可用的数值序列。</div></div>`;
+      }
+      const ticks = buildAnnualDateTicks(axisDates);
+      const dateWindow = buildDateWindow(axisDates);
+      const metaText = `${yLabel} · ${dateWindow.label || "日期窗口未知"}`;
+      return renderMultiLineChart(title, lines, [], {
+        xTicks: ticks,
+        metaText,
+      });
+    }
+
+    function buildRunCompareMetricRow(record) {
+      const run = record.run;
+      const summary = run && run.summary && typeof run.summary === "object" ? run.summary : {};
+      const backtest = record.snapshot && record.snapshot.backtest && typeof record.snapshot.backtest === "object"
+        ? record.snapshot.backtest
+        : {};
+      const backtestSummary = backtest && backtest.summary && typeof backtest.summary === "object"
+        ? backtest.summary
+        : {};
+      return {
+        run_id: String(run.run_id || ""),
+        case_name: String(run.case_name || ""),
+        factor_name: String(summary.factor_name || run.case_name || "-"),
+        evaluation_profile: String(run.evaluation_profile || summary.research_evaluation_profile || "-"),
+        mean_rank_ic: toFiniteNumber(summary.mean_rank_ic),
+        ic_ir: toFiniteNumber(summary.rank_ic_ir ?? summary.ic_ir),
+        mean_long_short_return: toFiniteNumber(summary.mean_long_short_return),
+        long_short_sharpe: toFiniteNumber(
+          summary.long_short_sharpe ?? summary.cost_aware_long_short_sharpe ?? summary.long_short_ir,
+        ),
+        max_drawdown: toFiniteNumber(resolveMaxDrawdownForDisplay(summary, backtestSummary)),
+        mean_long_short_turnover: toFiniteNumber(summary.mean_long_short_turnover),
+      };
+    }
+
+    function formatCompareMetricValue(value, mode = "num") {
+      const finite = toFiniteNumber(value);
+      if (finite === null) return "-";
+      if (mode === "pct") return `${(Number(finite) * 100).toFixed(2)}%`;
+      return Number(finite).toFixed(4);
+    }
+
+    function formatCompareDelta(value, baseline, mode = "num") {
+      const v = toFiniteNumber(value);
+      const b = toFiniteNumber(baseline);
+      if (v === null || b === null) return "<span class='muted'>-</span>";
+      const delta = Number(v) - Number(b);
+      const sign = delta > 0 ? "+" : "";
+      const text = mode === "pct"
+        ? `${sign}${(delta * 100).toFixed(2)}%`
+        : `${sign}${delta.toFixed(4)}`;
+      const cls = delta > 0 ? "good" : (delta < 0 ? "bad" : "warn");
+      return `<span class="status ${cls}" style="display:inline-block;min-width:72px;text-align:center">${escHtml(text)}</span>`;
+    }
+
+    function renderRunCompareContractTable(contracts) {
+      const rows = Array.isArray(contracts) ? contracts : [];
+      if (!rows.length) return "<div class='muted'>未读取到 run 合同信息。</div>";
+      return `<div class="artifact-table-wrap" style="margin-top:10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>run_id</th>
+              <th>case</th>
+              <th>workflow</th>
+              <th>profile</th>
+              <th>horizon</th>
+              <th>rebalance</th>
+              <th>prices_path</th>
+              <th>universe_path</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td><code>${escHtml(String(row.run_id || "").slice(0, 10))}</code></td>
+                <td><code>${escHtml(row.case_name || "-")}</code></td>
+                <td>${escHtml(row.workflow || "-")}</td>
+                <td>${escHtml(row.evaluation_profile || "-")}</td>
+                <td>${escHtml(row.target_horizon === null || row.target_horizon === undefined ? "-" : String(row.target_horizon))}</td>
+                <td>${escHtml(row.rebalance_frequency || "-")}</td>
+                <td class="code">${escHtml(row.prices_path || "-")}</td>
+                <td class="code">${escHtml(row.universe_path || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>`;
+    }
+
+    function renderRunCompareOutput(records, contracts, validation) {
+      const box = $("runCompareBox");
+      if (!box) return;
+      const contractTable = renderRunCompareContractTable(contracts);
+      if (!validation.ok) {
+        box.innerHTML = `<div class="run-error-box">
+          <strong>对比已阻断：run 口径不一致</strong>
+          <div class="run-error-summary">
+            ${validation.mismatches.map((item) => `<div>${escHtml(item)}</div>`).join("")}
+          </div>
+          <div class="muted" style="margin-top:6px;">请先保证 workflow / profile / 数据窗口 / 选股域一致，再做同图对比。</div>
+        </div>
+        ${contractTable}`;
+        return;
+      }
+
+      const metricRows = records.map((record) => buildRunCompareMetricRow(record));
+      const baseline = metricRows[0] || null;
+      const metricTable = `<div class="artifact-table-wrap" style="margin-bottom:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>baseline</th>
+              <th>run_id</th>
+              <th>case</th>
+              <th>factor</th>
+              <th>profile</th>
+              <th>Mean RankIC</th>
+              <th>Δ</th>
+              <th>ICIR</th>
+              <th>Δ</th>
+              <th>Mean L/S</th>
+              <th>Δ</th>
+              <th>Sharpe</th>
+              <th>Δ</th>
+              <th>Max DD</th>
+              <th>Δ</th>
+              <th>Turnover</th>
+              <th>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${metricRows.map((row, idx) => `
+              <tr>
+                <td>${idx === 0 ? "<span class='status succeeded'>BASE</span>" : "-"}</td>
+                <td><code>${escHtml(String(row.run_id || "").slice(0, 10))}</code></td>
+                <td><code>${escHtml(row.case_name || "-")}</code></td>
+                <td>${escHtml(row.factor_name || "-")}</td>
+                <td>${escHtml(row.evaluation_profile || "-")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.mean_rank_ic, "num"))}</td>
+                <td>${formatCompareDelta(row.mean_rank_ic, baseline && baseline.mean_rank_ic, "num")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.ic_ir, "num"))}</td>
+                <td>${formatCompareDelta(row.ic_ir, baseline && baseline.ic_ir, "num")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.mean_long_short_return, "pct"))}</td>
+                <td>${formatCompareDelta(row.mean_long_short_return, baseline && baseline.mean_long_short_return, "pct")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.long_short_sharpe, "num"))}</td>
+                <td>${formatCompareDelta(row.long_short_sharpe, baseline && baseline.long_short_sharpe, "num")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.max_drawdown, "pct"))}</td>
+                <td>${formatCompareDelta(row.max_drawdown, baseline && baseline.max_drawdown, "pct")}</td>
+                <td>${escHtml(formatCompareMetricValue(row.mean_long_short_turnover, "pct"))}</td>
+                <td>${formatCompareDelta(row.mean_long_short_turnover, baseline && baseline.mean_long_short_turnover, "pct")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>`;
+
+      const runIds = records.map((record) => String(record.run.run_id || ""));
+      const labelsByRunId = {};
+      records.forEach((record) => {
+        labelsByRunId[String(record.run.run_id || "")] = String(record.run.case_name || record.run.run_id || "");
+      });
+      const rankIcSeriesByRun = {};
+      const turnoverSeriesByRun = {};
+      const navSeriesByRun = {};
+      records.forEach((record) => {
+        const runId = String(record.run.run_id || "");
+        rankIcSeriesByRun[runId] = extractSeriesFromRows(
+          record.snapshot && record.snapshot.icRows,
+          ["rank_ic", "mean_rank_ic", "ic", "value"],
+        );
+        turnoverSeriesByRun[runId] = extractSeriesFromRows(
+          record.snapshot && record.snapshot.turnoverRows,
+          ["turnover", "mean_turnover", "value"],
+        );
+        navSeriesByRun[runId] = extractNavSeries(record.snapshot || {});
+      });
+      const rankIcChart = buildRunCompareChart("Rank IC 时序对比", runIds, labelsByRunId, rankIcSeriesByRun, "Rank IC");
+      const turnoverChart = buildRunCompareChart("换手率时序对比", runIds, labelsByRunId, turnoverSeriesByRun, "Turnover");
+      const navChart = buildRunCompareChart("累计净值时序对比", runIds, labelsByRunId, navSeriesByRun, "NAV");
+
+      box.innerHTML = `<div class="metrics-screening-note" style="margin-bottom:10px;">
+          <strong>对比口径校验</strong>
+          ${escHtml(`通过（run=${records.length}，baseline=${String((baseline && baseline.case_name) || "").trim() || "N/A"}）`)}
+        </div>
+        ${metricTable}
+        <div class="chart-grid">
+          ${rankIcChart}
+          ${turnoverChart}
+          ${navChart}
+        </div>
+        ${contractTable}`;
+    }
+
+    async function compareSelectedRuns() {
+      if (!state.selectedProject) {
+        sidebarMsg("请先选择项目", true);
+        return false;
+      }
+      const selectedIds = Array.isArray(state.runCompareIds) ? state.runCompareIds.slice() : [];
+      if (selectedIds.length < 2) {
+        sidebarMsg("请至少选择 2 个已完成 run", true);
+        return false;
+      }
+      if (selectedIds.length > RUN_COMPARE_MAX_RUNS) {
+        sidebarMsg(`最多支持 ${RUN_COMPARE_MAX_RUNS} 个 run 对比`, true);
+        return false;
+      }
+
+      const records = [];
+      for (const runId of selectedIds) {
+        const run = getRunRecord(runId);
+        if (!run) continue;
+        if (String(run.status || "") !== "succeeded") {
+          sidebarMsg(`run ${String(runId).slice(0, 8)} 不是 succeeded，无法比较`, true);
+          return false;
+        }
+        records.push(run);
+      }
+      if (records.length < 2) {
+        sidebarMsg("有效 run 数不足，无法对比", true);
+        return false;
+      }
+
+      const compareBox = $("runCompareBox");
+      if (compareBox) {
+        compareBox.innerHTML = "<div class='muted'>正在加载 run 对比数据…</div>";
+      }
+      const payloads = await Promise.all(records.map(async (run) => {
+        const [manifest, snapshot] = await Promise.all([
+          loadRunManifestPayload(run),
+          loadRunOverviewSnapshot(run),
+        ]);
+        return {
+          run,
+          manifest,
+          snapshot: snapshot || {},
+        };
+      }));
+      const contracts = payloads.map((item) => buildRunCompareContract(item.run, item.manifest));
+      const validation = validateRunCompareContracts(contracts);
+      renderRunCompareOutput(payloads, contracts, validation);
+      if (validation.ok) {
+        sidebarMsg("Run 对比完成");
+      } else {
+        sidebarMsg("对比已阻断：请先统一关键口径", true);
+      }
+      return validation.ok;
     }
 
     function resolveEvaluationProfileName(summary, run = null) {
@@ -3422,6 +4351,20 @@
       return `${(Number(n) * 100).toFixed(digits)}%`;
     }
 
+    function fmtDrawdownAsPercent(value, digits = 2) {
+      const n = toFiniteNumber(value);
+      if (n === null) return "-";
+      return `${(Math.abs(Number(n)) * 100).toFixed(digits)}%`;
+    }
+
+    function resolveMaxDrawdownForDisplay(summary, backtestSummary = {}) {
+      const fromBacktest = toFiniteNumber(backtestSummary && backtestSummary.max_drawdown);
+      if (fromBacktest !== null) return fromBacktest;
+      const fromSummary = toFiniteNumber(summary && summary.max_drawdown);
+      if (fromSummary !== null) return fromSummary;
+      return toFiniteNumber(summary && summary.ls_max_drawdown);
+    }
+
     function formatCoverageQuickMetric(summary) {
       if (summary.coverage_summary) return String(summary.coverage_summary);
       const nDates = toFiniteNumber(summary.n_dates_used);
@@ -3434,7 +4377,8 @@
       return parts.join(" | ") || "-";
     }
 
-    function buildQuickMetricEntries(summary) {
+    function buildQuickMetricEntries(summary, options = {}) {
+      const backtestSummary = options && options.backtestSummary ? options.backtestSummary : {};
       const costAwareSharpe = summary.cost_aware_long_short_sharpe;
       const costAwareIr = summary.cost_aware_long_short_ir;
       const costAwareFallback = summary.long_short_ir;
@@ -3456,7 +4400,7 @@
         { label: "Coverage", value: formatCoverageQuickMetric(summary) },
         { label: costAwareLabel, value: fmtMetric(costAwareValue) },
         { label: "IC t-stat", value: fmtMetric(summary.ic_t_stat) },
-        { label: "Max Drawdown", value: fmtRatioAsPercent(summary.max_drawdown ?? summary.ls_max_drawdown, 1) },
+        { label: "Max Drawdown", value: fmtDrawdownAsPercent(resolveMaxDrawdownForDisplay(summary, backtestSummary), 1) },
       ];
     }
 
@@ -3487,10 +4431,11 @@
       if (!summary || !Object.keys(summary).length) return "<span class='muted'>-</span>";
       const compact = options && options.compact === true;
       const fast = isFastScreenProfile(summary, run);
+      const backtestSummary = options && options.backtestSummary ? options.backtestSummary : {};
 
       if (compact) {
         if (fast) {
-          const entries = buildQuickMetricEntries(summary).slice(0, 4);
+          const entries = buildQuickMetricEntries(summary, { backtestSummary }).slice(0, 4);
           return `<div class="metrics-screening-kv">${entries.map((entry) => `<span>${escHtml(`${entry.label}: ${entry.value}`)}</span>`).join("")}</div>`;
         }
         const compactPairs = [
@@ -3498,13 +4443,13 @@
           `Mean RankIC ${fmtMetric(summary.mean_rank_ic)}`,
           `RankICIR ${fmtMetric(summary.rank_ic_ir ?? summary.ic_ir)}`,
           `L/S ${fmtMetric(summary.mean_long_short_return)}`,
-          `Max DD ${fmtRatioAsPercent(summary.max_drawdown ?? summary.ls_max_drawdown, 1)}`,
+          `Max DD ${fmtDrawdownAsPercent(resolveMaxDrawdownForDisplay(summary, backtestSummary), 1)}`,
         ];
         return `<div class="metrics-screening-kv">${compactPairs.map((item) => `<span>${escHtml(item)}</span>`).join("")}</div>`;
       }
 
       if (fast) {
-        const entries = buildQuickMetricEntries(summary);
+        const entries = buildQuickMetricEntries(summary, { backtestSummary });
         return `<div class="metrics-screening">
           <div class="metrics-screening-row"><span class="metrics-chip pos">10 项核心指标</span></div>
           <div class="metrics-screening-grid metrics-screening-grid-fast">${entries.map((entry) => `
@@ -3612,6 +4557,12 @@
       viewer.innerHTML = "<div class='muted'>加载因子总览中…</div>";
       try {
         const snapshot = await loadRunOverviewSnapshot(run);
+        const backtest = snapshot.backtest && typeof snapshot.backtest === "object" ? snapshot.backtest : {};
+        const backtestSummary = backtest.summary && typeof backtest.summary === "object" ? backtest.summary : {};
+        const summaryEl = $("metricsRunSummary");
+        if (summaryEl && viewerId === "metricsArtifactViewer" && isFastScreenProfile(run.summary || {}, run)) {
+          summaryEl.innerHTML = renderMetricsSummary(run.summary || {}, run, { backtestSummary });
+        }
         const overviewHtml = renderRunOverviewSection(run, snapshot);
         viewer.innerHTML = overviewHtml || "<span class='muted'>暂无可展示总览。</span>";
       } catch (e) {
@@ -3625,7 +4576,9 @@
       viewer.innerHTML = "<div class='muted'>加载全面评价报告中…</div>";
       try {
         const snapshot = await loadRunOverviewSnapshot(run);
-        const summaryHtml = renderMetricsSummary(run.summary || {}, run);
+        const backtest = snapshot.backtest && typeof snapshot.backtest === "object" ? snapshot.backtest : {};
+        const backtestSummary = backtest.summary && typeof backtest.summary === "object" ? backtest.summary : {};
+        const summaryHtml = renderMetricsSummary(run.summary || {}, run, { backtestSummary });
         const overviewHtml = renderRunOverviewSection(run, snapshot);
         const combinedHtml = [summaryHtml, overviewHtml].filter(Boolean).join("");
         viewer.innerHTML = combinedHtml
@@ -4119,12 +5072,20 @@ ${styleText}
 
       const task = (async () => {
         const res = await fetch(buildArtifactApiUrl(runId, key));
+        const text = await res.text();
         if (!res.ok) {
-          throw new Error(`artifact fetch failed: ${key}`);
+          let detail = "";
+          try {
+            const payload = JSON.parse(text);
+            detail = String(payload && (payload.error || payload.message) || "").trim();
+          } catch (_) {
+            detail = "";
+          }
+          throw new Error(detail || text || `artifact fetch failed: ${key}`);
         }
         const payload = {
           contentType: res.headers.get("Content-Type") || "",
-          text: await res.text(),
+          text,
         };
         boundedMapSet(
           state.artifactTextCache,
@@ -4304,7 +5265,7 @@ ${styleText}
         }],
         navMarker ? [navMarker] : [],
         {
-          xTickLabels: navWindow.start && navWindow.end ? [navWindow.start, navWindow.end] : [],
+          xTicks: buildAnnualDateTicks(navRows.map((row) => row.date)),
           metaText: joinChartMeta([navWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
         },
       );
@@ -4328,24 +5289,26 @@ ${styleText}
         return out;
       })();
       const rankIcChart = rankIcLinePoints.length >= 2
-        ? renderOverviewLineChart(
+        ? renderDualAxisLineChart(
             "RankIC 时序（含累计）",
-            [
-              {
-                label: "RankIC",
-                color: "var(--focus)",
-                points: rankIcLinePoints,
-              },
-              {
-                label: "Cumulative RankIC",
-                color: "var(--brand)",
-                points: cumulativeRankIcPoints,
-              },
-            ],
+            {
+              label: "RankIC",
+              color: "var(--focus)",
+              points: rankIcLinePoints,
+            },
+            {
+              label: "Cumulative RankIC",
+              color: "var(--brand)",
+              points: cumulativeRankIcPoints,
+            },
             rankIcMarker ? [rankIcMarker] : [],
             {
-              xTickLabels: rankIcWindow.start && rankIcWindow.end ? [rankIcWindow.start, rankIcWindow.end] : [],
+              xTicks: buildAnnualDateTicks(icDates),
               metaText: joinChartMeta([rankIcWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
+              leftAxisLabel: "RankIC（左轴）",
+              rightAxisLabel: "累计 RankIC（右轴）",
+              leftTickDigits: 4,
+              rightTickDigits: 2,
             },
           )
         : "";
@@ -4367,7 +5330,7 @@ ${styleText}
         }],
         rollingIcMarker ? [rollingIcMarker] : [],
         {
-          xTickLabels: rollingWindow.start && rollingWindow.end ? [rollingWindow.start, rollingWindow.end] : [],
+          xTicks: buildAnnualDateTicks(rollingDates),
           metaText: joinChartMeta([rollingWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
         },
       );
@@ -4493,7 +5456,7 @@ ${styleText}
             groupSeries.lines,
             [],
             {
-              xTickLabels: groupWindow.start && groupWindow.end ? [groupWindow.start, groupWindow.end] : [],
+              xTicks: buildAnnualDateTicks(groupSeries.orderedDates),
               metaText: joinChartMeta([groupWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
             },
           );
@@ -4522,7 +5485,7 @@ ${styleText}
         }],
         turnoverMarker ? [turnoverMarker] : [],
         {
-          xTickLabels: turnoverWindow.start && turnoverWindow.end ? [turnoverWindow.start, turnoverWindow.end] : [],
+          xTicks: buildAnnualDateTicks(turnoverDates),
           metaText: joinChartMeta([turnoverWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
         },
       );
@@ -4559,7 +5522,7 @@ ${styleText}
             [{ label: "Coverage", color: "var(--focus)", points: coveragePoints }],
             coverageMarker ? [coverageMarker] : [],
             {
-              xTickLabels: coverageWindow.start && coverageWindow.end ? [coverageWindow.start, coverageWindow.end] : [],
+              xTicks: buildAnnualDateTicks(coverageDates),
               metaText: joinChartMeta([coverageWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
             },
           )
@@ -4605,7 +5568,7 @@ ${styleText}
           cumulatedLines,
           [],
           {
-            xTickLabels: groupWindow.start && groupWindow.end ? [groupWindow.start, groupWindow.end] : [],
+            xTicks: buildAnnualDateTicks(groupSeries.orderedDates),
             metaText: joinChartMeta([groupWindow.label, splitDate ? `样本外起点：${splitDate}` : ""]),
           },
         );
@@ -4705,6 +5668,106 @@ ${styleText}
       if (!text) return "";
       const match = text.match(/\\d{4}-\\d{2}-\\d{2}/);
       return match ? match[0] : text;
+    }
+
+    function parseAxisDate(value) {
+      const text = normalizeChartDate(value);
+      if (!text) return null;
+      const normalized = text.replace(/[/.]/g, "-");
+      let match = normalized.match(/(\\d{4})-(\\d{1,2})(?:-(\\d{1,2}))?/);
+      if (!match) {
+        const compactYmd = normalized.match(/(?:^|\\D)(\\d{4})(\\d{2})(\\d{2})(?:\\D|$)/);
+        if (compactYmd) {
+          match = ["", compactYmd[1], compactYmd[2], compactYmd[3]];
+        } else {
+          const compactYm = normalized.match(/(?:^|\\D)(\\d{4})(\\d{2})(?:\\D|$)/);
+          if (compactYm) {
+            match = ["", compactYm[1], compactYm[2], "1"];
+          }
+        }
+      }
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3] || "1");
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+      if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() !== year
+        || parsed.getMonth() !== month - 1
+        || parsed.getDate() !== day
+      ) {
+        return null;
+      }
+      return parsed;
+    }
+
+    function formatAxisDateLabel(date, granularity = "month") {
+      const base = `${date.getFullYear()}.${date.getMonth() + 1}`;
+      return granularity === "day" ? `${base}.${date.getDate()}` : base;
+    }
+
+    function addAxisDays(date, days) {
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+    }
+
+    function addAxisMonths(date, months) {
+      const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+      const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+      target.setDate(Math.min(date.getDate(), lastDay));
+      return target;
+    }
+
+    function chooseAxisDateTickInterval(start, end) {
+      const spanDays = Math.max(0, (end - start) / (86400 * 1000));
+      if (spanDays <= 45) return { days: 7, months: 0, granularity: "day", minLastGapDays: 4 };
+      if (spanDays <= 120) return { days: 14, months: 0, granularity: "day", minLastGapDays: 7 };
+      if (spanDays <= 550) return { days: 0, months: 1, granularity: "month", minLastGapDays: 15 };
+      if (spanDays <= 1095) return { days: 0, months: 3, granularity: "month", minLastGapDays: 45 };
+      if (spanDays <= 2190) return { days: 0, months: 6, granularity: "month", minLastGapDays: 90 };
+      return { days: 0, months: 12, granularity: "month", minLastGapDays: 180 };
+    }
+
+    function addAxisDateTickInterval(date, interval) {
+      if (interval.days > 0) return addAxisDays(date, interval.days);
+      return addAxisMonths(date, Math.max(1, interval.months || 1));
+    }
+
+    function buildAnnualDateTicks(dateRows) {
+      const parsed = (Array.isArray(dateRows) ? dateRows : [])
+        .map((value, idx) => ({ idx, date: parseAxisDate(value) }))
+        .filter((item) => item.date instanceof Date && Number.isFinite(item.date.getTime()));
+      if (parsed.length < 2) return [];
+      const start = parsed[0].date;
+      const end = parsed[parsed.length - 1].date;
+      const interval = chooseAxisDateTickInterval(start, end);
+      const ticks = [];
+      let lastIdx = -1;
+      let target = new Date(start.getTime());
+      const appendFirstOnOrAfter = (targetDate) => {
+        const item = parsed.find((candidate) => candidate.idx > lastIdx && candidate.date >= targetDate);
+        if (!item) return;
+        const label = formatAxisDateLabel(item.date, interval.granularity);
+        if (ticks.length && ticks[ticks.length - 1].label === label) return;
+        ticks.push({ x: item.idx + 1, label, date: item.date });
+        lastIdx = item.idx;
+      };
+      while (target <= end) {
+        appendFirstOnOrAfter(target);
+        target = addAxisDateTickInterval(target, interval);
+      }
+      const last = parsed[parsed.length - 1];
+      const lastGapDays = ticks.length
+        ? (last.date - ticks[ticks.length - 1].date) / (86400 * 1000)
+        : Infinity;
+      if (!ticks.length || (last.idx > lastIdx && lastGapDays >= interval.minLastGapDays)) {
+        ticks.push({ x: last.idx + 1, label: formatAxisDateLabel(last.date, interval.granularity), date: last.date });
+      }
+      if (ticks.length < 2 && last.idx > lastIdx) {
+        ticks.push({ x: last.idx + 1, label: formatAxisDateLabel(last.date, interval.granularity), date: last.date });
+      }
+      return ticks.map((tick) => ({ x: tick.x, label: tick.label }));
     }
 
     function buildDateWindow(dateRows) {
@@ -5050,6 +6113,14 @@ ${styleText}
       const xTickLabels = Array.isArray(options && options.xTickLabels)
         ? options.xTickLabels.map((value) => String(value || "").trim()).slice(0, 2)
         : [];
+      const explicitXTicks = Array.isArray(options && options.xTicks)
+        ? options.xTicks
+            .map((tick) => ({
+              x: toFiniteNumber(tick && tick.x),
+              label: String((tick && tick.label) || "").trim(),
+            }))
+            .filter((tick) => tick.x !== null && tick.label)
+        : [];
       const lineRows = lines.filter((line) => Array.isArray(line.points) && line.points.length >= 2);
       if (!lineRows.length) {
         return `<div class="artifact-chart-card">
@@ -5059,12 +6130,12 @@ ${styleText}
         </div>`;
       }
 
-      const width = 520;
-      const height = 200;
-      const padL = 44;
-      const padR = 16;
-      const padT = 16;
-      const padB = 30;
+      const width = 1040;
+      const height = 400;
+      const padL = 88;
+      const padR = 32;
+      const padT = 32;
+      const padB = 68;
       const innerW = width - padL - padR;
       const innerH = height - padT - padB;
 
@@ -5104,38 +6175,208 @@ ${styleText}
           const x = xPos(Number(marker.x)).toFixed(2);
           const color = escAttr(marker.color || "var(--bad)");
           const label = escHtml(marker.label || "");
-          return `<line x1="${x}" x2="${x}" y1="${padT}" y2="${height - padB}" stroke="${color}" stroke-width="1.2" stroke-dasharray="4 3" />
-            ${label ? `<text x="${x}" y="${padT + 10}" fill="${color}" font-size="11" text-anchor="start">${label}</text>` : ""}`;
+          return `<line x1="${x}" x2="${x}" y1="${padT}" y2="${height - padB}" stroke="${color}" stroke-width="2" stroke-dasharray="8 6" />
+            ${label ? `<text x="${x}" y="${padT + 20}" fill="${color}" font-size="22" text-anchor="start">${label}</text>` : ""}`;
         })
         .join("");
 
       const svgLines = lineRows.map((line) => {
         const points = line.points.map((p) => `${xPos(p.x).toFixed(2)},${yPos(p.y).toFixed(2)}`).join(" ");
-        return `<polyline points="${points}" fill="none" stroke="${escAttr(line.color)}" stroke-width="2.2" />`;
+        return `<polyline points="${points}" fill="none" stroke="${escAttr(line.color)}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" />`;
       }).join("");
 
       const legend = lineRows.map((line) =>
         `<span class="artifact-chart-legend-item"><span class="artifact-chart-dot" style="background:${escAttr(line.color)}"></span>${escHtml(line.label)}</span>`
       ).join("");
 
-      const xTicks = xTickLabels.length === 2 && xTickLabels[0] && xTickLabels[1]
-        ? xTickLabels
-        : [xMin, xMax].map((value) => Number.isInteger(value) ? String(value) : value.toFixed(2));
+      const xTicks = explicitXTicks.length
+        ? explicitXTicks.map((tick) => ({ x: Number(tick.x), label: tick.label }))
+        : (
+          xTickLabels.length === 2 && xTickLabels[0] && xTickLabels[1]
+            ? [
+              { x: xMin, label: xTickLabels[0] },
+              { x: xMax, label: xTickLabels[1] },
+            ]
+            : [xMin, xMax].map((value) => ({
+              x: value,
+              label: Number.isInteger(value) ? String(value) : value.toFixed(2),
+            }))
+        );
       const yTicks = [yMin, yMax].map((value) => value.toFixed(4));
+      const xTickSvg = xTicks.map((tick, idx) => {
+        const x = xPos(Number(tick.x));
+        const anchor = idx === 0 ? "start" : idx === xTicks.length - 1 ? "end" : "middle";
+        return `<text x="${x.toFixed(2)}" y="${height - 18}" fill="var(--muted)" font-size="21" text-anchor="${anchor}">${escHtml(tick.label)}</text>`;
+      }).join("");
 
       return `<div class="artifact-chart-card">
         <p class="artifact-chart-title">${escHtml(title)}</p>
         ${metaText ? `<div class="artifact-chart-meta">${escHtml(metaText)}</div>` : ""}
-        <svg class="artifact-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escAttr(title)}">
-          <line x1="${padL}" x2="${width - padR}" y1="${height - padB}" y2="${height - padB}" stroke="var(--line)" stroke-width="1" />
-          <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${height - padB}" stroke="var(--line-soft)" stroke-width="1" />
-          ${zeroY === null ? "" : `<line x1="${padL}" x2="${width - padR}" y1="${zeroY.toFixed(2)}" y2="${zeroY.toFixed(2)}" stroke="var(--bad-soft)" stroke-width="1" stroke-dasharray="4 3" />`}
+        <svg class="artifact-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escAttr(title)}" shape-rendering="geometricPrecision">
+          <line x1="${padL}" x2="${width - padR}" y1="${height - padB}" y2="${height - padB}" stroke="var(--line)" stroke-width="1.4" />
+          <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${height - padB}" stroke="var(--line-soft)" stroke-width="1.4" />
+          ${zeroY === null ? "" : `<line x1="${padL}" x2="${width - padR}" y1="${zeroY.toFixed(2)}" y2="${zeroY.toFixed(2)}" stroke="var(--bad-soft)" stroke-width="1.4" stroke-dasharray="8 6" />`}
           ${markerLines}
           ${svgLines}
-          <text x="${padL}" y="${height - 8}" fill="var(--muted)" font-size="11">${escHtml(xTicks[0])}</text>
-          <text x="${width - padR}" y="${height - 8}" fill="var(--muted)" font-size="11" text-anchor="end">${escHtml(xTicks[1])}</text>
-          <text x="${padL - 6}" y="${padT + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${escHtml(yTicks[1])}</text>
-          <text x="${padL - 6}" y="${height - padB + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${escHtml(yTicks[0])}</text>
+          ${xTickSvg}
+          <text x="${padL - 12}" y="${padT + 8}" fill="var(--muted)" font-size="22" text-anchor="end">${escHtml(yTicks[1])}</text>
+          <text x="${padL - 12}" y="${height - padB + 8}" fill="var(--muted)" font-size="22" text-anchor="end">${escHtml(yTicks[0])}</text>
+        </svg>
+        <div class="artifact-chart-legend">${legend}</div>
+      </div>`;
+    }
+
+    function renderDualAxisLineChart(title, leftLine, rightLine, markers = [], options = {}) {
+      const leftPoints = Array.isArray(leftLine && leftLine.points) ? leftLine.points : [];
+      const rightPoints = Array.isArray(rightLine && rightLine.points) ? rightLine.points : [];
+      if (leftPoints.length < 2 || rightPoints.length < 2) {
+        return renderMultiLineChart(
+          title,
+          [leftLine, rightLine].filter(
+            (line) => Array.isArray(line && line.points) && line.points.length >= 2,
+          ),
+          markers,
+          options,
+        );
+      }
+
+      const metaText = String((options && options.metaText) || "").trim();
+      const xTickLabels = Array.isArray(options && options.xTickLabels)
+        ? options.xTickLabels.map((value) => String(value || "").trim()).slice(0, 2)
+        : [];
+      const explicitXTicks = Array.isArray(options && options.xTicks)
+        ? options.xTicks
+            .map((tick) => ({
+              x: toFiniteNumber(tick && tick.x),
+              label: String((tick && tick.label) || "").trim(),
+            }))
+            .filter((tick) => tick.x !== null && tick.label)
+        : [];
+
+      const width = 1040;
+      const height = 400;
+      const padL = 88;
+      const padR = 88;
+      const padT = 32;
+      const padB = 68;
+      const innerW = width - padL - padR;
+      const innerH = height - padT - padB;
+
+      const allPoints = [...leftPoints, ...rightPoints];
+      let xMin = Infinity;
+      let xMax = -Infinity;
+      for (const point of allPoints) {
+        if (point.x < xMin) xMin = point.x;
+        if (point.x > xMax) xMax = point.x;
+      }
+      if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) {
+        return `<div class="artifact-chart-card">
+          <p class="artifact-chart-title">${escHtml(title)}</p>
+          ${metaText ? `<div class="artifact-chart-meta">${escHtml(metaText)}</div>` : ""}
+          <div class="muted">图表数据不可解析。</div>
+        </div>`;
+      }
+      if (Math.abs(xMax - xMin) < 1e-12) xMax = xMin + 1.0;
+
+      let yLeftMin = Infinity;
+      let yLeftMax = -Infinity;
+      for (const point of leftPoints) {
+        if (point.y < yLeftMin) yLeftMin = point.y;
+        if (point.y > yLeftMax) yLeftMax = point.y;
+      }
+      let yRightMin = Infinity;
+      let yRightMax = -Infinity;
+      for (const point of rightPoints) {
+        if (point.y < yRightMin) yRightMin = point.y;
+        if (point.y > yRightMax) yRightMax = point.y;
+      }
+      if (Math.abs(yLeftMax - yLeftMin) < 1e-12) {
+        yLeftMax += 1.0;
+        yLeftMin -= 1.0;
+      }
+      if (Math.abs(yRightMax - yRightMin) < 1e-12) {
+        yRightMax += 1.0;
+        yRightMin -= 1.0;
+      }
+
+      const xPos = (x) => padL + ((x - xMin) / (xMax - xMin)) * innerW;
+      const yLeftPos = (y) => padT + (1 - (y - yLeftMin) / (yLeftMax - yLeftMin)) * innerH;
+      const yRightPos = (y) => padT + (1 - (y - yRightMin) / (yRightMax - yRightMin)) * innerH;
+      const zeroLeftY = (yLeftMin <= 0 && yLeftMax >= 0) ? yLeftPos(0) : null;
+
+      const markerLines = (Array.isArray(markers) ? markers : [])
+        .filter((marker) => Number.isFinite(Number(marker.x)))
+        .map((marker) => {
+          const x = xPos(Number(marker.x)).toFixed(2);
+          const color = escAttr(marker.color || "var(--bad)");
+          const label = escHtml(marker.label || "");
+          return `<line x1="${x}" x2="${x}" y1="${padT}" y2="${height - padB}" stroke="${color}" stroke-width="2" stroke-dasharray="8 6" />
+            ${label ? `<text x="${x}" y="${padT + 20}" fill="${color}" font-size="22" text-anchor="start">${label}</text>` : ""}`;
+        })
+        .join("");
+
+      const buildPath = (points, yFn) =>
+        points.map((point) => `${xPos(point.x).toFixed(2)},${yFn(point.y).toFixed(2)}`).join(" ");
+      const leftPath = buildPath(leftPoints, yLeftPos);
+      const rightPath = buildPath(rightPoints, yRightPos);
+
+      const xTicks = explicitXTicks.length
+        ? explicitXTicks.map((tick) => ({ x: Number(tick.x), label: tick.label }))
+        : (
+          xTickLabels.length === 2 && xTickLabels[0] && xTickLabels[1]
+            ? [
+              { x: xMin, label: xTickLabels[0] },
+              { x: xMax, label: xTickLabels[1] },
+            ]
+            : [xMin, xMax].map((value) => ({
+              x: value,
+              label: Number.isInteger(value) ? String(value) : value.toFixed(2),
+            }))
+        );
+      const xTickSvg = xTicks.map((tick, idx) => {
+        const x = xPos(Number(tick.x));
+        const anchor = idx === 0 ? "start" : idx === xTicks.length - 1 ? "end" : "middle";
+        return `<text x="${x.toFixed(2)}" y="${height - 18}" fill="var(--muted)" font-size="21" text-anchor="${anchor}">${escHtml(tick.label)}</text>`;
+      }).join("");
+
+      const leftTickDigits = Number.isFinite(Number(options.leftTickDigits))
+        ? Math.max(0, Math.min(6, Number(options.leftTickDigits)))
+        : 4;
+      const rightTickDigits = Number.isFinite(Number(options.rightTickDigits))
+        ? Math.max(0, Math.min(6, Number(options.rightTickDigits)))
+        : 2;
+      const leftTicks = [yLeftMin, yLeftMax].map((value) => Number(value).toFixed(leftTickDigits));
+      const rightTicks = [yRightMin, yRightMax].map((value) => Number(value).toFixed(rightTickDigits));
+      const leftAxisLabel = String(
+        (options && options.leftAxisLabel) || `${leftLine.label || "Left"}（左轴）`,
+      ).trim();
+      const rightAxisLabel = String(
+        (options && options.rightAxisLabel) || `${rightLine.label || "Right"}（右轴）`,
+      ).trim();
+
+      const legend = [
+        `<span class="artifact-chart-legend-item"><span class="artifact-chart-dot" style="background:${escAttr(leftLine.color)}"></span>${escHtml(String(leftLine.label || "Left"))}（左轴）</span>`,
+        `<span class="artifact-chart-legend-item"><span class="artifact-chart-dot" style="background:${escAttr(rightLine.color)}"></span>${escHtml(String(rightLine.label || "Right"))}（右轴）</span>`,
+      ].join("");
+
+      return `<div class="artifact-chart-card">
+        <p class="artifact-chart-title">${escHtml(title)}</p>
+        ${metaText ? `<div class="artifact-chart-meta">${escHtml(metaText)}</div>` : ""}
+        <svg class="artifact-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escAttr(title)}" shape-rendering="geometricPrecision">
+          <line x1="${padL}" x2="${width - padR}" y1="${height - padB}" y2="${height - padB}" stroke="var(--line)" stroke-width="1.4" />
+          <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${height - padB}" stroke="var(--line-soft)" stroke-width="1.4" />
+          <line x1="${width - padR}" x2="${width - padR}" y1="${padT}" y2="${height - padB}" stroke="var(--line-soft)" stroke-width="1.4" />
+          ${zeroLeftY === null ? "" : `<line x1="${padL}" x2="${width - padR}" y1="${zeroLeftY.toFixed(2)}" y2="${zeroLeftY.toFixed(2)}" stroke="var(--bad-soft)" stroke-width="1.4" stroke-dasharray="8 6" />`}
+          ${markerLines}
+          <polyline points="${leftPath}" fill="none" stroke="${escAttr(leftLine.color)}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" />
+          <polyline points="${rightPath}" fill="none" stroke="${escAttr(rightLine.color)}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" />
+          ${xTickSvg}
+          <text x="${padL - 12}" y="${padT + 8}" fill="var(--muted)" font-size="22" text-anchor="end">${escHtml(leftTicks[1])}</text>
+          <text x="${padL - 12}" y="${height - padB + 8}" fill="var(--muted)" font-size="22" text-anchor="end">${escHtml(leftTicks[0])}</text>
+          <text x="${width - padR + 12}" y="${padT + 8}" fill="var(--muted)" font-size="22" text-anchor="start">${escHtml(rightTicks[1])}</text>
+          <text x="${width - padR + 12}" y="${height - padB + 8}" fill="var(--muted)" font-size="22" text-anchor="start">${escHtml(rightTicks[0])}</text>
+          <text x="${padL + 4}" y="${padT - 8}" fill="${escAttr(leftLine.color)}" font-size="16">${escHtml(leftAxisLabel)}</text>
+          <text x="${width - padR - 4}" y="${padT - 8}" fill="${escAttr(rightLine.color)}" font-size="16" text-anchor="end">${escHtml(rightAxisLabel)}</text>
         </svg>
         <div class="artifact-chart-legend">${legend}</div>
       </div>`;
@@ -5846,9 +7087,9 @@ ${styleText}
         longShortStats.sharpe,
       );
       const mddLs = pickFinite(
+        backtestSummary.max_drawdown,
         summary.max_drawdown,
         summary.ls_max_drawdown,
-        backtestSummary.max_drawdown,
         longShortStats.mdd,
       );
       const turnoverLs = pickFinite(
@@ -6333,7 +7574,7 @@ ${styleText}
         btn.disabled = false;
         const s = $("sidebarStatus");
         if (s) { s.textContent = `${label}：请求超时，请重试`; s.style.color = "var(--error)"; }
-      }, 20000);
+      }, 70000);
       try {
         const msg = await asyncFn();
         clearTimeout(safetyId);
@@ -6368,6 +7609,355 @@ ${styleText}
     function escHtml(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
     function escAttr(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
+    function setExploreRecordSession(sessionId, options = {}) {
+      state.exploreSessionId = String(sessionId || "").trim();
+      state.selectedExploreSessionId = state.exploreSessionId || state.selectedExploreSessionId || "";
+      const btn = $("btnRecordExploreResponse");
+      const sessionEl = $("exploreRecordSession");
+      const statusEl = $("exploreRecordStatus");
+      const textEl = $("exploreResponseText");
+      if (textEl && options.clearResponse !== false) textEl.value = "";
+      if (btn) btn.disabled = !state.exploreSessionId;
+      if (sessionEl) {
+        sessionEl.textContent = state.exploreSessionId
+          ? `session: ${state.exploreSessionId}`
+          : "尚未生成可回灌 session";
+      }
+      if (statusEl) {
+        statusEl.className = "idea-record-status";
+        statusEl.textContent = state.exploreSessionId
+          ? "粘贴外部 LLM 响应后点击回灌；系统会保存 lint 报告和结构化切片。"
+          : "本次探索尚未返回可回灌 session，请重新生成 prompt。";
+      }
+    }
+
+    function renderExploreLintReport(report) {
+      const statusEl = $("exploreRecordStatus");
+      if (!statusEl) return;
+      const violations = Array.isArray(report && report.violations) ? report.violations : [];
+      const errorCount = violations.filter(v => String(v.severity || "") === "error").length;
+      const warningCount = violations.filter(v => String(v.severity || "") === "warning").length;
+      const sections = Array.isArray(report && report.sections_seen) ? report.sections_seen : [];
+      const verdictClass = errorCount > 0 ? "error" : (warningCount > 0 ? "warning" : "ok");
+      const verdictText = errorCount > 0
+        ? `已回灌：${errorCount} 个 error`
+        : (warningCount > 0 ? `已回灌：${warningCount} 个 warning` : "已回灌：lint 通过");
+      const pills = [
+        `<span class="idea-lint-pill ${verdictClass}">${escHtml(verdictText)}</span>`,
+        `<span class="idea-lint-pill">sections ${sections.length}</span>`,
+      ];
+      let listHtml = "";
+      if (violations.length > 0) {
+        listHtml = `<div class="idea-lint-list">${violations.slice(0, 8).map(v => {
+          const severity = String(v.severity || "warning");
+          const code = String(v.code || "lint_violation");
+          const section = String(v.section || "-");
+          const detail = String(v.detail || "");
+          return `<div class="idea-lint-item ${escAttr(severity)}">
+            <strong>${escHtml(code)}</strong> · ${escHtml(section)}<br>${escHtml(detail)}
+          </div>`;
+        }).join("")}</div>`;
+      }
+      statusEl.className = "idea-record-status";
+      statusEl.innerHTML = `${pills.join("")}${listHtml}`;
+    }
+
+    function renderExploreSessions() {
+      const box = $("exploreSessionList");
+      if (!box) return;
+      const sessions = Array.isArray(state.exploreSessions) ? state.exploreSessions : [];
+      if (!sessions.length) {
+        box.innerHTML = "<div class='muted'>暂无已保存会话。</div>";
+        return;
+      }
+      box.innerHTML = sessions.map((item) => {
+        const sid = String(item.session_id || "");
+        const active = sid && sid === state.selectedExploreSessionId;
+        const stage = String(item.stage || "-");
+        const mode = String(item.mode || "-");
+        const responseMark = item.has_response ? "已回灌" : "未回灌";
+        const lintMark = item.has_lint_errors ? "lint error" : "lint ok";
+        return `
+          <div
+            class="idea-session-item ${active ? "active" : ""}"
+            data-action="openExploreSession"
+            data-session-id="${escAttr(sid)}"
+          >
+            <div><strong>${escHtml(sid)}</strong></div>
+            <div class="muted">${escHtml(item.created_at_utc || "-")} · ${escHtml(stage)} · ${escHtml(mode)}</div>
+            <div class="muted">${escHtml(responseMark)} · ${escHtml(lintMark)} · next=${escHtml(item.recommended_next_stage || "-")}</div>
+            <div>${escHtml(item.idea || "-")}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function loadExploreSessions(selectedSessionId = "") {
+      const data = await api("/api/vault/explore-sessions?limit=30");
+      state.exploreSessions = Array.isArray(data.sessions) ? data.sessions : [];
+      if (selectedSessionId) {
+        state.selectedExploreSessionId = String(selectedSessionId);
+      } else if (
+        state.selectedExploreSessionId
+        && !state.exploreSessions.some((item) => item.session_id === state.selectedExploreSessionId)
+      ) {
+        state.selectedExploreSessionId = "";
+      }
+      renderExploreSessions();
+    }
+
+    function renderExploreSessionCards(cards) {
+      const cardListEl = $("exploreCardList");
+      if (!cardListEl) return;
+      if (!Array.isArray(cards) || cards.length === 0) {
+        cardListEl.innerHTML = "<span class='muted'>该历史会话没有保存卡片快照；重新生成一次探索即可记录新快照。</span>";
+        return;
+      }
+      cardListEl.innerHTML = cards.map((c) => {
+        const name = c.name || c.path || "?";
+        const summary = c.summary || "";
+        const reasons = Array.isArray(c.reasons) ? c.reasons.filter(Boolean) : [];
+        const reasonHtml = reasons.map((r) => `<span class="idea-reason-chip">${escHtml(r)}</span>`).join("");
+        return `<div class="idea-session-item"
+          data-action="previewExploreCard"
+          data-card-path="${escAttr(c.path || name)}"
+          data-card-name="${escAttr(name)}">
+          <div class="idea-card-head"><strong class="idea-card-title">${escHtml(name)}</strong>${reasonHtml}</div>
+          ${summary ? `<div class="idea-card-summary">${escHtml(summary)}</div>` : ""}
+        </div>`;
+      }).join("");
+    }
+
+    async function openExploreSession(sessionId) {
+      const sid = String(sessionId || "").trim();
+      if (!sid) return;
+      state.selectedExploreSessionId = sid;
+      renderExploreSessions();
+      const payload = await api(`/api/vault/explore-sessions/${enc(sid)}`);
+      state.exploreSessionPayload = payload;
+      state.exploreSessionId = sid;
+      const ideaEl = $("exploreIdea");
+      if (ideaEl) ideaEl.value = String(payload.idea || "");
+      const mode = String(payload.mode || "").trim();
+      if (mode) {
+        const modeEl = document.querySelector(`input[name="exploreMode"][value="${mode}"]`);
+        if (modeEl) modeEl.checked = true;
+      }
+      const stage = String(payload.stage || "").trim();
+      if (stage) {
+        const stageEl = document.querySelector(`input[name="exploreStage"][value="${stage}"]`);
+        if (stageEl) stageEl.checked = true;
+      }
+      const promptBox = $("explorePromptBox");
+      if (promptBox) promptBox.textContent = String(payload.gpt_prompt || "");
+      const resultsEl = $("exploreResults");
+      if (resultsEl) resultsEl.style.display = "block";
+      const copyBtn = $("btnCopyExplorePrompt");
+      if (copyBtn) copyBtn.style.display = payload.gpt_prompt ? "" : "none";
+      const responseEl = $("exploreResponseText");
+      if (responseEl) responseEl.value = String(payload.response || "");
+      setExploreRecordSession(sid, {clearResponse: false});
+      if (payload.lint_report) renderExploreLintReport(payload.lint_report);
+      renderExploreSessionCards(payload.related_cards || []);
+      const rightPane = $("exploreRightPane");
+      if (rightPane) rightPane.style.display = "block";
+      const constraintTab = $("exploreTabConstraint");
+      if (constraintTab) constraintTab.style.display = "none";
+      switchExploreRightTab("placeholder");
+      renderExploreSessions();
+      sidebarMsg(`已加载探索会话：${sid}`);
+    }
+
+    function currentExploreSourceText() {
+      const responseText = String(($("exploreResponseText") || {value: ""}).value || "").trim();
+      if (responseText) return responseText;
+      const payload = state.exploreSessionPayload || {};
+      if (payload && typeof payload === "object" && String(payload.response || "").trim()) {
+        return String(payload.response || "").trim();
+      }
+      const promptText = String(($("explorePromptBox") || {textContent: ""}).textContent || "").trim();
+      if (promptText) return promptText;
+      return String(($("exploreIdea") || {value: ""}).value || "").trim();
+    }
+
+    function currentExploreIdeaText() {
+      return String(($("exploreIdea") || {value: ""}).value || "").trim()
+        || String((state.exploreSessionPayload || {}).idea || "").trim();
+    }
+
+    function escapeRegExp(text) {
+      return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function extractBracketSection(text, labels) {
+      const raw = String(text || "");
+      for (const label of labels) {
+        const pattern = new RegExp(`\\[${escapeRegExp(label)}\\]([\\s\\S]*?)(?=\\n\\[[^\\]]+\\]|$)`, "i");
+        const match = raw.match(pattern);
+        if (match && match[1] && match[1].trim()) return match[1].trim();
+      }
+      return "";
+    }
+
+    function truncateText(text, maxChars) {
+      const clean = String(text || "").replace(/\s+/g, " ").trim();
+      if (clean.length <= maxChars) return clean;
+      return clean.slice(0, Math.max(maxChars - 1, 0)).trim() + "…";
+    }
+
+    function inferSelectValue(text, options) {
+      const lower = String(text || "").toLowerCase();
+      for (const [value, needles] of options) {
+        if (needles.some((needle) => lower.includes(needle))) return value;
+      }
+      return "";
+    }
+
+    function selectedExploreCardPaths() {
+      const payloadCards = Array.isArray((state.exploreSessionPayload || {}).related_cards)
+        ? state.exploreSessionPayload.related_cards
+        : [];
+      const fromPayload = payloadCards.map((c) => String(c.path || c.name || "").trim()).filter(Boolean);
+      if (fromPayload.length) return fromPayload;
+      return Array.from(document.querySelectorAll("#exploreCardList [data-card-path]"))
+        .map((el) => String(el.dataset.cardPath || "").trim())
+        .filter(Boolean);
+    }
+
+    function safeFactorMethodName(text) {
+      const raw = String(text || "").toLowerCase();
+      if (raw.includes("vol") || raw.includes("波动")) return "asym_vol_candidate";
+      if (raw.includes("liquid") || raw.includes("流动")) return "liquidity_candidate";
+      if (raw.includes("momentum") || raw.includes("动量")) return "momentum_candidate";
+      const ascii = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      return ascii ? `${ascii.slice(0, 40)}_candidate`.replace(/_+/g, "_") : "explore_factor_candidate";
+    }
+
+    function applyExploreToProjectHypothesis() {
+      if (!state.selectedProject) {
+        sidebarMsg("请先选择项目。", true);
+        return;
+      }
+      const idea = currentExploreIdeaText();
+      const source = currentExploreSourceText();
+      const mechanism = extractBracketSection(source, [
+        "初步机制假设",
+        "候选机制",
+        "Step 3：最终结构化假设",
+        "最终结构化假设",
+        "Mechanism Hypotheses",
+      ]);
+      const uncertainty = extractBracketSection(source, [
+        "不确定性与风险点",
+        "风险识别",
+        "Step 4：对抗性检验（Adversarial Check）",
+        "对抗性检验（Adversarial Check）",
+      ]);
+      const stage = String(document.querySelector('input[name="exploreStage"]:checked')?.value || "mechanism_discovery");
+      const nextStage = stage === "mechanism_discovery"
+        ? "进入 signal_mapping：把候选机制映射到可计算数据、必要变量和混淆控制。"
+        : stage === "signal_mapping"
+          ? "进入 validation_kill_tests：检查是否只是已有因子的换壳，并跑稳健性/子样本 kill tests。"
+          : "整理 kill test 结论，决定 KILL / HOLD-FOR-AUDIT / 修改假设。";
+      if ($("patchHypothesis")) {
+        $("patchHypothesis").value = truncateText([idea, mechanism].filter(Boolean).join("\n\n"), 1200);
+      }
+      if ($("patchFocus")) {
+        $("patchFocus").value = truncateText(uncertainty || `当前探索阶段：${stage}`, 260);
+      }
+      if ($("patchAction")) {
+        $("patchAction").value = nextStage;
+      }
+      sidebarMsg("已填入项目假设表单；确认后点击 SYNC_STATE 保存。");
+    }
+
+    function fillPreflightFromExplore() {
+      const idea = currentExploreIdeaText();
+      const source = `${idea}\n${currentExploreSourceText()}`;
+      if ($("pfCandidateName")) $("pfCandidateName").value = truncateText(idea || "explore candidate", 80);
+      const family = inferSelectValue(source, [
+        ["volatility", ["volatility", "realized vol", "波动"]],
+        ["reversal", ["reversal", "反转", "修复"]],
+        ["momentum", ["momentum", "动量", "趋势"]],
+        ["value", ["value", "估值"]],
+        ["quality", ["quality", "质量", "盈利"]],
+        ["size", ["size", "市值", "小盘"]],
+      ]);
+      if (family && $("pfFamily")) $("pfFamily").value = family;
+      const mechanism = inferSelectValue(source, [
+        ["microstructure", ["microstructure", "流动性", "盘口", "成交", "冲击", "涨跌停"]],
+        ["behavioral", ["behavior", "behavioral", "情绪", "过度反应", "拥挤", "投机"]],
+        ["risk", ["risk", "风险", "补偿", "risk aversion", "downside"]],
+        ["statistical", ["statistical", "统计", "分布", "skew", "偏度"]],
+      ]);
+      if (mechanism && $("pfMechanism")) $("pfMechanism").value = mechanism;
+      if ($("pfDecayClass") && !$("pfDecayClass").value) $("pfDecayClass").value = "medium";
+      const paths = selectedExploreCardPaths();
+      if ($("pfCheckedCards") && paths.length) $("pfCheckedCards").value = paths.slice(0, 8).join("\n");
+      sidebarMsg("已填入候选预检表单；请检查后运行图约束扫描。");
+    }
+
+    function buildFactorDraftCode(methodName, description, researchText) {
+      const note = String(researchText || "")
+        .split("\n")
+        .map((line) => `    # ${line.slice(0, 110)}`)
+        .slice(0, 18)
+        .join("\n");
+      return `def builder(prices, *, window=20, skip_recent=5, min_periods=None, **kwargs):
+    """Research draft generated from AlphaLab idea explorer.
+
+    This is a reviewable draft, not a validated factor definition.
+    """
+    import numpy as np
+    import pandas as pd
+
+    frame = prices.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.sort_values(["asset", "date"]).reset_index(drop=True)
+
+    min_periods = min_periods or max(3, window // 2)
+
+    # Research idea: ${description}
+${note}
+
+    ret = frame.groupby("asset", sort=False)["close"].pct_change(fill_method=None)
+
+    # Default daily asymmetry sketch: separate downside and upside realized volatility.
+    # Replace this block after signal_mapping confirms the exact computable signal.
+    down_leg = ret.where(ret < 0, 0.0)
+    up_leg = ret.where(ret > 0, 0.0)
+    down_vol = down_leg.pow(2).groupby(frame["asset"], sort=False).rolling(
+        window, min_periods=min_periods
+    ).mean().reset_index(level=0, drop=True).pipe(np.sqrt)
+    up_vol = up_leg.pow(2).groupby(frame["asset"], sort=False).rolling(
+        window, min_periods=min_periods
+    ).mean().reset_index(level=0, drop=True).pipe(np.sqrt)
+
+    eps = 1e-12
+    value = np.log(down_vol + eps) - np.log(up_vol + eps)
+    if skip_recent:
+        value = value.groupby(frame["asset"], sort=False).shift(skip_recent)
+
+    result = frame[["date", "asset"]].copy()
+    result["factor"] = "${methodName}"
+    result["value"] = value
+    return result
+`;
+    }
+
+    function generateFactorDraftFromExplore() {
+      const idea = currentExploreIdeaText();
+      const source = currentExploreSourceText();
+      const methodName = safeFactorMethodName(idea || source);
+      const description = truncateText(idea || "AlphaLab idea explorer draft", 180);
+      if ($("cfName")) $("cfName").value = methodName;
+      if ($("cfDescription")) $("cfDescription").value = description;
+      if ($("cfCode")) $("cfCode").value = buildFactorDraftCode(methodName, description, source);
+      const details = document.querySelector(".factor-workshop-details");
+      if (details) details.open = true;
+      sidebarMsg("已生成 Factor Draft 到因子工坊；请审阅后再注册。");
+    }
+
     function linesToList(text) {
       return (text || "").split("\\n").map(x => x.trim()).filter(Boolean);
     }
@@ -6382,14 +7972,14 @@ ${styleText}
       cardPreview.style.display = "none";
       constraintBox.style.display = "none";
       placeholder.style.display = "none";
-      tabCard.style.opacity = "0.5";
-      tabConstraint.style.opacity = "0.5";
+      tabCard.classList.remove("active");
+      tabConstraint.classList.remove("active");
       if (tab === "card") {
         cardPreview.style.display = "";
-        tabCard.style.opacity = "1";
+        tabCard.classList.add("active");
       } else if (tab === "constraint") {
         constraintBox.style.display = "";
-        tabConstraint.style.opacity = "1";
+        tabConstraint.classList.add("active");
       } else {
         placeholder.style.display = "";
       }
@@ -6405,7 +7995,7 @@ ${styleText}
       switchExploreRightTab("card");
       // Highlight selected card
       document.querySelectorAll("#exploreCardList [data-action=previewExploreCard]").forEach(el => {
-        el.style.borderColor = el.dataset.cardPath === cardPath ? "var(--brand)" : "var(--line)";
+        el.classList.toggle("active", el.dataset.cardPath === cardPath);
       });
       try {
         const data = await api(`/api/vault/card/${enc(cardPath)}`);
@@ -6452,6 +8042,8 @@ ${styleText}
         selectDraft(el.dataset.draftName);
       } else if (action === "previewExploreCard") {
         previewExploreCard(el.dataset.cardPath, el.dataset.cardName);
+      } else if (action === "openExploreSession") {
+        openExploreSession(el.dataset.sessionId);
       } else if (action === "selectCard") {
         $("cardViewName").value = el.dataset.cardPath;
         $("btnReadCard").click();
@@ -6459,6 +8051,13 @@ ${styleText}
         deleteRun(el.dataset.runId, el.dataset.caseName);
       } else if (action === "writebackRun") {
         writebackRun(el.dataset.runId);
+      } else if (action === "toggleRunCompare") {
+        const runId = String(el.dataset.runId || "").trim();
+        const checked = el instanceof HTMLInputElement ? el.checked : false;
+        const accepted = setRunCompareSelection(runId, checked);
+        if (!accepted && el instanceof HTMLInputElement) {
+          el.checked = false;
+        }
       } else if (action === "copyArtifact") {
         const pre = $("artifactText");
         const text = state.artifactRawText || (pre ? pre.textContent : "");
@@ -6486,6 +8085,7 @@ ${styleText}
           clearRunCaches();
           state.runs = [];
           state.selectedMetricsRunId = "";
+          clearRunCompareSelection({ resetPanel: true });
         }
         await loadProjectDetail();
         if (state.view === "bridge") {
@@ -6745,150 +8345,240 @@ ${styleText}
           const idea = $("exploreIdea").value.trim();
           if (!idea) { sidebarMsg("请输入想法", true); return; }
           const mode = document.querySelector('input[name="exploreMode"]:checked').value;
-          const data = await api("/api/vault/explore-idea", "POST", { idea, mode, project_slug: state.selectedProject || null });
+          const stageEl = document.querySelector('input[name="exploreStage"]:checked');
+          const stage = stageEl ? stageEl.value : "mechanism_discovery";
+          const injectDrift = $("exploreInjectDrift") ? $("exploreInjectDrift").checked : true;
+          const persistSession = $("explorePersistSession") ? $("explorePersistSession").checked : true;
+          const explorePayload = {
+            idea,
+            mode,
+            stage,
+            inject_recent_drift: injectDrift,
+            persist_session: persistSession,
+            project_slug: state.selectedProject || null,
+          };
+          if (state.selectedExploreSessionId) {
+            explorePayload.parent_session_id = state.selectedExploreSessionId;
+          }
+          const data = await api("/api/vault/explore-idea", "POST", explorePayload, { timeoutMs: 60000 });
+          const retrievalDiagnostics = data && data.retrieval_diagnostics
+            ? data.retrieval_diagnostics
+            : {};
+          const sessionId = retrievalDiagnostics.session_id || "";
+          state.exploreSessionPayload = {
+            ...data,
+            session_id: sessionId,
+            stage,
+            project_slug: state.selectedProject || "",
+          };
 
-          // Render card list
-          const cards = data.related_cards || [];
-          const cardListEl = $("exploreCardList");
-          if (cards.length === 0) {
-            cardListEl.innerHTML = '<span class="muted">未找到相关卡片。建议在 CARD-INDEX.tsv 中完善 tags 字段。</span>';
-          } else {
-            const reasonLabel = {
-              semantic_match: "语义匹配", similar_to: "相似卡片", depends_on: "依赖",
-              reverse_dependency: "被依赖", same_family: "同族", same_mechanism: "同机制",
-              project_context: "项目上下文",
-            };
-            const lifecycleColor = lc => {
-              if (!lc) return "";
-              const m = {validated:"var(--ok)",production:"var(--ok)",live:"var(--ok)",deployed:"var(--ok)",
-                         theoretical:"var(--muted)",candidate:"var(--focus)",active:"var(--focus)",deprecated:"var(--error)",retired:"var(--error)"};
-              return m[lc.toLowerCase()] || "var(--muted)";
-            };
-            cardListEl.innerHTML = cards.map(c => {
-              const name = c.name || c.path || "?";
-              const reasons = (c.reasons || []).filter(Boolean);
-              const summary = c.summary || "";
-              const snippet = c.snippet || "";
-              const showSnippet = snippet && snippet !== summary;
-              // Meta line: type badge + lifecycle badge + mechanism + family
-              let metaHtml = "";
-              if (c.type) metaHtml += `<span style="background:var(--brand-soft);padding:1px 5px;border-radius:3px;font-size: 12px;color:var(--brand-dark)">${escHtml(c.type)}</span> `;
-              if (c.lifecycle) {
-                const lcc = lifecycleColor(c.lifecycle);
-                metaHtml += `<span style="color:${lcc};font-size: 13px">${escHtml(c.lifecycle)}</span> `;
-              }
-              if (c.mechanism) metaHtml += `<span class="muted" style="font-size: 13px">机制:${escHtml(c.mechanism)}</span> `;
-              if (c.factor_family) metaHtml += `<span class="muted" style="font-size: 13px">族:${escHtml(c.factor_family)}</span> `;
-              // Reason badges
-              let reasonHtml = "";
-              if (reasons.length) {
-                reasonHtml = reasons.map(r => {
-                  const label = reasonLabel[r] || r;
-                  /* Warm reason chips: terracotta tint for semantic, ochre for context, olive for others.
-                     Replaces earlier cyan/purple/green which read "cyber-tech" against parchment. */
-                  const bg = r === "semantic_match" ? "var(--brand-soft)" : r === "project_context" ? "var(--warn-soft)" : "var(--ok-soft)";
-                  const fg = r === "semantic_match" ? "var(--brand-dark)" : r === "project_context" ? "var(--warn)" : "var(--ok)";
-                  return `<span style="display:inline-block;background:${bg};color:${fg};padding:1px 5px;border-radius:3px;font-size: 12px;margin-right:3px">${escHtml(label)}</span>`;
-                }).join("");
-              }
-              return `<div style="margin-bottom:7px;padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer"
-                           data-action="previewExploreCard" data-card-path="${escAttr(c.path || name)}" data-card-name="${escAttr(name)}">
-                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                  <strong style="font-size: 15px">${escHtml(name)}</strong>
-                  ${reasonHtml}
-                </div>
-                <div style="margin:3px 0 0 0">${metaHtml}</div>
-                ${summary ? `<div style="font-size: 14px;color:var(--ink);margin-top:3px">${escHtml(summary)}</div>` : ""}
-                ${showSnippet ? `<details style="margin-top:2px"><summary style="font-size: 13px;color:var(--muted);cursor:pointer">展开原文摘录</summary><div style="font-size: 13px;color:var(--muted);margin-top:2px">${escHtml(snippet)}</div></details>` : ""}
-              </div>`;
-            }).join("");
+          // Make the primary deliverable visible as soon as the API succeeds.
+          // Card rendering below is deliberately isolated so a malformed card
+          // payload or tab issue cannot hide the prompt again.
+          const promptBox = $("explorePromptBox");
+          if (promptBox) promptBox.textContent = data.gpt_prompt || "";
+          const resultsEl = $("exploreResults");
+          if (resultsEl) resultsEl.style.display = "block";
+          const copyBtn = $("btnCopyExplorePrompt");
+          if (copyBtn) copyBtn.style.display = data.gpt_prompt ? "" : "none";
+          setExploreRecordSession(sessionId);
+          if (sessionId) loadExploreSessions(sessionId).catch((err) => console.error("explore sessions", err));
+
+          // Surface the recommended next stage as a hint next to the button.
+          const hint = $("exploreStageHint");
+          if (hint) {
+            const nextStage = retrievalDiagnostics.recommended_next_stage || null;
+            const driftCount = retrievalDiagnostics.drift_injected_count || 0;
+            const parts = [];
+            if (nextStage) parts.push("建议下一站: " + nextStage);
+            if (driftCount > 0) parts.push("已注入 " + driftCount + " 条漂移");
+            if (sessionId) parts.push("session: " + sessionId);
+            if (parts.length > 0) {
+              hint.textContent = parts.join("　·　");
+              hint.style.display = "block";
+            } else {
+              hint.style.display = "none";
+            }
           }
 
-          // Setup right pane: always visible, with constraint tab in constrained mode
-          const rightPane = $("exploreRightPane");
-          rightPane.style.display = "";
-          const constraintTab = $("exploreTabConstraint");
-          const cr = data.constraint_report || {};
-          if (mode === "constrained") {
-            constraintTab.style.display = "";
-            let html = "";
-            if (cr.primary_family) html += `<div>推断因子族：<strong>${escHtml(cr.primary_family)}</strong></div>`;
-            if (cr.primary_mechanism) html += `<div>推断机制：<strong>${escHtml(cr.primary_mechanism)}</strong></div>`;
-            if (cr.crowding_warning) {
-              html += `<div style="color:var(--error);margin-top:5px">${escHtml(cr.crowding_warning)}</div>`;
-            }
-            const peers = cr.validated_peers || [];
-            if (peers.length > 0) {
-              html += `<div style="margin-top:6px;font-size: 14px"><strong>同族已验证因子</strong>（${peers.length}）：`;
-              html += `<span class="muted">${peers.map(p => escHtml(p)).join("、")}</span></div>`;
-            }
-            if (cr.family_counts && Object.keys(cr.family_counts).length > 0) {
-              const fc = Object.entries(cr.family_counts).map(([k, v]) => `${escHtml(k)}(${v})`).join(", ");
-              html += `<div class="muted" style="font-size: 13px;margin-top:5px">现有因子族分布：${fc}</div>`;
-            }
-            const nw = cr.novelty_warnings || [];
-            if (nw.length > 0) {
-              html += `<div style="margin-top:6px">`;
-              for (const w of nw) {
-                html += `<div style="font-size: 14px;color:var(--warn)">${escHtml(w)}</div>`;
+          const cards = data.related_cards || [];
+          try {
+            // Render card list
+            const cardListEl = $("exploreCardList");
+            if (cardListEl) {
+              if (cards.length === 0) {
+                cardListEl.innerHTML = '<span class="muted">未找到相关卡片。建议在 CARD-INDEX.tsv 中完善 tags 字段。</span>';
+              } else {
+                const reasonLabel = {
+                  semantic_match: "语义匹配", similar_to: "相似卡片", depends_on: "依赖",
+                  reverse_dependency: "被依赖", same_family: "同族", same_mechanism: "同机制",
+                  project_context: "项目上下文",
+                };
+                const lifecycleColor = lc => {
+                  if (!lc) return "";
+                  const m = {validated:"var(--ok)",production:"var(--ok)",live:"var(--ok)",deployed:"var(--ok)",
+                             theoretical:"var(--muted)",candidate:"var(--focus)",active:"var(--focus)",deprecated:"var(--error)",retired:"var(--error)"};
+                  return m[String(lc).toLowerCase()] || "var(--muted)";
+                };
+                cardListEl.innerHTML = cards.map(c => {
+                  const name = c.name || c.path || "?";
+                  const reasons = Array.isArray(c.reasons) ? c.reasons.filter(Boolean) : [];
+                  const summary = c.summary || "";
+                  const snippet = c.snippet || "";
+                  const showSnippet = snippet && snippet !== summary;
+                  // Meta line: type badge + lifecycle badge + mechanism + family
+                  let metaHtml = "";
+                  if (c.type) metaHtml += `<span class="idea-type-chip">${escHtml(c.type)}</span>`;
+                  if (c.lifecycle) {
+                    const lcc = lifecycleColor(c.lifecycle);
+                    metaHtml += `<span class="idea-lifecycle-chip" style="color:${lcc}">${escHtml(c.lifecycle)}</span>`;
+                  }
+                  if (c.mechanism) metaHtml += `<span class="idea-meta-chip">机制:${escHtml(c.mechanism)}</span>`;
+                  if (c.factor_family) metaHtml += `<span class="idea-meta-chip">族:${escHtml(c.factor_family)}</span>`;
+                  // Reason badges
+                  let reasonHtml = "";
+                  if (reasons.length) {
+                    reasonHtml = reasons.map(r => {
+                      const label = reasonLabel[r] || r;
+                      /* Warm reason chips: terracotta tint for semantic, ochre for context, olive for others.
+                         Replaces earlier cyan/purple/green which read "cyber-tech" against parchment. */
+                      const bg = r === "semantic_match" ? "var(--brand-soft)" : r === "project_context" ? "var(--warn-soft)" : "var(--ok-soft)";
+                      const fg = r === "semantic_match" ? "var(--brand-dark)" : r === "project_context" ? "var(--warn)" : "var(--ok)";
+                      return `<span class="idea-reason-chip" style="--chip-bg:${bg};--chip-fg:${fg}">${escHtml(label)}</span>`;
+                    }).join("");
+                  }
+                  return `<div class="idea-session-item"
+                               data-action="previewExploreCard" data-card-path="${escAttr(c.path || name)}" data-card-name="${escAttr(name)}">
+                    <div class="idea-card-head">
+                      <strong class="idea-card-title">${escHtml(name)}</strong>
+                      ${reasonHtml}
+                    </div>
+                    ${metaHtml ? `<div class="idea-card-meta">${metaHtml}</div>` : ""}
+                    ${summary ? `<div class="idea-card-summary">${escHtml(summary)}</div>` : ""}
+                    ${showSnippet ? `<details class="idea-card-snippet"><summary>展开原文摘录</summary><div>${escHtml(snippet)}</div></details>` : ""}
+                  </div>`;
+                }).join("");
               }
-              html += `</div>`;
             }
-            const frontier = cr.frontier_matches || [];
-            if (frontier.length > 0) {
-              html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">`;
-              html += `<strong style="font-size: 14px">探索前沿方向</strong>`;
-              for (const f of frontier) {
-                const prioColor = f.priority === "high" ? "var(--ok)" : f.priority === "medium" ? "var(--warn)" : "var(--muted)";
-                html += `<div style="margin-top:4px;padding:5px 8px;background:var(--bg);border-radius:4px;font-size: 14px">`;
-                html += `<div><strong>${escHtml(f.direction)}</strong> <span style="color:${prioColor};font-size: 13px">[${escHtml(f.priority || "?")}]</span></div>`;
-                html += `<div class="muted" style="font-size: 13px">${escHtml(f.reason)}</div>`;
-                if (f.factor_family || f.mechanism) {
-                  html += `<div class="muted" style="font-size: 12px">${[f.factor_family, f.mechanism].filter(Boolean).join(" / ")}`;
-                  if (f.suggested_by) html += ` · suggested by: ${escHtml(f.suggested_by)}`;
+
+            // Setup right pane: always visible, with constraint tab in constrained mode
+            const rightPane = $("exploreRightPane");
+            if (rightPane) rightPane.style.display = "block";
+            const constraintTab = $("exploreTabConstraint");
+            const cr = data.constraint_report || {};
+            if (mode === "constrained") {
+              if (constraintTab) constraintTab.style.display = "";
+              let html = "";
+              if (cr.primary_family) html += `<div>推断因子族：<strong>${escHtml(cr.primary_family)}</strong></div>`;
+              if (cr.primary_mechanism) html += `<div>推断机制：<strong>${escHtml(cr.primary_mechanism)}</strong></div>`;
+              if (cr.crowding_warning) {
+                html += `<div style="color:var(--error);margin-top:5px">${escHtml(cr.crowding_warning)}</div>`;
+              }
+              const peers = Array.isArray(cr.validated_peers) ? cr.validated_peers : [];
+              if (peers.length > 0) {
+                html += `<div style="margin-top:6px;font-size: 14px"><strong>同族已验证因子</strong>（${peers.length}）：`;
+                html += `<span class="muted">${peers.map(p => escHtml(p)).join("、")}</span></div>`;
+              }
+              if (cr.family_counts && Object.keys(cr.family_counts).length > 0) {
+                const fc = Object.entries(cr.family_counts).map(([k, v]) => `${escHtml(k)}(${v})`).join(", ");
+                html += `<div class="muted" style="font-size: 13px;margin-top:5px">现有因子族分布：${fc}</div>`;
+              }
+              const nw = Array.isArray(cr.novelty_warnings) ? cr.novelty_warnings : [];
+              if (nw.length > 0) {
+                html += `<div style="margin-top:6px">`;
+                for (const w of nw) {
+                  html += `<div style="font-size: 14px;color:var(--warn)">${escHtml(w)}</div>`;
+                }
+                html += `</div>`;
+              }
+              const frontier = Array.isArray(cr.frontier_matches) ? cr.frontier_matches : [];
+              if (frontier.length > 0) {
+                html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">`;
+                html += `<strong style="font-size: 14px">探索前沿方向</strong>`;
+                for (const f of frontier) {
+                  const prioColor = f.priority === "high" ? "var(--ok)" : f.priority === "medium" ? "var(--warn)" : "var(--muted)";
+                  html += `<div style="margin-top:4px;padding:5px 8px;background:var(--bg);border-radius:4px;font-size: 14px">`;
+                  html += `<div><strong>${escHtml(f.direction)}</strong> <span style="color:${prioColor};font-size: 13px">[${escHtml(f.priority || "?")}]</span></div>`;
+                  html += `<div class="muted" style="font-size: 13px">${escHtml(f.reason)}</div>`;
+                  if (f.factor_family || f.mechanism) {
+                    html += `<div class="muted" style="font-size: 12px">${[f.factor_family, f.mechanism].filter(Boolean).join(" / ")}`;
+                    if (f.suggested_by) html += ` · suggested by: ${escHtml(f.suggested_by)}`;
+                    html += `</div>`;
+                  }
                   html += `</div>`;
                 }
                 html += `</div>`;
               }
-              html += `</div>`;
-            }
-            const failures = cr.failure_refs || [];
-            if (failures.length > 0) {
-              html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">`;
-              html += `<strong style="font-size: 14px;color:var(--error)">相关失败案例</strong>`;
-              for (const f of failures) {
-                html += `<div style="margin-top:4px;padding:5px 8px;background:var(--error-soft);border-left:3px solid var(--error);border-radius:0 4px 4px 0;font-size: 14px">`;
-                html += `<div><code style="font-size: 13px">${escHtml(f.failure_id)}</code> <strong>${escHtml(f.title)}</strong>`;
-                if (f.status) html += ` <span class="muted" style="font-size: 13px">[${escHtml(f.status)}]</span>`;
-                html += `</div>`;
-                if (f.failure_statement) {
-                  html += `<div class="muted" style="font-size: 13px;margin-top:2px">${escHtml(f.failure_statement)}</div>`;
+              const failures = Array.isArray(cr.failure_refs) ? cr.failure_refs : [];
+              if (failures.length > 0) {
+                html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">`;
+                html += `<strong style="font-size: 14px;color:var(--error)">相关失败案例</strong>`;
+                for (const f of failures) {
+                  html += `<div style="margin-top:4px;padding:5px 8px;background:var(--error-soft);border-left:3px solid var(--error);border-radius:0 4px 4px 0;font-size: 14px">`;
+                  html += `<div><code style="font-size: 13px">${escHtml(f.failure_id)}</code> <strong>${escHtml(f.title)}</strong>`;
+                  if (f.status) html += ` <span class="muted" style="font-size: 13px">[${escHtml(f.status)}]</span>`;
+                  html += `</div>`;
+                  if (f.failure_statement) {
+                    html += `<div class="muted" style="font-size: 13px;margin-top:2px">${escHtml(f.failure_statement)}</div>`;
+                  }
+                  html += `</div>`;
                 }
                 html += `</div>`;
               }
-              html += `</div>`;
+              if (!html) html = '<span class="muted">（未找到 mechanism/factor_family 字段，建议完善卡片 frontmatter）</span>';
+              const constraintReportEl = $("exploreConstraintReport");
+              if (constraintReportEl) constraintReportEl.innerHTML = html;
+              // Default to constraint tab in constrained mode
+              switchExploreRightTab("constraint");
+            } else {
+              if (constraintTab) constraintTab.style.display = "none";
+              // In non-constrained mode, show placeholder until a card is clicked
+              switchExploreRightTab("placeholder");
             }
-            if (!html) html = '<span class="muted">（未找到 mechanism/factor_family 字段，建议完善卡片 frontmatter）</span>';
-            $("exploreConstraintReport").innerHTML = html;
-            // Default to constraint tab in constrained mode
-            switchExploreRightTab("constraint");
-          } else {
-            constraintTab.style.display = "none";
-            // In non-constrained mode, show placeholder until a card is clicked
-            switchExploreRightTab("placeholder");
+          } catch (renderError) {
+            console.error("explore render", renderError);
+            const cardListEl = $("exploreCardList");
+            if (cardListEl) {
+              cardListEl.innerHTML = `<span style="color:var(--error)">卡片渲染失败：${escHtml(renderError.message || renderError)}</span>`;
+            }
           }
-
-          // Show prompt + copy button
-          $("explorePromptBox").textContent = data.gpt_prompt || "";
-          $("exploreResults").style.display = "";
-          $("btnCopyExplorePrompt").style.display = "";
           return `找到 ${cards.length} 张相关卡片`;
         });
       });
       $("btnCopyExplorePrompt").addEventListener("click", (e) => copyText("explorePromptBox", e.currentTarget));
+      $("btnRecordExploreResponse").addEventListener("click", (e) => {
+        withLoading(e.currentTarget, "回灌响应", async () => {
+          const sessionId = state.exploreSessionId || "";
+          const responseText = ($("exploreResponseText") || {value: ""}).value || "";
+          if (!sessionId) throw new Error("尚未生成可回灌 session，请重新生成 prompt");
+          if (!responseText.trim()) throw new Error("请先粘贴外部 LLM 响应");
+          const data = await api("/api/vault/record-explore-response", "POST", {
+            session_id: sessionId,
+            response_text: responseText,
+          });
+          renderExploreLintReport(data.lint_report || {});
+          state.exploreSessionPayload = {
+            ...(state.exploreSessionPayload || {}),
+            response: responseText,
+            lint_report: data.lint_report || null,
+          };
+          await loadExploreSessions(sessionId);
+          return "回灌完成";
+        });
+      });
 
       // Bridge Workspace
       const bind = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+
+      bind("btnRefreshExploreSessions", "click", (e) => {
+        withLoading(e.currentTarget, "刷新会话", async () => {
+          await loadExploreSessions(state.selectedExploreSessionId || state.exploreSessionId || "");
+          return "会话已刷新";
+        });
+      });
+      bind("btnExploreApplyProject", "click", () => applyExploreToProjectHypothesis());
+      bind("btnExploreFillPreflight", "click", () => fillPreflightFromExplore());
+      bind("btnExploreGenerateFactorDraft", "click", () => generateFactorDraftFromExplore());
 
       bind("btnCreateProject", "click", (e) => {
         withLoading(e.currentTarget, "新建项目", async () => {
@@ -6984,6 +8674,18 @@ ${styleText}
       $("btnRefreshRuns").addEventListener("click", (e) => {
         withLoading(e.currentTarget, "刷新", async () => { await loadRuns(); });
       });
+      $("btnCompareRuns").addEventListener("click", (e) => {
+        withLoading(e.currentTarget, "运行对比", async () => {
+          const ok = await compareSelectedRuns();
+          return ok ? "对比完成" : "已提示";
+        });
+      });
+      $("btnClearRunCompare").addEventListener("click", (e) => {
+        withLoading(e.currentTarget, "清空", async () => {
+          clearRunCompareSelection({ resetPanel: true });
+          return "已清空";
+        });
+      });
       bind("btnRefreshMetricsRuns", "click", (e) => {
         withLoading(e.currentTarget, "刷新", async () => {
           await loadRuns();
@@ -7032,10 +8734,13 @@ ${styleText}
       // Boot
       await loadCategories();
       await loadProjects();
+      await loadExploreSessions();
       await loadEvaluationProfiles();
       await loadCustomFactors();
       await loadDashboard();
       updateAutoRefreshButton();
+      updateRunCompareSelectedCount();
+      resetRunComparePanel();
       switchView("dashboard");
     }
 

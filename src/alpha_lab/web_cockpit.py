@@ -19,8 +19,8 @@ from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLa
 from alpha_lab.real_cases.single_factor.pipeline import (
     SingleFactorBatchParallelConfig,
     run_single_factor_case,
-    run_single_factor_cases,
 )
+from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
 from alpha_lab.reporting.renderers import write_case_report
 from alpha_lab.research_bridge.models import (
     load_project_config,
@@ -275,38 +275,14 @@ class _CockpitRunStore:
             return ordered_groups
 
     def _execute_task_group(self, tasks: list[_RunTask]) -> None:
-        if len(tasks) <= 1:
-            for task in tasks:
-                self._execute_single_task(task)
-            return
-
-        try:
-            results = run_single_factor_cases(
-                [task.spec_path for task in tasks],
-                output_root_dir=tasks[0].output_root_dir,
-                evaluation_profile=tasks[0].evaluation_profile,
-                vault_export_mode="skip",
-                batch_parallel_config=_build_frontend_batch_parallel_config(len(tasks)),
-                reuse_input_bundle=True,
-            )
-        except Exception:
-            for task in tasks:
-                self._execute_single_task(task)
-            return
-
-        if len(results) != len(tasks):
-            for task in tasks:
-                self._execute_single_task(task)
-            return
-
-        for task, result in zip(tasks, results, strict=True):
-            self._finalize_success(task.run_id, task.render_report, result)
+        for task in tasks:
+            self._execute_single_task(task)
 
     def _execute_single_task(self, task: _RunTask) -> None:
         try:
             result = run_single_factor_case(
                 task.spec_path,
-                output_root_dir=task.output_root_dir,
+                output_root_dir=_resolve_cockpit_run_output_root_dir(task),
                 evaluation_profile=task.evaluation_profile,
                 vault_export_mode="skip",
             )
@@ -348,6 +324,24 @@ def _build_frontend_batch_parallel_config(
         max_workers=worker_slots,
         factors_per_worker=_FRONTEND_BATCH_FACTORS_PER_WORKER,
     )
+
+
+def _resolve_cockpit_run_output_root_dir(task: _RunTask) -> Path:
+    try:
+        base_root = (
+            Path(task.output_root_dir).expanduser().resolve()
+            if task.output_root_dir is not None
+            else Path(
+                load_single_factor_case_spec(
+                    Path(task.spec_path).expanduser().resolve()
+                ).output.root_dir
+            )
+            .expanduser()
+            .resolve()
+        )
+    except Exception:
+        base_root = Path(task.output_root_dir or "__default_output_root__").expanduser().resolve()
+    return base_root / "_web_runs" / task.run_id
 
 
 class _CockpitService:

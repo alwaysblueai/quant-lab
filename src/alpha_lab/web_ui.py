@@ -37,7 +37,6 @@ from alpha_lab.factor_recipe import FactorRecipeError, build_factor_from_recipe_
 from alpha_lab.real_cases.single_factor.pipeline import (
     SingleFactorBatchParallelConfig,
     run_single_factor_case,
-    run_single_factor_cases,
 )
 from alpha_lab.real_cases.single_factor.spec import (
     PreprocessSpec,
@@ -301,32 +300,8 @@ class _WebRunStore:
             except Exception as exc:
                 self._mark_failed(task.run_id, exc)
 
-        if len(prepared) <= 1:
-            for task, spec_path in prepared:
-                self._execute_single_task(task, spec_path)
-            return
-
-        try:
-            results = run_single_factor_cases(
-                [spec_path for _, spec_path in prepared],
-                output_root_dir=prepared[0][0].output_root_dir,
-                evaluation_profile=prepared[0][0].evaluation_profile,
-                vault_export_mode="skip",
-                batch_parallel_config=_build_frontend_batch_parallel_config(len(prepared)),
-                reuse_input_bundle=True,
-            )
-        except Exception:
-            for task, spec_path in prepared:
-                self._execute_single_task(task, spec_path)
-            return
-
-        if len(results) != len(prepared):
-            for task, spec_path in prepared:
-                self._execute_single_task(task, spec_path)
-            return
-
-        for (task, _), result in zip(prepared, results, strict=True):
-            self._finalize_success(task.run_id, task.render_report, result)
+        for task, spec_path in prepared:
+            self._execute_single_task(task, spec_path)
 
     def _prepare_task_spec(self, task: _RunTask) -> Path:
         spec_path = Path(self._records[task.run_id].spec_path)
@@ -342,7 +317,7 @@ class _WebRunStore:
         try:
             result = run_single_factor_case(
                 spec_path,
-                output_root_dir=task.output_root_dir,
+                output_root_dir=_resolve_web_ui_run_output_root_dir(task),
                 evaluation_profile=task.evaluation_profile,
                 vault_export_mode="skip",
             )
@@ -669,6 +644,10 @@ def _safe_upload_filename(filename: str) -> str:
     if "." not in safe:
         return safe + ".yaml"
     return safe
+
+
+def _resolve_web_ui_run_output_root_dir(task: _RunTask) -> Path:
+    return Path(task.output_root_dir).expanduser().resolve() / "_web_runs" / task.run_id
 
 
 def _prepare_spec_for_data_source(
@@ -1543,7 +1522,7 @@ def _extract_visualization_payload(artifact_paths: dict[str, str]) -> dict[str, 
         else []
     )
     long_short_points = (
-        _read_long_short_from_group_returns(group_returns_path)
+        _read_long_short_from_group_returns(group_returns_path, max_points=0)
         if group_returns_path is not None
         else []
     )
@@ -2244,9 +2223,10 @@ def _index_html() -> str:
             <option value="pilot">pilot: 最近 3 年 / top_liquid_300 / qfq</option>
             <option value="standard" selected>standard: 最近 5 年 / listed_90d / qfq</option>
             <option value="robust">robust: 最近 8 年 / listed_90d / qfq</option>
+            <option value="institutional">institutional: 最近 8 年 / 私募口径 / qfq</option>
           </select>
           <p id="data-slice-preset-hint" class="source-hint">
-            standard 作为默认预设；流动性 universe 按过去 60 日平均成交额排序，
+            standard 作为默认预设；institutional 会剔除 ST/停牌和低流动性尾部，
             可继续手动改开始/结束日期。
           </p>
         </div>
@@ -2335,6 +2315,11 @@ def _index_html() -> str:
       robust: {
         years: 8,
         hint: "robust: 最近 8 年，listed_90d，qfq。适合稳健性复核。",
+      },
+      institutional: {
+        years: 8,
+        hint: "institutional: 最近 8 年，institutional_ashare，qfq。"
+          + "上市满 180 天，剔除 ST/停牌，并过滤低流动性尾部。",
       },
     };
 
@@ -2881,6 +2866,115 @@ def _index_html() -> str:
       visualizationWrap.appendChild(grid);
     }
 
+    function parseAxisDate(value) {
+      const text = String(value || "").trim();
+      if (!text) return null;
+      const normalized = text.replace(/[/.]/g, "-");
+      let match = normalized.match(/^(\\d{4})-(\\d{1,2})(?:-(\\d{1,2}))?/);
+      if (!match) {
+        const compactYmd = normalized.match(/(?:^|\\D)(\\d{4})(\\d{2})(\\d{2})(?:\\D|$)/);
+        if (compactYmd) {
+          match = ["", compactYmd[1], compactYmd[2], compactYmd[3]];
+        } else {
+          const compactYm = normalized.match(/(?:^|\\D)(\\d{4})(\\d{2})(?:\\D|$)/);
+          if (compactYm) {
+            match = ["", compactYm[1], compactYm[2], "1"];
+          }
+        }
+      }
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3] || "1");
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+      if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() !== year
+        || parsed.getMonth() !== month - 1
+        || parsed.getDate() !== day
+      ) {
+        return null;
+      }
+      return parsed;
+    }
+
+    function formatAxisDateLabel(date, granularity = "month") {
+      const base = `${date.getFullYear()}.${date.getMonth() + 1}`;
+      return granularity === "day" ? `${base}.${date.getDate()}` : base;
+    }
+
+    function addAxisDays(date, days) {
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+    }
+
+    function addAxisMonths(date, months) {
+      const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+      const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+      target.setDate(Math.min(date.getDate(), lastDay));
+      return target;
+    }
+
+    function chooseAxisDateTickInterval(start, end) {
+      const spanDays = Math.max(0, (end - start) / (86400 * 1000));
+      if (spanDays <= 45) return { days: 7, months: 0, granularity: "day", minLastGapDays: 4 };
+      if (spanDays <= 120) return { days: 14, months: 0, granularity: "day", minLastGapDays: 7 };
+      if (spanDays <= 550) return { days: 0, months: 1, granularity: "month", minLastGapDays: 15 };
+      if (spanDays <= 1095) return { days: 0, months: 3, granularity: "month", minLastGapDays: 45 };
+      if (spanDays <= 2190) return { days: 0, months: 6, granularity: "month", minLastGapDays: 90 };
+      return { days: 0, months: 12, granularity: "month", minLastGapDays: 180 };
+    }
+
+    function addAxisDateTickInterval(date, interval) {
+      if (interval.days > 0) return addAxisDays(date, interval.days);
+      return addAxisMonths(date, Math.max(1, interval.months || 1));
+    }
+
+    function buildAnnualDateTicks(dateRows) {
+      const parsed = (Array.isArray(dateRows) ? dateRows : [])
+        .map((value, idx) => ({ idx, date: parseAxisDate(value) }))
+        .filter((item) => item.date instanceof Date && Number.isFinite(item.date.getTime()));
+      if (parsed.length < 2) return [];
+      const start = parsed[0].date;
+      const end = parsed[parsed.length - 1].date;
+      const interval = chooseAxisDateTickInterval(start, end);
+      const ticks = [];
+      let lastIdx = -1;
+      let target = new Date(start.getTime());
+      while (target <= end) {
+        const item = parsed.find(
+          (candidate) => candidate.idx > lastIdx && candidate.date >= target,
+        );
+        if (item) {
+          const label = formatAxisDateLabel(item.date, interval.granularity);
+          if (!ticks.length || ticks[ticks.length - 1].label !== label) {
+            ticks.push({ x: item.idx + 1, label, date: item.date });
+            lastIdx = item.idx;
+          }
+        }
+        target = addAxisDateTickInterval(target, interval);
+      }
+      const last = parsed[parsed.length - 1];
+      const lastGapDays = ticks.length
+        ? (last.date - ticks[ticks.length - 1].date) / (86400 * 1000)
+        : Infinity;
+      if (!ticks.length || (last.idx > lastIdx && lastGapDays >= interval.minLastGapDays)) {
+        ticks.push({
+          x: last.idx + 1,
+          label: formatAxisDateLabel(last.date, interval.granularity),
+          date: last.date,
+        });
+      }
+      if (ticks.length < 2 && last.idx > lastIdx) {
+        ticks.push({
+          x: last.idx + 1,
+          label: formatAxisDateLabel(last.date, interval.granularity),
+          date: last.date,
+        });
+      }
+      return ticks.map((tick) => ({ x: tick.x, label: tick.label }));
+    }
+
     function buildLineChartCard(title, points, color) {
       const parsed = [];
       for (const item of points) {
@@ -2905,14 +2999,17 @@ def _index_html() -> str:
 
       const width = 420;
       const height = 120;
-      const pad = 10;
-      const innerW = width - pad * 2;
-      const innerH = height - pad * 2;
+      const padL = 28;
+      const padR = 10;
+      const padT = 10;
+      const padB = 24;
+      const innerW = width - padL - padR;
+      const innerH = height - padT - padB;
       const n = parsed.length;
       const lineParts = [];
       for (let i = 0; i < n; i += 1) {
-        const x = pad + (i / (n - 1)) * innerW;
-        const y = pad + (1 - (parsed[i].value - min) / (max - min)) * innerH;
+        const x = padL + (i / (n - 1)) * innerW;
+        const y = padT + (1 - (parsed[i].value - min) / (max - min)) * innerH;
         lineParts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
       }
 
@@ -2929,10 +3026,10 @@ def _index_html() -> str:
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
       const base = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      base.setAttribute("x1", String(pad));
-      base.setAttribute("x2", String(width - pad));
-      base.setAttribute("y1", String(height - pad));
-      base.setAttribute("y2", String(height - pad));
+      base.setAttribute("x1", String(padL));
+      base.setAttribute("x2", String(width - padR));
+      base.setAttribute("y1", String(height - padB));
+      base.setAttribute("y2", String(height - padB));
       base.setAttribute("stroke", "#d0d7de");
       base.setAttribute("stroke-width", "1");
       svg.appendChild(base);
@@ -2943,6 +3040,19 @@ def _index_html() -> str:
       poly.setAttribute("stroke", color);
       poly.setAttribute("stroke-width", "2");
       svg.appendChild(poly);
+
+      const ticks = buildAnnualDateTicks(parsed.map((item) => item.date));
+      for (const tick of ticks) {
+        const x = padL + ((tick.x - 1) / (n - 1)) * innerW;
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", x.toFixed(2));
+        label.setAttribute("y", String(height - 6));
+        label.setAttribute("fill", "#57606a");
+        label.setAttribute("font-size", "9");
+        label.setAttribute("text-anchor", tick.x === 1 ? "start" : tick.x === n ? "end" : "middle");
+        label.textContent = tick.label;
+        svg.appendChild(label);
+      }
 
       card.appendChild(svg);
 
