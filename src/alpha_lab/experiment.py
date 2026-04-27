@@ -4,10 +4,11 @@ import datetime
 import subprocess
 import time
 import warnings
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
+from types import TracebackType
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -564,13 +565,28 @@ def run_factor_experiment(
 
     stage_timings: dict[str, float] = {}
 
-    @contextmanager
-    def _stage(name: str) -> Iterator[None]:
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            stage_timings[name] = stage_timings.get(name, 0.0) + (time.perf_counter() - start)
+    class _StageTimer:
+        def __init__(self, name: str) -> None:
+            self._name = name
+            self._start = 0.0
+
+        def __enter__(self) -> None:
+            self._start = time.perf_counter()
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> Literal[False]:
+            del exc_type, exc, traceback
+            stage_timings[self._name] = stage_timings.get(self._name, 0.0) + (
+                time.perf_counter() - self._start
+            )
+            return False
+
+    def _stage(name: str) -> _StageTimer:
+        return _StageTimer(name)
 
     # --- Step 0: resolve strategy overrides ---------------------------------
     # StrategySpec is the explicit domain boundary between the factor research

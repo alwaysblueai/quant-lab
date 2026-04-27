@@ -2065,17 +2065,17 @@
             "campaign_triage_reasons": [
               "fragile across rolling windows",
               "single-case verdict indicates fragility",
-              "long-short tail risk is elevated",
               "IC decays sharply after 1-day execution lag",
-              "confidence intervals remain supportive"
+              "confidence intervals remain supportive",
+              "coverage and validity are sufficient"
             ],
             "factor_verdict_reasons": [
               "positive IC and RankIC means",
               "IC and RankIC signs are consistently positive",
               "signal weakens materially in some periods",
-              "long-short max drawdown is elevated",
               "confidence interval overlaps zero: long-short",
-              "apparent edge is weak relative to estimation noise"
+              "apparent edge is weak relative to estimation noise",
+              "IC decays sharply after 1-day execution lag"
             ],
             "level12_transition_reasons": [
               "campaign triage: Fragile / monitor",
@@ -2134,15 +2134,15 @@
               "coverage and validity are sufficient",
               "turnover efficiency is acceptable",
               "rebalance cadence matches IC decay profile",
-              "Sharpe survives multiple-testing haircut"
+              "long-short tail risk is controlled"
             ],
             "factor_verdict_reasons": [
               "positive IC and RankIC means",
               "IC and RankIC signs are consistently positive",
               "signal weakens materially in some periods",
-              "long-short max drawdown is elevated",
               "confidence interval overlaps zero: long-short",
-              "IC and RankIC validity is high"
+              "IC and RankIC validity is high",
+              "long-short spread is positive with positive IR"
             ],
             "level12_transition_reasons": [
               "campaign triage: Strong Level 1 candidate",
@@ -2492,7 +2492,7 @@
             "coverage and validity are sufficient",
             "turnover efficiency is acceptable",
             "rebalance cadence matches IC decay profile",
-            "Sharpe survives multiple-testing haircut"
+            "long-short tail risk is controlled"
           ],
           "case_name": "case_triage_sensitive",
           "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/experiment_card.md",
@@ -2502,9 +2502,9 @@
             "positive IC and RankIC means",
             "IC and RankIC signs are consistently positive",
             "signal weakens materially in some periods",
-            "long-short max drawdown is elevated",
             "confidence interval overlaps zero: long-short",
-            "IC and RankIC validity is high"
+            "IC and RankIC validity is high",
+            "long-short spread is positive with positive IR"
           ],
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
@@ -3083,9 +3083,9 @@
           "campaign_triage_reasons": [
             "fragile across rolling windows",
             "single-case verdict indicates fragility",
-            "long-short tail risk is elevated",
             "IC decays sharply after 1-day execution lag",
-            "confidence intervals remain supportive"
+            "confidence intervals remain supportive",
+            "coverage and validity are sufficient"
           ],
           "case_name": "case_triage_sensitive",
           "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/experiment_card.md",
@@ -3095,9 +3095,9 @@
             "positive IC and RankIC means",
             "IC and RankIC signs are consistently positive",
             "signal weakens materially in some periods",
-            "long-short max drawdown is elevated",
             "confidence interval overlaps zero: long-short",
-            "apparent edge is weak relative to estimation noise"
+            "apparent edge is weak relative to estimation noise",
+            "IC decays sharply after 1-day execution lag"
           ],
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
