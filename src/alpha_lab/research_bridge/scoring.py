@@ -1,6 +1,6 @@
 """Typed hybrid scoring for explore-idea card retrieval (P0 + P1).
 
-Splits "card relevance" into five orthogonal components and lets each
+Splits "card relevance" into base orthogonal components and lets each
 exploration mode weight them differently. Also exposes a hard filter for
 unsatisfied data dependencies (P1: ``depends_on`` / ``uses_data`` are
 graph relations, not similarity terms).
@@ -56,6 +56,7 @@ class ScoreComponents:
     mechanism: float = 0.0
     dependency: float = 0.0
     failure: float = 0.0
+    llm_relevance: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
         return {
@@ -64,6 +65,7 @@ class ScoreComponents:
             "mechanism": self.mechanism,
             "dependency": self.dependency,
             "failure": self.failure,
+            "llm_relevance": self.llm_relevance,
         }
 
 
@@ -74,23 +76,38 @@ class ScoreWeights:
     mechanism: float = 0.0
     dependency: float = 0.0
     failure: float = 0.0
+    llm_relevance: float = 0.0
 
 
 # Mode-conditioned weights for the alpha-lab factor-recipe explorer.
-# start: prioritize semantic + cross-domain (penalize cards close to known
-#   failures so cross-domain analogies aren't drowned by past attempts).
-# free: structured expansion — metadata + mechanism dominate.
-# constrained: hard convergence — dependency satisfaction and failure
-#   proximity matter most.
+# The vault is a source-material library, not a precedent court. Failure
+# proximity remains a diagnostic component surfaced to prompts, but it no
+# longer contributes to ranking or static kill behavior in Stage 1. Only
+# available_data can hard-filter a card before generation.
 ALPHA_MODE_WEIGHTS: dict[str, ScoreWeights] = {
     "start": ScoreWeights(
-        semantic=1.0, metadata=0.2, mechanism=0.2, dependency=0.0, failure=-0.5
+        semantic=1.0,
+        metadata=0.2,
+        mechanism=0.2,
+        dependency=0.0,
+        failure=0.0,
+        llm_relevance=1.0,
     ),
     "free": ScoreWeights(
-        semantic=0.6, metadata=0.7, mechanism=0.7, dependency=0.3, failure=0.0
+        semantic=0.6,
+        metadata=0.7,
+        mechanism=0.7,
+        dependency=0.3,
+        failure=0.0,
+        llm_relevance=0.6,
     ),
     "constrained": ScoreWeights(
-        semantic=0.4, metadata=0.6, mechanism=0.5, dependency=0.8, failure=0.6
+        semantic=0.4,
+        metadata=0.6,
+        mechanism=0.5,
+        dependency=0.8,
+        failure=0.0,
+        llm_relevance=0.3,
     ),
 }
 
@@ -99,13 +116,28 @@ ALPHA_MODE_WEIGHTS: dict[str, ScoreWeights] = {
 # ``free`` to match model-lab's mode names.
 MODEL_MODE_WEIGHTS: dict[str, ScoreWeights] = {
     "start": ScoreWeights(
-        semantic=1.0, metadata=0.2, mechanism=0.2, dependency=0.0, failure=-0.5
+        semantic=1.0,
+        metadata=0.2,
+        mechanism=0.2,
+        dependency=0.0,
+        failure=0.0,
+        llm_relevance=1.0,
     ),
     "explore": ScoreWeights(
-        semantic=0.6, metadata=0.7, mechanism=0.6, dependency=0.3, failure=0.0
+        semantic=0.6,
+        metadata=0.7,
+        mechanism=0.6,
+        dependency=0.3,
+        failure=0.0,
+        llm_relevance=0.6,
     ),
     "constrained": ScoreWeights(
-        semantic=0.4, metadata=0.6, mechanism=0.5, dependency=0.8, failure=0.6
+        semantic=0.4,
+        metadata=0.6,
+        mechanism=0.5,
+        dependency=0.8,
+        failure=0.0,
+        llm_relevance=0.3,
     ),
 }
 
@@ -117,6 +149,7 @@ def aggregate_score(components: ScoreComponents, weights: ScoreWeights) -> float
         + components.mechanism * weights.mechanism
         + components.dependency * weights.dependency
         + components.failure * weights.failure
+        + components.llm_relevance * weights.llm_relevance
     )
 
 
@@ -270,10 +303,10 @@ def normalize_data_set(values: Iterable[str] | None) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 # Workflow stages (P2)
 #
-# Stages express the *research action layer* — where a session sits in the
-# mechanism → signal → validation flow. Stage and mode are orthogonal: the
-# stage selects which prompt template family runs; mode dials strictness
-# *within* that family.
+# These are the Stage 1 prompt substeps from docs/research_workflow.md:
+# mechanism discovery followed by signal mapping. Stage 3 data-kill still
+# has a legacy LLM helper constant below, but it is no longer part of the
+# public idea-explorer progression.
 # ---------------------------------------------------------------------------
 
 MECHANISM_DISCOVERY = "mechanism_discovery"
@@ -281,25 +314,35 @@ SIGNAL_MAPPING = "signal_mapping"
 VALIDATION_KILL_TESTS = "validation_kill_tests"
 
 WORKFLOW_STAGES: frozenset[str] = frozenset(
-    {MECHANISM_DISCOVERY, SIGNAL_MAPPING, VALIDATION_KILL_TESTS}
+    {MECHANISM_DISCOVERY, SIGNAL_MAPPING}
 )
+STAGE3_LLM_HELPER_STAGES: frozenset[str] = frozenset({VALIDATION_KILL_TESTS})
 
 _WORKFLOW_STAGE_PROGRESSION: dict[str, str | None] = {
     MECHANISM_DISCOVERY: SIGNAL_MAPPING,
-    SIGNAL_MAPPING: VALIDATION_KILL_TESTS,
-    VALIDATION_KILL_TESTS: None,
+    SIGNAL_MAPPING: None,
 }
 
 
-def normalize_workflow_stage(stage: str | None) -> str:
+def normalize_workflow_stage(
+    stage: str | None, *, allow_stage3_helper: bool = False
+) -> str:
     text = (stage or "").strip().lower()
     if text in WORKFLOW_STAGES:
+        return text
+    if allow_stage3_helper and text in STAGE3_LLM_HELPER_STAGES:
         return text
     return MECHANISM_DISCOVERY
 
 
 def recommend_next_stage(current: str | None) -> str | None:
+    if (current or "").strip().lower() in STAGE3_LLM_HELPER_STAGES:
+        return None
     return _WORKFLOW_STAGE_PROGRESSION.get(normalize_workflow_stage(current))
+
+
+def is_stage3_llm_helper_stage(stage: str | None) -> bool:
+    return (stage or "").strip().lower() in STAGE3_LLM_HELPER_STAGES
 
 
 # ---------------------------------------------------------------------------

@@ -120,6 +120,12 @@ class SingleFactorDiagnosticsSnapshot(TypedDict):
     run_baseline_comparison: bool
     run_random_baseline: bool
     run_lag_sensitivity: bool
+    diagnostic_max_dates: int | None
+    diagnostic_sample_mode: str
+
+
+class ModelFactorOverridesSnapshot(TypedDict):
+    min_retrain_every_n_dates: int | None
 
 
 class ResearchEvaluationAuditSnapshot(TypedDict):
@@ -133,6 +139,7 @@ class ResearchEvaluationAuditSnapshot(TypedDict):
     level2_promotion: Level2PromotionSnapshot
     level2_portfolio_validation: Level2PortfolioValidationSnapshot
     single_factor_diagnostics: SingleFactorDiagnosticsSnapshot
+    model_factor_overrides: ModelFactorOverridesSnapshot
 
 
 def get_research_evaluation_profile_intent(profile_name: str) -> str:
@@ -355,6 +362,35 @@ class SingleFactorDiagnosticsConfig:
     run_baseline_comparison: bool = True
     run_random_baseline: bool = True
     run_lag_sensitivity: bool = True
+    diagnostic_max_dates: int | None = None
+    diagnostic_sample_mode: str = "latest"
+
+    def __post_init__(self) -> None:
+        if self.diagnostic_max_dates is not None and self.diagnostic_max_dates <= 0:
+            raise ValueError("single_factor_diagnostics.diagnostic_max_dates must be > 0")
+        if self.diagnostic_sample_mode not in {"latest", "even"}:
+            raise ValueError(
+                "single_factor_diagnostics.diagnostic_sample_mode must be one of "
+                "['latest', 'even']"
+            )
+
+
+@dataclass(frozen=True)
+class ModelFactorOverridesConfig:
+    """Profile-level overrides applied to model-factor case specs.
+
+    Each field is an *override floor*: when set, the pipeline raises the
+    corresponding spec field to at least this value but never lowers it.
+    None means no override (pipeline uses the spec value as written).
+    """
+
+    min_retrain_every_n_dates: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.min_retrain_every_n_dates is not None and self.min_retrain_every_n_dates <= 0:
+            raise ValueError(
+                "model_factor_overrides.min_retrain_every_n_dates must be > 0"
+            )
 
 
 @dataclass(frozen=True)
@@ -377,6 +413,9 @@ class ResearchEvaluationConfig:
     )
     single_factor_diagnostics: SingleFactorDiagnosticsConfig = field(
         default_factory=SingleFactorDiagnosticsConfig
+    )
+    model_factor_overrides: ModelFactorOverridesConfig = field(
+        default_factory=ModelFactorOverridesConfig
     )
 
     def to_dict(self) -> dict[str, object]:
@@ -529,6 +568,17 @@ class ResearchEvaluationConfig:
                 "run_baseline_comparison": (self.single_factor_diagnostics.run_baseline_comparison),
                 "run_random_baseline": (self.single_factor_diagnostics.run_random_baseline),
                 "run_lag_sensitivity": (self.single_factor_diagnostics.run_lag_sensitivity),
+                "diagnostic_max_dates": (
+                    self.single_factor_diagnostics.diagnostic_max_dates
+                ),
+                "diagnostic_sample_mode": (
+                    self.single_factor_diagnostics.diagnostic_sample_mode
+                ),
+            },
+            "model_factor_overrides": {
+                "min_retrain_every_n_dates": (
+                    self.model_factor_overrides.min_retrain_every_n_dates
+                ),
             },
         }
 
@@ -658,8 +708,13 @@ def _build_exploratory_screening_profile() -> ResearchEvaluationConfig:
             run_execution_price_sensitivity=False,
             run_param_sensitivity=False,
             run_baseline_comparison=False,
-            run_random_baseline=False,
+            run_random_baseline=True,
             run_lag_sensitivity=False,
+            diagnostic_max_dates=500,
+            diagnostic_sample_mode="latest",
+        ),
+        model_factor_overrides=ModelFactorOverridesConfig(
+            min_retrain_every_n_dates=40,
         ),
     )
 
@@ -690,8 +745,11 @@ def _build_stricter_research_profile() -> ResearchEvaluationConfig:
             min_rolling_positive_share_regime_warning=0.55,
         ),
         uncertainty=UncertaintyConfig(
+            method="block_bootstrap",
             confidence_level=0.99,
             relative_half_width_warn=0.75,
+            bootstrap_resamples=800,
+            block_bootstrap_block_length=10,
         ),
         rolling_stability=RollingStabilityConfig(
             rolling_regime_min_positive_share=0.65,

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,7 @@ from alpha_lab.research_bridge.scoring import (
     aggregate_score,
     derive_failure_keywords,
     infer_available_data_from_frequency,
+    is_stage3_llm_helper_stage,
     normalize_data_set,
     normalize_workflow_stage,
     recommend_next_stage,
@@ -62,7 +65,17 @@ from alpha_lab.vault_export_graph_feedback import (
 )
 
 from . import loaders as bridge_loaders
+from . import mechanism_index
 from . import sessions as bridge_sessions
+from .llm_rerank import (
+    DEFAULT_MAX_CANDIDATES,
+    CategorizeOutcome,
+    RerankCandidate,
+    RerankOutcome,
+    categorize_and_compress,
+    rerank_candidates,
+)
+from .query_expansion import ExpansionOutcome, expand_query
 
 PROJECTS_DIRNAME = "55_projects"
 
@@ -168,6 +181,8 @@ class ExploreIdeaCard:
     summary: str
     snippet: str
     reasons: list[str]
+    transferable_moves: list[str] = field(default_factory=list)
+    operative_claims: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -180,6 +195,8 @@ class ExploreIdeaCard:
             "summary": self.summary,
             "snippet": self.snippet,
             "reasons": list(self.reasons),
+            "transferable_moves": list(self.transferable_moves),
+            "operative_claims": list(self.operative_claims),
         }
 
 
@@ -190,6 +207,7 @@ class ExploreIdeaResult:
     related_cards: list[ExploreIdeaCard]
     constraint_report: dict[str, object]
     gpt_prompt: str
+    insight_brief: list[str] = field(default_factory=list)
     # Always-on retrieval observability (P0/P1): score components per
     # candidate, dropped cards from hard filters, weights table for the
     # active mode, and the inferred query anchor.
@@ -202,6 +220,45 @@ class ExploreIdeaResult:
             "related_cards": [card.to_payload() for card in self.related_cards],
             "constraint_report": dict(self.constraint_report),
             "gpt_prompt": self.gpt_prompt,
+            "insight_brief": list(self.insight_brief),
+            "retrieval_diagnostics": dict(self.retrieval_diagnostics),
+        }
+
+
+@dataclass(frozen=True)
+class IdeaDraftResult:
+    idea: str
+    mode: str
+    stage: str
+    models: tuple[str, ...]
+    draft_dir: Path
+    shared_prompt_path: Path
+    model_dispatch_paths: dict[str, Path]
+    ledger_paths: dict[str, Path]
+    final_ledger_path: Path
+    reconcile_path: Path
+    retrieval_log_path: Path
+    manifest_path: Path
+    retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "idea": self.idea,
+            "mode": self.mode,
+            "stage": self.stage,
+            "models": list(self.models),
+            "draft_dir": str(self.draft_dir),
+            "shared_prompt_path": str(self.shared_prompt_path),
+            "model_dispatch_paths": {
+                key: str(value) for key, value in self.model_dispatch_paths.items()
+            },
+            "ledger_paths": {
+                key: str(value) for key, value in self.ledger_paths.items()
+            },
+            "final_ledger_path": str(self.final_ledger_path),
+            "reconcile_path": str(self.reconcile_path),
+            "retrieval_log_path": str(self.retrieval_log_path),
+            "manifest_path": str(self.manifest_path),
             "retrieval_diagnostics": dict(self.retrieval_diagnostics),
         }
 
@@ -511,6 +568,7 @@ def scaffold_case(
     prices_path: str = "./placeholder_prices.csv",
     universe_path: str = "./placeholder_universe.csv",
     factor_path: str = "./placeholder_factor.csv",
+    builder_kwargs: dict[str, Any] | None = None,
     preflight: bool = False,
     candidate_name: str | None = None,
     candidate_family: str | None = None,
@@ -556,6 +614,7 @@ def scaffold_case(
             target_horizon=target_horizon,
             rebalance_frequency=rebalance_frequency,
             direction=direction,
+            builder_kwargs=builder_kwargs or {},
         )
     else:
         payload = _build_generic_study_payload(
@@ -642,6 +701,12 @@ def explore_idea(
 ) -> ExploreIdeaResult:
     resolved_vault = _resolve_bridge_vault_root(vault_root)
     normalized_mode = _normalize_explore_mode(mode)
+    if is_stage3_llm_helper_stage(stage):
+        raise ValueError(
+            "validation_kill_tests has moved out of the idea explorer. "
+            "Use Stage 1 mechanism_discovery/signal_mapping here, then hand "
+            "ledger_v2 + upgrade_diff to the Stage 3 data-kill workflow."
+        )
     normalized_stage = normalize_workflow_stage(stage)
     normalized_idea = idea.strip()
     if not normalized_idea:
@@ -712,14 +777,61 @@ def explore_idea(
                 max_items=8,
             )
         )
-    ranked, dropped_cards = _typed_rank_candidates(
-        semantic_matches=semantic_matches,
+    v2_payload = _try_v2_rank_candidates(
+        idea=normalized_idea,
+        mode=normalized_mode,
+        vault_root=resolved_vault,
+        workspace_root=workspace_root,
         graph=graph,
+        embeddings=embeddings,
+        index_rows=index_rows,
         anchor=anchor,
         weights=weights,
         available_data=available_data_set,
         failure_keywords=failure_keywords,
     )
+    insight_brief: list[str] = []
+    extra_retrieval_diagnostics: dict[str, object] = {}
+    if v2_payload is not None:
+        ranked = v2_payload.ranked
+        dropped_cards = v2_payload.dropped_cards
+        rerank_outcome = _disabled_rerank_outcome("superseded_by_v2_categorize")
+        insight_brief = v2_payload.insight_brief
+        extra_retrieval_diagnostics = v2_payload.diagnostics
+    else:
+        scored, dropped_cards = _score_candidates(
+            semantic_matches=semantic_matches,
+            graph=graph,
+            anchor=anchor,
+            available_data=available_data_set,
+            failure_keywords=failure_keywords,
+        )
+        rerank_outcome = rerank_candidates(
+            idea=normalized_idea,
+            mode=normalized_mode,
+            candidates=[
+                RerankCandidate(
+                    name=item.result.name,
+                    summary=item.result.summary or "",
+                    domain=item.metadata.domain,
+                    mechanism=item.metadata.mechanism,
+                    factor_family=item.metadata.factor_family,
+                    path=item.result.path,
+                )
+                for item in scored[:DEFAULT_MAX_CANDIDATES]
+            ],
+        )
+        scored = [
+            replace(
+                item,
+                components=replace(
+                    item.components,
+                    llm_relevance=rerank_outcome.scores.get(item.result.name, 0.0),
+                ),
+            )
+            for item in scored
+        ]
+        ranked = _finalize_ranking(scored, weights)
     ranked_matches: list[SearchResult] = [item.result for item in ranked]
     score_components_by_name: dict[str, dict[str, float]] = {
         item.result.name: {
@@ -756,6 +868,7 @@ def explore_idea(
         suggested_mechanism=suggested_mechanism,
     )
     prompt_context["score_components_by_name"] = score_components_by_name
+    prompt_context["insight_brief"] = insight_brief
     constraint_report: dict[str, object] = (
         prompt_context if normalized_mode == "constrained" else {}
     )
@@ -771,7 +884,9 @@ def explore_idea(
             "mechanism": weights.mechanism,
             "dependency": weights.dependency,
             "failure": weights.failure,
+            "llm_relevance": weights.llm_relevance,
         },
+        "llm_rerank": _llm_rerank_diagnostics(rerank_outcome),
         "query_anchor": {
             "domain": anchor.domain,
             "market": anchor.market,
@@ -781,6 +896,7 @@ def explore_idea(
         "available_data_provided": available_data_set is not None,
         "available_data_source": inventory_source,
     }
+    retrieval_diagnostics.update(extra_retrieval_diagnostics)
 
     upstream_session_id: str | None = None
     upstream_sections_injected = 0
@@ -865,6 +981,7 @@ def explore_idea(
             "related_cards": [card.to_payload() for card in related_cards],
             "constraint_report": constraint_report,
             "gpt_prompt": gpt_prompt,
+            "insight_brief": insight_brief,
             "retrieval_diagnostics": retrieval_diagnostics,
         }
         start_result = bridge_sessions.start_explore_session(
@@ -881,8 +998,435 @@ def explore_idea(
         related_cards=related_cards,
         constraint_report=constraint_report,
         gpt_prompt=gpt_prompt,
+        insight_brief=insight_brief,
         retrieval_diagnostics=retrieval_diagnostics,
     )
+
+
+def draft_idea(
+    *,
+    vault_root: str | Path | None,
+    idea: str,
+    models: list[str] | tuple[str, ...] | str | None = None,
+    mode: str = "start",
+    project_slug: str | None = None,
+    top_k: int = 8,
+    available_data: frozenset[str] | list[str] | None = None,
+    stage: str | None = None,
+    workspace_root: str | Path = ".",
+    output_root: str | Path | None = None,
+    persist_session: bool = False,
+    inject_recent_drift: bool = False,
+    parent_session_id: str | None = None,
+) -> IdeaDraftResult:
+    """Create Stage 1 dual-engine draft artifacts without running an LLM.
+
+    The generated pack gives every engine the same retrieval snapshot and
+    Markdown-only prompt. Desktop agents should not write YAML or files; the
+    user carries the reviewed Markdown into Stage 2 outside alpha-lab.
+    """
+
+    selected_models = _normalize_idea_draft_models(models)
+    resolved_workspace = Path(workspace_root).expanduser().resolve()
+    resolved_vault = _resolve_bridge_vault_root(vault_root)
+    explore_result = explore_idea(
+        vault_root=resolved_vault,
+        idea=idea,
+        mode=mode,
+        project_slug=project_slug,
+        top_k=top_k,
+        available_data=available_data,
+        stage=stage,
+        workspace_root=resolved_workspace,
+        persist_session=persist_session,
+        inject_recent_drift=inject_recent_drift,
+        parent_session_id=parent_session_id,
+    )
+    diagnostics = dict(explore_result.retrieval_diagnostics)
+    normalized_stage = str(diagnostics.get("stage") or MECHANISM_DISCOVERY)
+    base_dir = (
+        Path(output_root).expanduser().resolve()
+        if output_root is not None
+        else resolved_workspace / "artifacts" / "alpha_lab_explorer" / "drafts"
+    )
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    draft_name = f"{stamp}__{_safe_idea_draft_slug(explore_result.idea)[:48]}"
+    draft_dir = _allocate_unique_draft_dir(base_dir, draft_name)
+    draft_dir.mkdir(parents=True, exist_ok=False)
+
+    shared_prompt_path = draft_dir / "prompt.shared.md"
+    shared_prompt_path.write_text(explore_result.gpt_prompt, encoding="utf-8")
+
+    model_dispatch_paths: dict[str, Path] = {}
+    ledger_paths: dict[str, Path] = {}
+    for model in selected_models:
+        dispatch_path = draft_dir / f"dispatch.{model}.md"
+        dispatch_path.write_text(
+            _render_idea_model_dispatch(
+                model=model,
+                idea=explore_result.idea,
+                result=explore_result,
+                draft_dir=draft_dir,
+                vault_root=resolved_vault,
+            ),
+            encoding="utf-8",
+        )
+        model_dispatch_paths[model] = dispatch_path
+
+        ledger_paths[model] = draft_dir / f"ledger_v1.{model}.yaml"
+
+    final_ledger_path = draft_dir / "ledger_v1.yaml"
+    reconcile_path = draft_dir / "reconcile.md"
+    reconcile_path.write_text(
+        _render_reconcile_template(
+            idea=explore_result.idea,
+            models=selected_models,
+            ledger_paths=ledger_paths,
+            final_ledger_path=final_ledger_path,
+        ),
+        encoding="utf-8",
+    )
+    retrieval_log_path = draft_dir / "retrieval_log.md"
+    retrieval_log_path.write_text(
+        _render_stage1_retrieval_log(explore_result),
+        encoding="utf-8",
+    )
+    manifest_path = draft_dir / "manifest.json"
+    manifest_payload = {
+        "type": "alpha_lab_idea_draft",
+        "created_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "idea": explore_result.idea,
+        "mode": explore_result.mode,
+        "stage": normalized_stage,
+        "models": list(selected_models),
+        "shared_prompt_path": str(shared_prompt_path),
+        "model_dispatch_paths": {
+            key: str(value) for key, value in model_dispatch_paths.items()
+        },
+        "ledger_paths": {key: str(value) for key, value in ledger_paths.items()},
+        "final_ledger_path": str(final_ledger_path),
+        "reconcile_path": str(reconcile_path),
+        "retrieval_log_path": str(retrieval_log_path),
+        "retrieval_diagnostics": diagnostics,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return IdeaDraftResult(
+        idea=explore_result.idea,
+        mode=explore_result.mode,
+        stage=normalized_stage,
+        models=selected_models,
+        draft_dir=draft_dir,
+        shared_prompt_path=shared_prompt_path,
+        model_dispatch_paths=model_dispatch_paths,
+        ledger_paths=ledger_paths,
+        final_ledger_path=final_ledger_path,
+        reconcile_path=reconcile_path,
+        retrieval_log_path=retrieval_log_path,
+        manifest_path=manifest_path,
+        retrieval_diagnostics=diagnostics,
+    )
+
+
+def _normalize_idea_draft_models(
+    models: list[str] | tuple[str, ...] | str | None,
+) -> tuple[str, ...]:
+    raw_items: list[str]
+    if models is None:
+        raw_items = ["claude", "codex"]
+    elif isinstance(models, str):
+        raw_items = [item.strip() for item in models.split(",")]
+    else:
+        raw_items = []
+        for item in models:
+            raw_items.extend(str(item).split(","))
+    normalized: list[str] = []
+    for item in raw_items:
+        name = item.strip().lower()
+        if not name:
+            continue
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", name):
+            raise ValueError(f"invalid model name: {item!r}")
+        if name not in normalized:
+            normalized.append(name)
+    if not normalized:
+        raise ValueError("at least one model must be provided")
+    return tuple(normalized)
+
+
+def _safe_idea_draft_slug(value: str) -> str:
+    normalized = re.sub(r"\s+", "-", value.strip())
+    normalized = re.sub(r"[^A-Za-z0-9_.-]", "-", normalized).strip(".-_")
+    if normalized:
+        return normalized
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"idea-{digest}"
+
+
+def _allocate_unique_draft_dir(base_dir: Path, draft_name: str) -> Path:
+    candidate = base_dir / draft_name
+    if not candidate.exists():
+        return candidate
+    for suffix in range(2, 1000):
+        candidate = base_dir / f"{draft_name}-{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"unable to allocate unique draft directory under {base_dir}")
+
+
+def _render_idea_model_dispatch(
+    *,
+    model: str,
+    idea: str,
+    result: ExploreIdeaResult,
+    draft_dir: Path,
+    vault_root: Path,
+) -> str:
+    label = _idea_draft_model_label(model)
+    bias = _idea_draft_model_bias(model)
+    lines = [
+        f"# Stage 1 Agent Prompt - {label}",
+        "",
+        "## 1. 新 idea",
+        idea,
+        "",
+        "## 2. 工作目录与资料位置",
+        f"- draft_dir：`{draft_dir}`",
+        f"- vault_root：`{vault_root}`",
+        "- 本轮不要创建、修改或保存任何 YAML 文件。",
+        "- 本轮只输出 Markdown 研究点评，供用户阅读、追问和带到网页版 GPT 讨论。",
+        "- 不要读取、引用或改写另一个 agent 的输出。",
+        "",
+        "## 3. Stage 1 纪律",
+        "- 第一轮回复必须是 Markdown 研究草稿：供用户阅读和讨论，不要输出 YAML，不要写文件。",
+        "- 即使用户后续要求补充，也优先继续完善 Markdown 点评；最终实现和结构化整理发生在 Stage2。",
+        "- 当前只做机制探索，不输出最终因子定义、完整公式、排名或 single best idea。",
+        "- 候选机制只增不减；不要做 keep/kill 判决。",
+        "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
+        "- `operative_claims` 只能作为弱上下文 hint，不作为淘汰条件。",
+        "- `inspired_by` / `fusion_of` / `cross_domain_jump` 是可选溯源；novel synthesis 合法。",
+        "- 机制命名不要直接使用 reversal / momentum / value / quality / size / "
+        "liquidity 等既有标签，也不要预设收益方向。",
+        "",
+        "## 4. 相关卡片列表",
+        "卡片路径相对于 vault root；请按 path 打开 quant-knowledge 原文后再写 Markdown 草稿。",
+    ]
+    if result.related_cards:
+        for idx, card in enumerate(result.related_cards[:8], start=1):
+            lines.extend(
+                [
+                    "",
+                    f"### K{idx}: {card.name}",
+                    f"- path: `{card.path}`",
+                    f"- summary: {card.summary}",
+                ]
+            )
+            if card.transferable_moves:
+                lines.append("- transferable_moves:")
+                for move in card.transferable_moves[:4]:
+                    lines.append(f"  - {move}")
+            else:
+                lines.append("- transferable_moves: []")
+    else:
+        lines.append("- 未命中相关卡片；可以做 novel synthesis，但需要把假设边界写清楚。")
+
+    prompt_briefs = _complete_stage1_prompt_briefs(result.insight_brief)
+    lines.extend(["", "### Cross-card synthesis"])
+    lines.append(
+        "以下只作为候选生成素材；不是约束或 keep/kill 规则。"
+        "收敛语气已弱化为可探索分支或 concern。"
+    )
+    if prompt_briefs:
+        for brief in prompt_briefs:
+            lines.append(f"- {_stage1_generation_material_text(brief)}")
+    else:
+        lines.append("- 本轮未生成可用的跨卡合成摘要；请以相关卡片原文为准自行寻找可迁移动作。")
+
+    lines.extend(
+        [
+            "",
+            "## 5. Markdown 输出格式 + 生成偏好",
+            f"- 生成倾向：{bias}",
+            "- 只输出 Markdown 点评，不输出 YAML，不写文件。",
+        (
+            "- 建议包含：阅读过的卡片、可迁移动作、候选机制点评、关键分歧、"
+            "主要疑问、后续应由用户和网页版 GPT 讨论的问题。"
+        ),
+            "- 每个候选机制只需写成可讨论的研究判断，不要收敛成最终因子定义或完整公式。",
+            "- 若某个机制之后可能进入实现，请说明所需数据、可能的混淆项和最容易出错的假设。",
+            "",
+            "建议结构：",
+            "- `阅读摘要`: 实际打开了哪些卡片，分别拿走了什么 move。",
+            "- `候选机制点评`: 3-8 个互补机制，每个机制说明市场参与者行为、可观察信号和不确定性。",
+            "- `与相近标签的差异`: 说明它和普通波动、普通反应不足、价量背离等标签的结构差异。",
+            "- `需要用户重点判断`: 哪些地方必须由用户读卡或结合业务知识确认。",
+            "- `进入 Stage2 的讨论问题`: 给网页版 GPT 和用户继续融合时使用。",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _complete_stage1_prompt_briefs(values: list[str], *, limit: int = 6) -> list[str]:
+    complete: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text.endswith(("。", "！", "？", ".", "!", "?", "）", ")", "]", '"', "'")):
+            complete.append(text)
+        if len(complete) >= limit:
+            break
+    return complete
+
+
+def _stage1_generation_material_text(value: str) -> str:
+    text = str(value or "").strip()
+    replacements = [
+        ("必要步骤", "可选构建分支"),
+        ("必须在", "可尝试在"),
+        ("必须", "可考虑"),
+        ("应将其定位为", "可探索其是否更适合定位为"),
+        ("应将", "可探索将"),
+        ("应当", "可考虑"),
+        ("应该", "可考虑"),
+        ("建议", "可探索"),
+        ("剔除", "作为 concern 标注"),
+        ("过滤层", "对照分支"),
+        ("方向相悖", "存在张力"),
+        ("否则是", "对应的 concern 是"),
+        ("否则", "对应的 concern 是"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def _idea_draft_model_label(model: str) -> str:
+    key = model.strip().lower()
+    if key == "claude":
+        return "Claude Code"
+    if key == "codex":
+        return "Codex"
+    return model.strip() or "Agent"
+
+
+def _idea_draft_model_bias(model: str) -> str:
+    if model == "claude":
+        return "偏深度组合：在 3-5 张卡内寻找深层结构相似性，把多个 move 融合成少数高密度机制假设。"
+    if model == "codex":
+        return "偏广度迁移：从更远的 asset class / 频率 / method 拉跨领域类比，提出更多互补候选。"
+    return "保持独立 voice：从共享素材中提出与其他引擎互补的新机制。"
+
+
+def _render_stage1_ledger_template(*, model: str, idea: str) -> str:
+    return "\n".join(
+        [
+            "# Stage 1 ledger template",
+            f"# model: {model}",
+            f"# idea: {idea}",
+            "mechanisms:",
+            "  - id: mechanism_1",
+            "    hypothesis: \"\"",
+            "    # optional: cite source cards only when useful for learning",
+            "    # - card: \"\"",
+            "    #   what_i_took: \"\"",
+            "    #   cross_domain_jump: \"\"",
+            "    inspired_by: []",
+            "    # optional: [card_1, card_2]",
+            "    fusion_of: []",
+            "    novel_delta: \"\"",
+            "    signal_sketch: \"\"",
+            "    data_needs: []",
+            "    concern: \"\"",
+            "",
+        ]
+    )
+
+
+def _render_reconcile_template(
+    *,
+    idea: str,
+    models: tuple[str, ...],
+    ledger_paths: dict[str, Path],
+    final_ledger_path: Path,
+) -> str:
+    model_rows = [
+        f"- `{model}`: `{ledger_paths[model].name}`" for model in models
+    ]
+    return "\n".join(
+        [
+            f"# Reconcile - {idea}",
+            "",
+            "目标：加法合并，不做互审淘汰。最终 `ledger_v1.yaml` 应该是候选并集，",
+            "并额外尝试第三轮 fusion 候选；弱项只标 concern，不删除。",
+            "",
+            "## 输入 ledger",
+            *model_rows,
+            "",
+            "## 输出 ledger",
+            f"- `{final_ledger_path.name}`",
+            "",
+            "## union",
+            "- 原样保留各模型中结构不同的机制候选。",
+            "- 如果两个候选只是在措辞上重复，合并描述但保留两个来源的 inspired_by。",
+            "",
+            "## fusion_candidates",
+            "- 从不同模型各取至少一个 move，提出新的融合候选。",
+            "- 只要机制有可验证信号草图，即使无明确来源卡也可以保留。",
+            "",
+            "## notes",
+            "- concern: 记录需要 Stage 3 数据验证的弱点。",
+            "- 不写淘汰式三分法栏目。",
+            "- 不把 `operative_claims` 当作 kill 条件。",
+            "",
+        ]
+    )
+
+
+def _render_stage1_retrieval_log(result: ExploreIdeaResult) -> str:
+    diagnostics = result.retrieval_diagnostics
+    lines = [
+        f"# Retrieval Log - {result.idea}",
+        "",
+        f"- mode: `{result.mode}`",
+        f"- stage: `{diagnostics.get('stage', MECHANISM_DISCOVERY)}`",
+        f"- available_data_source: `{diagnostics.get('available_data_source', 'none')}`",
+        "",
+        "## surfaced_cards",
+    ]
+    for idx, card in enumerate(result.related_cards, start=1):
+        lines.append(f"### K{idx}: {card.name}")
+        lines.append(f"- path: `{card.path}`")
+        if card.type:
+            lines.append(f"- type: `{card.type}`")
+        if card.mechanism:
+            lines.append(f"- mechanism: `{card.mechanism}`")
+        if card.factor_family:
+            lines.append(f"- factor_family: `{card.factor_family}`")
+        lines.append(f"- summary: {card.summary}")
+        if card.transferable_moves:
+            lines.append("- transferable_moves:")
+            for move in card.transferable_moves[:5]:
+                lines.append(f"  - {move}")
+        if card.operative_claims:
+            lines.append("- operative_claims (weak_hint_only):")
+            for claim in card.operative_claims[:5]:
+                lines.append(f"  - {claim}")
+        lines.append("")
+    lines.extend(
+        [
+            "## diagnostics",
+            "```json",
+            json.dumps(diagnostics, ensure_ascii=False, indent=2),
+            "```",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _build_factor_recipe_payload(
@@ -899,7 +1443,16 @@ def _build_factor_recipe_payload(
     target_horizon: int,
     rebalance_frequency: str,
     direction: str,
+    builder_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
+    base_config: dict[str, Any] = {
+        "method": base_method,
+        "window": lookback,
+        "skip_recent": skip_recent,
+    }
+    for key, value in builder_kwargs.items():
+        if key not in {"method", "window", "skip_recent"}:
+            base_config[key] = value
     return {
         "name": safe_case_name,
         "factor_name": factor_label,
@@ -909,11 +1462,7 @@ def _build_factor_recipe_payload(
             "mode": "recipe",
             "disable_pipeline_preprocess": True,
             "recipe": {
-                "base": {
-                    "method": base_method,
-                    "window": lookback,
-                    "skip_recent": skip_recent,
-                },
+                "base": base_config,
                 "preprocess": {
                     "winsorize": {
                         "enabled": True,
@@ -1169,9 +1718,14 @@ def apply_writeback(
     export_mode = (
         str(mode or frontmatter.get("vault_export_mode") or "versioned").strip() or "versioned"
     )
+    experiment_card_path = _frontmatter_path(frontmatter, "experiment_card_path")
+    _apply_experiment_card_feedback_fields(
+        experiment_card_path=experiment_card_path,
+        draft_frontmatter=frontmatter,
+    )
     export_result = export_to_vault(
         source_paths={
-            "experiment_card_path": _frontmatter_path(frontmatter, "experiment_card_path"),
+            "experiment_card_path": experiment_card_path,
             "summary_path": _frontmatter_path(frontmatter, "summary_path"),
             "manifest_path": _frontmatter_path(frontmatter, "manifest_path"),
         },
@@ -1902,6 +2456,8 @@ def _render_writeback_draft(
         "reviewed_at": "",
         "verdict_status": verdict_status,
         "one_sentence_verdict": "",
+        "emergent_moves": [],
+        "operative_claims": [],
         "status_lifecycle": project.status.lifecycle,
         "current_hypothesis": project.status.current_hypothesis,
         "current_focus": project.status.current_focus,
@@ -1930,6 +2486,15 @@ def _render_writeback_draft(
         for item in correlation_summary:
             if isinstance(item, dict):
                 lines.append(f"- {item.get('name', 'unknown')}")
+    lines.extend(
+        [
+            "",
+            "## 回灌素材（人工确认后写入 experiment card frontmatter）",
+            "",
+            "- `emergent_moves`: 这次实践浮现、可被未来因子借用的新 move；主回写字段。",
+            "- `operative_claims`: 观察到的现象 / 经验 / 边界条件；弱 hint，不作为 kill 条件。",
+        ]
+    )
     return _compose_markdown_with_frontmatter(frontmatter, "\n".join(lines))
 
 
@@ -2059,6 +2624,40 @@ def _frontmatter_path(frontmatter: dict[str, Any], key: str) -> Path | None:
     if not raw_value:
         return None
     return Path(raw_value).expanduser().resolve()
+
+
+def _apply_experiment_card_feedback_fields(
+    *,
+    experiment_card_path: Path | None,
+    draft_frontmatter: dict[str, Any],
+) -> None:
+    """Patch optional feedback fields into the generated experiment card.
+
+    Existing cards without YAML frontmatter are left untouched. Empty draft
+    values do not erase existing experiment-card values.
+    """
+
+    if experiment_card_path is None or not experiment_card_path.exists():
+        return
+    try:
+        card_frontmatter, card_body = _load_markdown_with_frontmatter(
+            experiment_card_path
+        )
+    except AlphaLabDataError:
+        return
+    changed = False
+    for key in ("emergent_moves", "operative_claims"):
+        values = _object_to_str_list(draft_frontmatter.get(key))
+        if not values:
+            continue
+        card_frontmatter[key] = values
+        changed = True
+    if not changed:
+        return
+    experiment_card_path.write_text(
+        _compose_markdown_with_frontmatter(card_frontmatter, card_body),
+        encoding="utf-8",
+    )
 
 
 def _load_vault_graph(vault_root: Path) -> VaultGraph | None:
@@ -2296,6 +2895,376 @@ class _RankedCandidate:
     aggregate: float
 
 
+@dataclass(slots=True)
+class _V2PooledCandidate:
+    result: SearchResult
+    hit_by: list[str]
+    literal_top: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _V2RankingPayload:
+    ranked: list[_RankedCandidate]
+    dropped_cards: list[dict[str, str]]
+    insight_brief: list[str]
+    diagnostics: dict[str, object]
+
+
+def _llm_rerank_diagnostics(outcome: RerankOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "dropped_invalid_names": outcome.dropped_invalid_names,
+        "fallback_reason": outcome.fallback_reason,
+    }
+
+
+def _disabled_rerank_outcome(reason: str) -> RerankOutcome:
+    return RerankOutcome(
+        enabled=False,
+        model="claude-sonnet-4-6",
+        scores={},
+        reasons={},
+        tokens_input=0,
+        tokens_output=0,
+        cache_hit_input=0,
+        dropped_invalid_names=[],
+        fallback_reason=reason,
+    )
+
+
+def _research_bridge_v2_enabled() -> bool:
+    return os.environ.get("ALPHA_LAB_RESEARCH_BRIDGE_V2") == "1" and bool(
+        os.environ.get("ANTHROPIC_API_KEY")
+    )
+
+
+def _try_v2_rank_candidates(
+    *,
+    idea: str,
+    mode: str,
+    vault_root: Path,
+    workspace_root: str | Path | None,
+    graph: VaultGraph | None,
+    embeddings: VaultEmbeddings | None,
+    index_rows: list[dict[str, str]],
+    anchor: QueryAnchor,
+    weights: ScoreWeights,
+    available_data: frozenset[str] | None,
+    failure_keywords: frozenset[str],
+) -> _V2RankingPayload | None:
+    if not _research_bridge_v2_enabled():
+        return None
+
+    expansion = expand_query(idea=idea, mode=mode)
+    if not expansion.enabled:
+        return None
+
+    resolved_workspace = (
+        Path(workspace_root).expanduser().resolve()
+        if workspace_root
+        else Path.cwd()
+    )
+    mechanism_embeddings = mechanism_index.load_mechanism_embeddings(
+        workspace_root=resolved_workspace,
+        vault_root=vault_root,
+    )
+    candidate_pool, literal_top_paths = _collect_v2_candidate_pool(
+        idea=idea,
+        expansion=expansion,
+        embeddings=embeddings,
+        mechanism_embeddings=mechanism_embeddings,
+        index_rows=index_rows,
+    )
+    if not candidate_pool:
+        return None
+
+    capped_pool, pool_cap_dropped = _apply_v2_pool_cap(
+        pool=candidate_pool,
+        literal_top_paths=literal_top_paths,
+        cap=40,
+    )
+    scored, dropped_cards = _score_candidates(
+        semantic_matches=[item.result for item in capped_pool.values()],
+        graph=graph,
+        anchor=anchor,
+        available_data=available_data,
+        failure_keywords=failure_keywords,
+    )
+    if not scored:
+        return None
+
+    fingerprints = {
+        item.result.path: fingerprint
+        for item in scored
+        if item.result.path
+        for fingerprint in [
+            mechanism_index.load_card_fingerprint(
+                workspace_root=resolved_workspace,
+                vault_root=vault_root,
+                path=item.result.path,
+            )
+        ]
+        if fingerprint is not None
+    }
+    provenance = {
+        path: list(candidate.hit_by) for path, candidate in capped_pool.items()
+    }
+    categorize_outcome = categorize_and_compress(
+        idea=idea,
+        mode=mode,
+        candidates=[
+            RerankCandidate(
+                name=item.result.name,
+                summary=item.result.summary or "",
+                domain=item.metadata.domain,
+                mechanism=item.metadata.mechanism,
+                factor_family=item.metadata.factor_family,
+                path=item.result.path,
+            )
+            for item in scored[:DEFAULT_MAX_CANDIDATES]
+        ],
+        fingerprints=fingerprints,
+        provenance=provenance,
+    )
+    if not categorize_outcome.enabled:
+        return None
+
+    categorized_by_path = categorize_outcome.by_path
+    final_scored: list[_RankedCandidate] = []
+    for item in scored:
+        path = item.result.path
+        category = categorized_by_path.get(path)
+        if category is not None and category.category == "unrelated":
+            if path in literal_top_paths:
+                llm_relevance = 0.0
+            else:
+                continue
+        else:
+            llm_relevance = category.relevance if category is not None else 0.0
+        final_scored.append(
+            replace(
+                item,
+                components=replace(
+                    item.components,
+                    llm_relevance=llm_relevance,
+                ),
+            )
+        )
+    if not final_scored:
+        return None
+
+    ranked = _finalize_ranking(final_scored, weights)
+    diagnostics = {
+        "v2_enabled": True,
+        "query_expansion": _expansion_diagnostics(expansion),
+        "mechanism_tier": {
+            "enabled": mechanism_embeddings is not None,
+            "hit_paths": sorted(
+                path
+                for path, candidate in capped_pool.items()
+                if any(tag.endswith("@mechanism") for tag in candidate.hit_by)
+            ),
+            "fallback_reason": None if mechanism_embeddings is not None else "missing_index",
+        },
+        "categorize": _categorize_diagnostics(categorize_outcome),
+        "pool_cap_dropped": pool_cap_dropped,
+    }
+    return _V2RankingPayload(
+        ranked=ranked,
+        dropped_cards=dropped_cards,
+        insight_brief=list(categorize_outcome.insight_brief),
+        diagnostics=diagnostics,
+    )
+
+
+def _collect_v2_candidate_pool(
+    *,
+    idea: str,
+    expansion: ExpansionOutcome,
+    embeddings: VaultEmbeddings | None,
+    mechanism_embeddings: VaultEmbeddings | None,
+    index_rows: list[dict[str, str]],
+) -> tuple[dict[str, _V2PooledCandidate], set[str]]:
+    pool: dict[str, _V2PooledCandidate] = {}
+    literal_top_paths: set[str] = set()
+    for probe in _dedupe([idea, *expansion.probes.direct]):
+        for match in _search_explore_matches(
+            idea=probe,
+            embeddings=embeddings,
+            index_rows=index_rows,
+            top_k=10,
+        ):
+            is_literal_top = probe == idea
+            _pool_add(
+                pool,
+                match=match,
+                tag=f"direct:{probe}@literal",
+                literal_top=is_literal_top,
+            )
+            if is_literal_top and match.path:
+                literal_top_paths.add(match.path)
+
+    if mechanism_embeddings is not None:
+        for probe_class, probes in _query_probe_items(expansion):
+            for probe in probes:
+                for match in mechanism_embeddings.search(probe, top_k=5):
+                    _pool_add(
+                        pool,
+                        match=match,
+                        tag=f"{probe_class}:{probe}@mechanism",
+                        literal_top=False,
+                    )
+    return pool, literal_top_paths
+
+
+def _pool_add(
+    pool: dict[str, _V2PooledCandidate],
+    *,
+    match: SearchResult,
+    tag: str,
+    literal_top: bool,
+) -> None:
+    path = str(match.path or "").strip()
+    if not path:
+        return
+    existing = pool.get(path)
+    if existing is None:
+        pool[path] = _V2PooledCandidate(
+            result=match,
+            hit_by=[tag],
+            literal_top=literal_top,
+        )
+        return
+    if tag not in existing.hit_by:
+        existing.hit_by.append(tag)
+    if literal_top:
+        existing.literal_top = True
+    if match.score > existing.result.score:
+        existing.result = match
+
+
+def _apply_v2_pool_cap(
+    *,
+    pool: dict[str, _V2PooledCandidate],
+    literal_top_paths: set[str],
+    cap: int,
+) -> tuple[dict[str, _V2PooledCandidate], list[str]]:
+    selected: dict[str, _V2PooledCandidate] = {
+        path: pool[path] for path in pool if path in literal_top_paths
+    }
+    remaining = [
+        (path, candidate)
+        for path, candidate in pool.items()
+        if path not in selected
+    ]
+    remaining.sort(key=lambda item: _v2_pool_priority(item[1]), reverse=True)
+    class_limits = {
+        "direct": 15,
+        "mechanism": 10,
+        "analogy": 8,
+        "failure": 5,
+        "construction": 5,
+    }
+    class_counts: Counter[str] = Counter()
+    for path, candidate in remaining:
+        if len(selected) >= cap:
+            break
+        classes = _candidate_probe_classes(candidate)
+        chosen_class = next(
+            (
+                probe_class
+                for probe_class in classes
+                if class_counts[probe_class] < class_limits.get(probe_class, 5)
+            ),
+            "",
+        )
+        if not chosen_class:
+            continue
+        class_counts[chosen_class] += 1
+        selected[path] = candidate
+    dropped = sorted(path for path in pool if path not in selected)
+    return selected, dropped
+
+
+def _v2_pool_priority(candidate: _V2PooledCandidate) -> tuple[float, float, float]:
+    distinct_provenance = float(len(set(candidate.hit_by)))
+    mechanism_hit = 1.0 if any(tag.endswith("@mechanism") for tag in candidate.hit_by) else 0.0
+    return (
+        distinct_provenance,
+        mechanism_hit,
+        float(candidate.result.score),
+    )
+
+
+def _candidate_probe_classes(candidate: _V2PooledCandidate) -> list[str]:
+    classes: list[str] = []
+    for tag in candidate.hit_by:
+        probe_class = tag.split(":", 1)[0].strip()
+        if probe_class and probe_class not in classes:
+            classes.append(probe_class)
+    return classes or ["direct"]
+
+
+def _query_probe_items(expansion: ExpansionOutcome) -> list[tuple[str, list[str]]]:
+    probes = expansion.probes
+    return [
+        ("direct", probes.direct),
+        ("mechanism", probes.mechanism),
+        ("analogy", probes.analogy),
+        ("failure", probes.failure),
+        ("construction", probes.construction),
+    ]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    rows: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        rows.append(text)
+    return rows
+
+
+def _expansion_diagnostics(outcome: ExpansionOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "fallback_reason": outcome.fallback_reason,
+        "probes": {
+            "direct": list(outcome.probes.direct),
+            "mechanism": list(outcome.probes.mechanism),
+            "analogy": list(outcome.probes.analogy),
+            "failure": list(outcome.probes.failure),
+            "construction": list(outcome.probes.construction),
+        },
+    }
+
+
+def _categorize_diagnostics(outcome: CategorizeOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "dropped_invalid_paths": list(outcome.dropped_invalid_paths),
+        "fallback_reason": outcome.fallback_reason,
+        "categories_by_path": {
+            item.path: item.category for item in outcome.categorized
+        },
+    }
+
+
 def _typed_rank_candidates(
     *,
     semantic_matches: list[SearchResult],
@@ -2310,7 +3279,26 @@ def _typed_rank_candidates(
     Returns ``(ranked_kept, dropped)``. Each dropped record carries the
     candidate name and a human-readable ``reason`` for observability.
     """
-    ranked: list[_RankedCandidate] = []
+    scored, dropped = _score_candidates(
+        semantic_matches=semantic_matches,
+        graph=graph,
+        anchor=anchor,
+        available_data=available_data,
+        failure_keywords=failure_keywords,
+    )
+    return _finalize_ranking(scored, weights), dropped
+
+
+def _score_candidates(
+    *,
+    semantic_matches: list[SearchResult],
+    graph: VaultGraph | None,
+    anchor: QueryAnchor,
+    available_data: frozenset[str] | None,
+    failure_keywords: frozenset[str],
+) -> tuple[list[_RankedCandidate], list[dict[str, str]]]:
+    """Compute typed score components without aggregating or sorting."""
+    scored: list[_RankedCandidate] = []
     dropped: list[dict[str, str]] = []
     seen: set[str] = set()
     for match in semantic_matches:
@@ -2331,17 +3319,27 @@ def _typed_rank_candidates(
         if not kept:
             dropped.append({"name": name, "reason": drop_reason})
             continue
-        aggregate = aggregate_score(components, weights)
-        ranked.append(
+        scored.append(
             _RankedCandidate(
                 result=match,
                 metadata=metadata,
                 components=components,
-                aggregate=aggregate,
+                aggregate=0.0,
             )
         )
+    return scored, dropped
+
+
+def _finalize_ranking(
+    scored: list[_RankedCandidate],
+    weights: ScoreWeights,
+) -> list[_RankedCandidate]:
+    ranked: list[_RankedCandidate] = []
+    for item in scored:
+        aggregate = aggregate_score(item.components, weights)
+        ranked.append(replace(item, aggregate=aggregate))
     ranked.sort(key=lambda item: (-item.aggregate, item.result.name))
-    return ranked, dropped
+    return ranked
 
 
 def _build_explore_related_cards(
@@ -2478,6 +3476,8 @@ def _build_explore_card(
         summary=summary,
         snippet=snippet,
         reasons=reasons,
+        transferable_moves=_extract_frontmatter_field_items(text, "transferable_moves"),
+        operative_claims=_extract_frontmatter_field_items(text, "operative_claims"),
     )
 
 
@@ -2636,6 +3636,63 @@ def _extract_simple_frontmatter(text: str) -> dict[str, str]:
     return payload
 
 
+def _extract_frontmatter_field_items(
+    text: str,
+    field_name: str,
+    *,
+    max_items: int = 4,
+    max_chars: int = 180,
+) -> list[str]:
+    if not text.startswith("---\n"):
+        return []
+    try:
+        _, frontmatter, _ = text.split("---\n", 2)
+    except ValueError:
+        return []
+    target = field_name.strip()
+    if not target:
+        return []
+    lines = frontmatter.splitlines()
+    captured: list[str] = []
+    in_field = False
+    for line in lines:
+        stripped = line.strip()
+        if not in_field:
+            if stripped.startswith(f"{target}:"):
+                value = stripped.split(":", 1)[1].strip()
+                if value:
+                    captured.append(value)
+                    break
+                in_field = True
+            continue
+        if stripped and not line[:1].isspace() and not stripped.startswith("-"):
+            break
+        captured.append(stripped)
+    if not captured:
+        return []
+
+    items: list[str] = []
+    current: list[str] = []
+    for line in captured:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            if current:
+                items.append(" ".join(current))
+            current = [stripped[2:].strip()]
+        else:
+            current.append(stripped)
+    if current:
+        items.append(" ".join(current))
+    if not items:
+        items = [" ".join(captured)]
+    return [
+        _truncate_text(re.sub(r"\s+", " ", item), max_chars=max_chars)
+        for item in items[:max_items]
+    ]
+
+
 def _strip_frontmatter(text: str) -> str:
     if not text.startswith("---\n"):
         return text.strip()
@@ -2766,19 +3823,8 @@ def _build_factor_recipe_exploration_prompt(
         constraint_report=constraint_report,
         graph=graph,
     )
-    # signal_mapping and validation_kill_tests are stage stubs for now —
-    # they emit a clear warning header on top of a mechanism_discovery-style
-    # body so the caller still gets usable structure while the dedicated
-    # templates are in flight.
     if stage == SIGNAL_MAPPING:
         return _build_factor_recipe_signal_mapping_prompt(
-            idea=idea,
-            mode=mode,
-            project=project,
-            context=context,
-        )
-    if stage == VALIDATION_KILL_TESTS:
-        return _build_factor_recipe_validation_kill_tests_prompt(
             idea=idea,
             mode=mode,
             project=project,
@@ -2836,6 +3882,9 @@ def _build_factor_recipe_prompt_context(
         )
     return {
         "cards": cards,
+        "insight_brief": _object_to_str_list(
+            constraint_report.get("insight_brief")
+        ),
         "primary_family": primary_family,
         "primary_mechanism": primary_mechanism,
         "crowding_warning": crowding_warning,
@@ -2882,7 +3931,15 @@ def _append_lint_self_check(lines: list[str], *, stage: str, mode: str) -> None:
 def _format_prompt_score_components(raw: object) -> str:
     if not isinstance(raw, dict):
         return ""
-    keys = ("semantic", "metadata", "mechanism", "dependency", "failure", "aggregate")
+    keys = (
+        "semantic",
+        "metadata",
+        "mechanism",
+        "dependency",
+        "failure",
+        "llm_relevance",
+        "aggregate",
+    )
     pieces: list[str] = []
     for key in keys:
         value = raw.get(key)
@@ -2920,6 +3977,7 @@ def _append_factor_recipe_context(
     upstream_artifact_header = str(
         context.get("upstream_artifact_header") or ""
     ).strip()
+    insight_brief = _object_to_str_list(context.get("insight_brief"))
     score_components_by_name = _object_to_dict(
         context.get("score_components_by_name")
     )
@@ -2927,10 +3985,10 @@ def _append_factor_recipe_context(
     if upstream_artifact_header:
         lines.extend(["", upstream_artifact_header])
 
-    lines.extend(["", "## 上下文约束", "", "知识库："])
+    lines.extend(["", "## vault 素材上下文", "", "知识卡片："])
     if not cards:
-        lines.append("- （未命中相关卡片；如果局部知识不足，应主动缩小结论强度，不允许编造背景。）")
-    for card in cards[:6]:
+        lines.append("- （未命中相关卡片；可以做 novel synthesis，但必须把假设边界写清楚。）")
+    for idx, card in enumerate(cards[:6], start=1):
         meta: list[str] = []
         if card.type:
             meta.append(f"类型={card.type}")
@@ -2941,19 +3999,30 @@ def _append_factor_recipe_context(
         if card.factor_family:
             meta.append(f"因子族={card.factor_family}")
         meta_text = f" ({'; '.join(meta)})" if meta else ""
-        lines.append(f"- {card.name}{meta_text}: {card.summary}")
+        lines.append(f"- [K{idx}] {card.name}{meta_text}: {card.summary}")
         score_line = _format_prompt_score_components(
             score_components_by_name.get(card.name)
         )
         if score_line:
             lines.append(f"  - retrieval score: {score_line}")
+        if card.transferable_moves:
+            lines.append(
+                "  - transferable_moves: "
+                + "; ".join(card.transferable_moves[:3])
+            )
+        if card.operative_claims:
+            lines.append(
+                "  - operative_claims (weak_hint_only): "
+                + "; ".join(card.operative_claims[:3])
+            )
     if cards and score_components_by_name:
         lines.extend(
             [
                 "",
-                "检索分量说明：semantic=文本相似，metadata=frontmatter 兼容，"
-                "mechanism=机制接近，dependency=数据依赖覆盖，"
-                "failure=与失败路径的距离/规避信号，aggregate=当前模式加权总分。",
+        "检索分量说明：semantic=文本相似，metadata=frontmatter 兼容，"
+        "mechanism=机制接近，dependency=数据依赖覆盖，"
+        "failure=失败观察相邻度（只作对照素材，不作 kill 权重），"
+        "llm_relevance=LLM 思想相关/可迁移分，aggregate=当前模式加权总分。",
             ]
         )
         if mode == "constrained":
@@ -2962,7 +4031,7 @@ def _append_factor_recipe_context(
                 "不要只因为卡片排在前面就引用。"
             )
 
-    lines.extend(["", "历史失败："])
+    lines.extend(["", "历史失败 / 经验观察（弱参考）："])
     if failure_refs:
         for item in failure_refs[:3]:
             failure_id = str(item.get("failure_id") or "").strip()
@@ -2970,15 +4039,15 @@ def _append_factor_recipe_context(
             statement = str(item.get("failure_statement") or "").strip()
             lines.append(f"- [{failure_id}] {title}: {statement}")
     else:
-        lines.append("- 未命中直接相关失败案例；这不构成放松约束的理由。")
+        lines.append("- 未命中直接相关失败观察；这不影响 Stage 1 继续生成候选。")
 
-    lines.extend(["", "研究路径与拥挤度："])
+    lines.extend(["", "研究素材分布："])
     if primary_family:
         lines.append(f"- 当前最接近的已有因子族：{primary_family}")
     if primary_mechanism:
         lines.append(f"- 当前最接近的已有机制：{primary_mechanism}")
     if crowding_warning:
-        lines.append(f"- 拥挤提示：{crowding_warning}")
+        lines.append(f"- 拥挤观察（仅提示，不淘汰）：{crowding_warning}")
     if validated_peers:
         lines.append(f"- 已验证同类：{', '.join(validated_peers[:5])}")
     if family_counts:
@@ -2988,6 +4057,11 @@ def _append_factor_recipe_context(
         direction = str(frontier_item.get("direction") or "").strip()
         reason = str(frontier_item.get("reason") or "").strip()
         lines.append(f"- frontier: {direction} | {reason}")
+
+    if insight_brief:
+        lines.extend(["", "## Cross-card synthesis"])
+        for brief in insight_brief[:6]:
+            lines.append(f"- {brief}")
 
     if include_soft_graph:
         lines.extend(["", "可用数据（软约束）："])
@@ -3006,7 +4080,10 @@ def _append_factor_recipe_context(
                 "",
                 "## Graph 约束模式（硬约束）",
                 "你只能使用以下数据节点与算子构造信号，不允许引入新变量。",
-                "如果某个机制无法仅靠这些节点与算子落地，请直接删除。",
+                (
+                    "如果某个机制无法仅靠这些节点与算子落地，请标记 "
+                    "`concern: current_data_unavailable`，不要在探索阶段做 kill。"
+                ),
                 "",
                 "可用数据：",
             ]
@@ -3015,7 +4092,7 @@ def _append_factor_recipe_context(
             for data_node in allowed_data_nodes:
                 lines.append(f"- {data_node}")
         else:
-            lines.append("- graph 未提供可用数据节点；此时不允许虚构新节点，应判定为无法执行。")
+            lines.append("- graph 未提供可用数据节点；此时不允许虚构新节点，只能标记数据缺口。")
         lines.extend(["", "可用算子："])
         for operator_name in _GRAPH_SIGNAL_OPERATORS:
             lines.append(f"- {operator_name}")
@@ -3072,6 +4149,44 @@ def _append_mechanism_discovery_concept_constraints(
         )
 
 
+def _append_stage1_ledger_protocol(lines: list[str]) -> None:
+    lines.extend(
+        [
+            "",
+            "## Stage 1 ledger 协议",
+            "本 prompt 只负责 Stage 1：用 vault 素材起草可验证机制。"
+            "输出应能转写为 `ledger_v1.yaml` + `retrieval_log.md`；"
+            "不要给 keep/kill 结论。",
+            "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
+            "- `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。",
+            "- 每条 mechanism 至少写 `hypothesis` / `signal_sketch` / `data_needs`。",
+            "- `inspired_by` / `fusion_of` / `cross_domain_jump` 都是可选溯源字段；"
+            "有来源就写，novel synthesis 无来源也合法。",
+            "- 不要强制 lineage 或从来源卡继承 kill 条件。"
+            "无来源不是缺口；需要担心的点写成 `concern`，留给 Stage 3 数据验证。",
+        ]
+    )
+
+
+def _append_cross_domain_generation_prompts(lines: list[str]) -> None:
+    lines.extend(
+        [
+            "",
+            "## 跨领域生成提示",
+            (
+                "- 优先尝试把至少两个不同领域、频率、资产或方法的 "
+                "`transferable_moves` 融合成一个机制。"
+            ),
+            (
+                "- 如果某张卡的 move 已在 daily PV 使用，尝试说明它能否迁移到当前上下文；"
+                "写清类比与差异。"
+            ),
+            "- 主动寻找被低估的 transferable_move：哪个动作最可能跨上下文复用，为什么？",
+            "- 候选机制只增不减；弱点标 `concern`，不要在探索阶段删除候选。",
+        ]
+    )
+
+
 def _build_factor_recipe_start_prompt(
     *,
     idea: str,
@@ -3106,23 +4221,29 @@ def _build_factor_recipe_start_prompt(
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=False)
+    _append_stage1_ledger_protocol(lines)
+    _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode="start"
     )
     lines.extend(
         [
             "",
-            "## 历史路径对抗",
+            "## 历史路径借鉴",
             "If a proposed mechanism resembles previously failed or explored ideas,",
-            "you MUST explicitly state:",
+            "explicitly state:",
             "1) what is similar,",
             "2) what is structurally different,",
             "before continuing.",
-            "Failure to differentiate is considered invalid reasoning.",
+            "Use the comparison to sharpen the candidate, not to kill it.",
             "",
             "## 输出要求",
             "[初步机制假设（Mechanism Hypotheses）]",
             "- 提出 2-3 个机制候选，每个都必须包含具体市场参与者行为或结构约束。",
+            "- 每个机制候选使用新 ledger 字段：`hypothesis`、可选 `inspired_by`、"
+            "可选 `fusion_of`、可选 `cross_domain_jump`、`novel_delta`、"
+            "`signal_sketch`、`data_needs`。",
+            "- 没有来源卡时不要写缺口；标注为 novel synthesis 即可。",
             "",
             "[初步信号思路（Signal Sketch）]",
             "- 可能用到的数据：",
@@ -3181,6 +4302,8 @@ def _build_factor_recipe_structured_prompt(
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=False)
+    _append_stage1_ledger_protocol(lines)
+    _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode="free"
     )
@@ -3193,6 +4316,9 @@ def _build_factor_recipe_structured_prompt(
             "- agent behavior:",
             "- structure constraint:",
             "- dynamic process:",
+            "- inspired_by: [{card, what_i_took, cross_domain_jump}]（可选）",
+            "- fusion_of: [[card_1, card_2]]（可选）",
+            "- novel_delta:",
             "",
             "[候选表达]",
             "- 输入数据：",
@@ -3210,10 +4336,18 @@ def _build_factor_recipe_structured_prompt(
             "- 差异点：",
             "",
             "[下一步验证]",
-            "- 第一轮应该验证什么：",
-            "- 哪些地方最需要继续讨论：",
+            "- Stage 2 可拓展的外部视角：",
+            "- Stage 3 需要用数据验证的 concern：",
+            "",
+            "[ledger_v1.yaml 草案]",
+            (
+                "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ "
+                "fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern"
+            ),
+            "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
             "",
             "不要做最终选择，不要 ranking，不要收敛到单一结论。",
+            "Stage 1 不产出 kill 结论。",
         ]
     )
     _append_lint_self_check(lines, stage=MECHANISM_DISCOVERY, mode="free")
@@ -3242,7 +4376,7 @@ def _build_factor_recipe_constrained_prompt(
                 "你不是在生成因子、公式、代码或伪代码，而是在做"
                 "“强约束下的结构化假设生成（constrained hypothesis generation）”。"
             ),
-            "目标是在生成阶段就压缩低质量想法的概率空间，而不是把低质量候选留给后续筛选。",
+            "目标是让候选机制更具体、更可验证，而不是在探索阶段做静态淘汰。",
             "",
             "## 输入主题",
             idea,
@@ -3258,10 +4392,12 @@ def _build_factor_recipe_constrained_prompt(
                 "可操作的行为、约束和可映射数据。"
             ),
             "4. 全程禁止输出具体因子公式、伪代码或参数搜索建议；只能输出结构化假设。",
-            "5. 少而精。Step 1 最多提出 5 个候选机制，Step 3 最多保留 2 个最终假设。",
+            "5. 少而精但不做 kill。Step 1 提出 3-5 个候选机制；弱点写 concern，候选只增不减。",
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=True)
+    _append_stage1_ledger_protocol(lines)
+    _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_hard_graph=True, mode="constrained"
     )
@@ -3271,8 +4407,8 @@ def _build_factor_recipe_constrained_prompt(
             "## 反冗余与 Anti-snooping 约束",
             "1. 避免生成以下内容的简单变体：动量（momentum）、反转（mean reversion）、波动率缩放。",
             (
-                "2. 如果只是 horizon、归一化、排序、加权、缩放、去极值或简单组合"
-                "发生变化，视为低质量变体，必须删除。"
+            "2. 如果只是 horizon、归一化、排序、加权、缩放、去极值或简单组合"
+            "发生变化，必须改写成真实机制，或标 `concern: parameter-only`。"
             ),
             "3. 你必须明确写出：与已有因子的相似点是什么，本质差异又是什么。",
             "",
@@ -3281,8 +4417,8 @@ def _build_factor_recipe_constrained_prompt(
                 "1. 最终保留的假设必须来自不同机制类别，"
                 "例如：行为驱动、结构约束、信息不对称、流动性冲击。"
             ),
-            "2. 如果两个候选机制本质相同，只能保留一个评分更高的版本。",
-            "3. 不允许用多个同质候选伪装成“多样性”。",
+            "2. 如果两个候选机制本质相同，合并描述并保留来源差异；不要用同质候选伪装成“多样性”。",
+            "3. 尝试至少一个跨卡 fusion 候选。",
             "",
             "## 非显然性约束",
             "1. 你必须解释为什么这个想法不是显而易见的。",
@@ -3290,47 +4426,48 @@ def _build_factor_recipe_constrained_prompt(
                 "2. 你必须指出市场上大多数人忽略了什么：是行为偏差、制度约束、"
                 "流动性摩擦、披露节奏错配，还是信息处理成本。"
             ),
-            "3. 如果无法说明“被忽略之处”，该机制应在 Step 2 被删除。",
+            "3. 如果无法说明“被忽略之处”，标 `concern: obvious_or_label_clone`，不要删除。",
             "",
             "## 历史路径约束",
             "1. 你必须判断当前假设属于哪个研究方向。",
             "2. 你必须说明：相比历史尝试，这次推进了什么，而不是重复走过的路径。",
-            "3. 如果本质上是重复路径，必须明确说明为什么这次不同；否则应在 Step 2 删除。",
+            "3. 如果本质上是重复路径，必须明确说明为什么这次不同；说明不清时写 concern。",
             "",
             "## 三阶段生成流程（必须严格按顺序执行）",
             "Step 1：只生成机制，禁止公式、禁止因子名、禁止变量堆叠。",
-            "Step 2：对 Step 1 的机制做带评分的自我筛选，删除低质量机制。",
-            "Step 3：仅基于筛选后的机制生成信号构造，仍然禁止公式和伪代码。",
-            "Step 4：对最终假设做对抗性检验；如果攻击成立，必须说明回到 Step 2 还是修改假设。",
+            "Step 2：对 Step 1 的机制做结构化 concern 标注，不删除候选。",
+            "Step 3：为候选机制生成信号草图，仍然禁止最终公式和伪代码。",
+            "Step 4：补充 fusion / cross-domain 候选；如果 concern 成立，只记录数据验证问题。",
             "",
             "### Step 1 细则：候选机制池",
             (
-                "对每个候选机制，只允许写：agent behavior、structure constraint、"
-                "dynamic process、为什么可映射到可观测数据。"
+            "对每个候选机制，只允许写：agent behavior、structure constraint、"
+                "dynamic process、为什么可映射到可观测数据、inspired_by（可选）、"
+                "fusion_of（可选）、novel_delta、concern。"
             ),
             "",
-            "### Step 2 细则：机制筛选（带评分）",
-            "删除任何不满足以下条件的机制：",
+            "### Step 2 细则：concern 标注",
+            "对以下问题逐项标 concern，但不要删除候选：",
             "- 没有明确参与者行为或市场结构约束",
             "- 无法映射到可观测输入数据",
             "- 只是动量 / 反转 / 波动率缩放的换壳",
-            "- 与历史失败案例过于相似，却解释不出新的生效条件",
+            "- 与历史失败案例相似但新的生效条件不清楚",
             "- 无法解释为什么它不显然",
-            "- 与其他高分候选属于同一机制类别但没有新增信息",
-            "对每个机制进行 0-10 评分：可持续性、可交易性、非显然性、与已有因子的差异度。",
-            "只保留总评分最高的 1-2 个机制。",
+            "- 与其他候选属于同一机制类别但没有新增信息",
+            "对每个机制给 0-10 生成潜力评分：可持续性、可交易性、非显然性、与已有因子的差异度。",
+            "评分只用于后续排序参考，不产生 keep/kill。",
             "",
             "### Step 3 细则：信号构造",
-            "对保留机制，信号构造只能写三项：输入数据、变换方式、聚合逻辑。",
+            "对每个机制，信号构造只能写三项：输入数据、变换方式、聚合逻辑。",
             "每一个信号组件都必须回连到机制，不允许出现“有用但解释不清”的装饰性组件。",
             "",
-            "### Step 4 细则：对抗性检验（Adversarial Check）",
-            "针对最终假设，提出最强反对意见：",
+            "### Step 4 细则：fusion / concern",
+            "针对候选假设，提出最强 concern：",
             "- 这个机制可能是错的原因是什么？",
             "- 是否可能是数据挖掘（data snooping）结果？",
             "- 是否可能只是已有因子的变体？",
             "- 在什么市场环境下会彻底失效？",
-            "如果反对意见成立，请明确写出：修改假设，还是回到 Step 2 重新选择机制。",
+            "如果 concern 成立，请明确写出需要 Stage 3 用什么数据或切片验证。",
             "",
             "## 输出格式（严格遵守，不要新增栏目）",
             "[Step 1：候选机制]",
@@ -3339,6 +4476,14 @@ def _build_factor_recipe_constrained_prompt(
             "- structure constraint:",
             "- dynamic process:",
             "- observable implication:",
+            "- inspired_by:",
+            "  - card:",
+            "    what_i_took:",
+            "    cross_domain_jump:",
+            "- fusion_of:",
+            "  - [card_1, card_2]",
+            "- novel_delta:",
+            "- concern:",
             "",
             "[Step 2：机制筛选]",
             "### 机制 1",
@@ -3347,14 +4492,14 @@ def _build_factor_recipe_constrained_prompt(
             "- 非显然性：",
             "- 差异度：",
             "- 总评分：",
-            "- 保留或删除 + 理由：",
+            "- concern + 理由：",
             "- 机制类别：",
             "- 与其他保留候选是否重复：",
             "",
-            "### 保留结果",
-            "- 最终只保留评分最高且机制类别不重复的 1-2 个机制",
+            "### union 结果",
+            "- 保留所有结构不同的机制；合并纯重复措辞，但不做 kill",
             "",
-            "[Step 3：最终结构化假设]",
+            "[Step 3：结构化假设草图]",
             "### 假设 1",
             "[机制（Mechanism）]",
             "- 行为 + 约束 + 动态过程",
@@ -3381,12 +4526,19 @@ def _build_factor_recipe_constrained_prompt(
             "- 相比历史尝试推进了什么：",
             "- 为什么这次不同：",
             "",
-            "[Step 4：对抗性检验（Adversarial Check）]",
-            "- 最强反对意见：",
+            "[Step 4：fusion / concern]",
+            "- fusion_candidates：",
+            "- 最强 concern：",
             "- 数据挖掘风险：",
             "- 是否只是已有因子的变体：",
             "- 彻底失效的市场环境：",
-            "- 结论：保留 / 修改 / 回到 Step 2",
+            "- Stage 3 数据验证问题：",
+            "",
+            "[ledger_v1.yaml 草案]",
+            (
+                "- mechanisms: hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
+                "novel_delta / signal_sketch / data_needs / concern"
+            ),
         ]
     )
     if novelty_warnings:
@@ -3406,13 +4558,13 @@ def _build_factor_recipe_signal_mapping_prompt(
 ) -> str:
     """Real prompt builder for ``signal_mapping`` stage.
 
-    The middle stage of the workflow audits *computability*: it forces
+    The second Stage 1 substep audits *computability*: it forces
     the LLM to translate each mechanism candidate into a minimum viable
     set of observable implications and required data fields, and to
     explain which mechanism the *current* implementation actually
     captures. It must not propose new mechanisms (that's
     mechanism_discovery) and must not pick a final version (that's
-    validation_kill_tests).
+    Stage 3 data validation after the Stage 2 expansion artifact).
 
     Like validation, it does NOT inject the mechanism_discovery
     concept-level prohibitions — by this stage the candidates already
@@ -3440,7 +4592,7 @@ def _build_factor_recipe_signal_mapping_prompt(
             "",
             "## 阶段声明",
             "你不是在生成新机制（mechanism_discovery 已完成），"
-            "也不是在做最终淘汰（validation_kill_tests 才做）。",
+            "也不是在做最终淘汰（Stage 3 数据验证才做）。",
             "你的任务是 **mechanism → 信号的可计算性审计**：",
             "把每个候选机制翻译成最少必要信号组件，"
             "并明确**当前实现**到底在捕捉哪个机制、漏掉了哪些。",
@@ -3449,6 +4601,7 @@ def _build_factor_recipe_signal_mapping_prompt(
             idea,
         ]
     )
+    _append_stage1_ledger_protocol(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode=mode
     )
@@ -3521,7 +4674,7 @@ def _build_factor_recipe_signal_mapping_prompt(
             "- 残余假设：在这个版本下你必须假设什么才相信它有信号",
             "",
             "**禁止**做最终选择 / ranking / "
-            "“我推荐版本 N”——选择留给 validation_kill_tests 阶段。",
+            "“我推荐版本 N”——选择留给 Stage 3 的数据 kill / spec 审计。",
         ]
     )
     if strict:
@@ -3577,6 +4730,15 @@ def _build_factor_recipe_signal_mapping_prompt(
             "- v1：实现 + 对应机制 + 控制项 + 残余假设",
             "- v2：…",
             "- v3：…（可选）",
+            "",
+            "[ledger_v1.yaml 草案]",
+            "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
+            "novel_delta / signal_sketch / data_needs / concern",
+            "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
+            "",
+            "[retrieval_log.md 草案]",
+            "- surfaced_cards: 本阶段实际使用的 [Kx] 卡片与用途",
+            "- data_dependency_notes: daily sufficient / intraday required 的边界",
         ]
     )
     _append_lint_self_check(lines, stage=SIGNAL_MAPPING, mode=mode)
@@ -3590,23 +4752,17 @@ def _build_factor_recipe_validation_kill_tests_prompt(
     project: ProjectConfig | None,
     context: dict[str, object],
 ) -> str:
-    """Real prompt builder for ``validation_kill_tests`` stage.
+    """Deprecated helper retained for import compatibility.
 
-    The forbidden-label vocabulary from mechanism_discovery returns here
-    as **audit targets** — the LLM must explicitly answer, for each
-    canonical alias family, whether the candidate is just a re-skin of
-    that family. We deliberately do NOT inject the concept-level
-    prohibitions because in this stage those labels are the targets, not
-    forbidden words.
-
-    ``mode``:
-      * ``start`` / ``free`` — full audit checklist; verdict is
-        narrative ("hold / iterate / kill") rather than mechanical.
-      * ``constrained`` — strict variant: every alias bucket needs a
-        binary verdict + at least one knowledge anchor or external
-        baseline cite; final kill verdict is binary; auditor must
-        enumerate which kill rule binds.
+    ``validation_kill_tests`` is no longer part of the idea explorer.
+    Stage 1 produces additive ledgers; Stage 3 data pipelines decide
+    keep/kill from actual evaluation artifacts.
     """
+    raise ValueError(
+        "validation_kill_tests has moved out of the idea explorer; "
+        "use mechanism_discovery/signal_mapping here and run Stage 3 data "
+        "validation separately."
+    )
     strict = mode == "constrained"
     mode_label = (
         "Validation & Kill Tests · Strict"
@@ -3758,7 +4914,11 @@ def _build_factor_recipe_validation_kill_tests_prompt(
             "",
             "[最终判定]",
             "- 触发的死亡条件（若有）：…",
-            "- 判定：<KILL / HOLD / ITERATE>",
+            (
+                "- 判定：<KILL / HOLD-FOR-AUDIT>"
+                if strict
+                else "- 判定：<KILL / HOLD / ITERATE>"
+            ),
             "- 下一步实证步骤：…",
         ]
     )

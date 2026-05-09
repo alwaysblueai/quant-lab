@@ -163,8 +163,11 @@ def test_exploratory_profile_streamlines_optional_single_factor_diagnostics() ->
     assert exploratory.single_factor_diagnostics.run_param_sensitivity is False
     assert exploratory.single_factor_diagnostics.run_baseline_comparison is False
     assert exploratory.single_factor_diagnostics.run_lag_sensitivity is False
+    assert exploratory.single_factor_diagnostics.diagnostic_max_dates == 500
+    assert exploratory.single_factor_diagnostics.diagnostic_sample_mode == "latest"
     assert default.single_factor_diagnostics.compute_ic_decay is True
     assert default.single_factor_diagnostics.run_param_sensitivity is True
+    assert default.single_factor_diagnostics.diagnostic_max_dates is None
 
 
 def test_profile_variants_change_triage_and_promotion_on_borderline_case() -> None:

@@ -6,13 +6,20 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import os
 import re
+from collections import Counter
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
 from alpha_lab.config import PROJECT_ROOT
+from alpha_lab.custom_factors import iter_custom_factor_meta_paths, read_custom_factor_source
+from alpha_lab.factor_recipe import factor_registry
 from alpha_lab.model_factor import list_model_contracts
 from alpha_lab.real_cases.model_factor.spec import load_model_factor_case_spec
-from alpha_lab.research_bridge.embeddings import SearchResult
+from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
+from alpha_lab.research_bridge.embeddings import SearchResult, VaultEmbeddings
 from alpha_lab.research_bridge.scoring import (
     MECHANISM_DISCOVERY,
     MODEL_MODE_WEIGHTS,
@@ -20,10 +27,12 @@ from alpha_lab.research_bridge.scoring import (
     VALIDATION_KILL_TESTS,
     CardMetadata,
     QueryAnchor,
+    ScoreComponents,
     ScoreWeights,
     aggregate_score,
     derive_failure_keywords,
     infer_available_data_from_frequency,
+    is_stage3_llm_helper_stage,
     normalize_data_set,
     normalize_workflow_stage,
     recommend_next_stage,
@@ -32,6 +41,16 @@ from alpha_lab.research_bridge.scoring import (
 from alpha_lab.vault_export import resolve_vault_root
 
 from . import loaders as bridge_loaders
+from . import mechanism_index
+from .llm_rerank import (
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_MODEL,
+    CategorizeOutcome,
+    RerankCandidate,
+    RerankOutcome,
+    categorize_and_compress,
+    rerank_candidates,
+)
 from .output_lint import (
     MODEL_SIGNAL_RISK_CONTROLS,
     MODEL_VALIDATION_ALIAS_TARGETS,
@@ -40,6 +59,7 @@ from .output_lint import (
     extract_model_stage_sections,
     lint_model_idea_response,
 )
+from .query_expansion import ExpansionOutcome, expand_query
 
 _SUPPORTED_MODES: frozenset[str] = frozenset({"start", "explore", "constrained"})
 _MODEL_SPEC_CONFIG_DIR = PROJECT_ROOT / "configs" / "real_cases" / "model_factor"
@@ -91,7 +111,6 @@ _RECOMMENDATION_PRIORITY_ORDER: tuple[str, ...] = (
 )
 _MODEL_PREVIOUS_STAGE: dict[str, str] = {
     SIGNAL_MAPPING: MECHANISM_DISCOVERY,
-    VALIDATION_KILL_TESTS: SIGNAL_MAPPING,
 }
 _MODEL_UPSTREAM_SECTION_PRIORITY: dict[str, tuple[str, ...]] = {
     SIGNAL_MAPPING: (
@@ -99,12 +118,6 @@ _MODEL_UPSTREAM_SECTION_PRIORITY: dict[str, tuple[str, ...]] = {
         "实现假设草图",
         "与当前 spec / baseline 的关系",
         "不确定性与失败路径",
-    ),
-    VALIDATION_KILL_TESTS: (
-        "Model Mechanism Mapping",
-        "当前实现解释",
-        "模型风险控制",
-        "可测试模型版本",
     ),
 }
 
@@ -174,11 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
     explore.add_argument(
         "--stage",
         default=None,
-        choices=["mechanism_discovery", "signal_mapping", "validation_kill_tests"],
+        choices=["mechanism_discovery", "signal_mapping"],
         help=(
             "Workflow stage. mechanism_discovery finds model mechanisms; "
-            "signal_mapping maps them to spec/run variants; "
-            "validation_kill_tests audits whether the model idea should be killed."
+            "signal_mapping maps them to spec/run variants. Stage 3 data validation "
+            "is handled by the structured kill workflow, not this explorer."
         ),
     )
     explore.add_argument(
@@ -305,6 +318,12 @@ def explore_model_idea(
         raise ValueError(
             f"unsupported mode: {mode!r}; expected one of {sorted(_SUPPORTED_MODES)}"
         )
+    if is_stage3_llm_helper_stage(stage):
+        raise ValueError(
+            "validation_kill_tests has moved out of model-lab idea exploration. "
+            "Use mechanism_discovery/signal_mapping here, then pass structured "
+            "artifacts into the Stage 3 data-kill workflow."
+        )
     # Stage axis is symmetric with alpha-lab's: a named dispatcher picks
     # the workflow stage first, then mode adjusts strictness inside that stage.
     normalized_stage = normalize_workflow_stage(stage)
@@ -330,6 +349,7 @@ def explore_model_idea(
     knowledge_context = _collect_knowledge_context(
         idea=normalized_idea,
         vault_root=vault_root,
+        workspace_root=resolved_workspace,
         top_k=normalized_top_k,
         mode=normalized_mode,
         available_data=available_data_set,
@@ -634,6 +654,7 @@ def _collect_knowledge_context(
     idea: str,
     vault_root: str | Path | None,
     top_k: int,
+    workspace_root: Path | None = None,
     mode: str = "explore",
     available_data: frozenset[str] | None = None,
 ) -> dict[str, object]:
@@ -643,6 +664,7 @@ def _collect_knowledge_context(
             "status": "not_configured",
             "knowledge_matches": [],
             "knowledge_handling_patterns": [],
+            "insight_brief": [],
             "frontier_matches": [],
             "failure_refs": [],
             "warnings": warnings,
@@ -652,6 +674,19 @@ def _collect_knowledge_context(
                 "dropped_cards": [],
                 "score_weights": _score_weights_to_dict(
                     MODEL_MODE_WEIGHTS.get(mode, MODEL_MODE_WEIGHTS["explore"])
+                ),
+                "llm_rerank": _llm_rerank_diagnostics(
+                    RerankOutcome(
+                        enabled=False,
+                        model=DEFAULT_MODEL,
+                        scores={},
+                        reasons={},
+                        tokens_input=0,
+                        tokens_output=0,
+                        cache_hit_input=0,
+                        dropped_invalid_names=[],
+                        fallback_reason="no_candidates",
+                    )
                 ),
                 "query_anchor": {
                     "domain": "",
@@ -691,32 +726,79 @@ def _collect_knowledge_context(
             for item in exploration.related_failures(text_query=idea, max_items=8)
         )
 
-    score_components_by_name: dict[str, dict[str, float]] = {}
-    dropped_cards: list[dict[str, str]] = []
-    ranked: list[tuple[float, SearchResult]] = []
-    for match in raw_matches:
-        if not match.name:
-            continue
-        card = _build_model_card_metadata(
-            graph=graph, name=match.name, fallback_type=match.type
+    v2_payload = _try_model_v2_knowledge_ranking(
+        idea=idea,
+        mode=mode,
+        vault_root=resolved_vault,
+        workspace_root=workspace_root,
+        graph=graph,
+        embeddings=embeddings,
+        index_rows=index_rows,
+        anchor=anchor,
+        weights=weights,
+        available_data=available_data,
+        failure_keywords=failure_keywords,
+    )
+    insight_brief: list[str] = []
+    extra_retrieval_diagnostics: dict[str, object] = {}
+    if v2_payload is not None:
+        ranked = v2_payload.ranked
+        score_components_by_name = v2_payload.score_components_by_name
+        dropped_cards = v2_payload.dropped_cards
+        rerank_outcome = _disabled_rerank_outcome("superseded_by_v2_categorize")
+        insight_brief = v2_payload.insight_brief
+        extra_retrieval_diagnostics = v2_payload.diagnostics
+    else:
+        score_components_by_name = {}
+        dropped_cards = []
+        scored: list[tuple[SearchResult, CardMetadata, ScoreComponents]] = []
+        for match in raw_matches:
+            if not match.name:
+                continue
+            card = _build_model_card_metadata(
+                graph=graph, name=match.name, fallback_type=match.type
+            )
+            components, kept, drop_reason = score_card(
+                anchor=anchor,
+                card=card,
+                semantic_score=float(match.score),
+                available_data=available_data,
+                failure_keywords=failure_keywords,
+            )
+            if not kept:
+                dropped_cards.append({"name": match.name, "reason": drop_reason})
+                continue
+            scored.append((match, card, components))
+
+        rerank_outcome = rerank_candidates(
+            idea=idea,
+            mode=mode,
+            candidates=[
+                RerankCandidate(
+                    name=match.name,
+                    summary=match.summary or "",
+                    domain=card.domain,
+                    mechanism=card.mechanism,
+                    factor_family=card.factor_family,
+                    path=match.path,
+                )
+                for match, card, _components in scored[:DEFAULT_MAX_CANDIDATES]
+            ],
         )
-        components, kept, drop_reason = score_card(
-            anchor=anchor,
-            card=card,
-            semantic_score=float(match.score),
-            available_data=available_data,
-            failure_keywords=failure_keywords,
-        )
-        if not kept:
-            dropped_cards.append({"name": match.name, "reason": drop_reason})
-            continue
-        aggregate = aggregate_score(components, weights)
-        score_components_by_name[match.name] = {
-            **components.to_dict(),
-            "aggregate": aggregate,
-        }
-        ranked.append((aggregate, match))
-    ranked.sort(key=lambda pair: (-pair[0], getattr(pair[1], "name", "")))
+
+        ranked = []
+        for match, _card, components in scored:
+            components = replace(
+                components,
+                llm_relevance=rerank_outcome.scores.get(match.name, 0.0),
+            )
+            aggregate = aggregate_score(components, weights)
+            score_components_by_name[match.name] = {
+                **components.to_dict(),
+                "aggregate": aggregate,
+            }
+            ranked.append((aggregate, match))
+        ranked.sort(key=lambda pair: (-pair[0], getattr(pair[1], "name", "")))
 
     knowledge_matches: list[dict[str, object]] = []
     for _, match in ranked[:top_k]:
@@ -731,6 +813,12 @@ def _collect_knowledge_context(
                 "score": round(float(match.score), 6),
                 "summary": str(match.summary or row.get("summary") or "").strip(),
                 "snippet": _read_card_snippet(resolved_vault, rel_path),
+                "transferable_moves": _read_card_frontmatter_field_items(
+                    resolved_vault, rel_path, "transferable_moves"
+                ),
+                "operative_claims": _read_card_frontmatter_field_items(
+                    resolved_vault, rel_path, "operative_claims"
+                ),
                 "score_components": components_payload,
             }
         )
@@ -775,6 +863,7 @@ def _collect_knowledge_context(
         "score_components_by_name": score_components_by_name,
         "dropped_cards": dropped_cards,
         "score_weights": _score_weights_to_dict(weights),
+        "llm_rerank": _llm_rerank_diagnostics(rerank_outcome),
         "query_anchor": {
             "domain": anchor.domain,
             "market": anchor.market,
@@ -783,16 +872,34 @@ def _collect_knowledge_context(
         },
         "available_data_provided": available_data is not None,
     }
+    retrieval_diagnostics.update(extra_retrieval_diagnostics)
 
     return {
         "status": status,
         "knowledge_matches": knowledge_matches,
         "knowledge_handling_patterns": handling_patterns,
+        "insight_brief": insight_brief,
         "frontier_matches": frontier_matches,
         "failure_refs": failure_refs,
         "warnings": warnings,
         "retrieval_diagnostics": retrieval_diagnostics,
     }
+
+
+@dataclass(slots=True)
+class _ModelV2PooledCandidate:
+    result: SearchResult
+    hit_by: list[str]
+    literal_top: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _ModelV2RankingPayload:
+    ranked: list[tuple[float, SearchResult]]
+    score_components_by_name: dict[str, dict[str, float]]
+    dropped_cards: list[dict[str, str]]
+    insight_brief: list[str]
+    diagnostics: dict[str, object]
 
 
 def _score_weights_to_dict(weights: ScoreWeights) -> dict[str, float]:
@@ -802,6 +909,372 @@ def _score_weights_to_dict(weights: ScoreWeights) -> dict[str, float]:
         "mechanism": weights.mechanism,
         "dependency": weights.dependency,
         "failure": weights.failure,
+        "llm_relevance": weights.llm_relevance,
+    }
+
+
+def _llm_rerank_diagnostics(outcome: RerankOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "dropped_invalid_names": outcome.dropped_invalid_names,
+        "fallback_reason": outcome.fallback_reason,
+    }
+
+
+def _disabled_rerank_outcome(reason: str) -> RerankOutcome:
+    return RerankOutcome(
+        enabled=False,
+        model=DEFAULT_MODEL,
+        scores={},
+        reasons={},
+        tokens_input=0,
+        tokens_output=0,
+        cache_hit_input=0,
+        dropped_invalid_names=[],
+        fallback_reason=reason,
+    )
+
+
+def _research_bridge_v2_enabled() -> bool:
+    return os.environ.get("ALPHA_LAB_RESEARCH_BRIDGE_V2") == "1" and bool(
+        os.environ.get("ANTHROPIC_API_KEY")
+    )
+
+
+def _try_model_v2_knowledge_ranking(
+    *,
+    idea: str,
+    mode: str,
+    vault_root: Path,
+    workspace_root: Path | None,
+    graph: object | None,
+    embeddings: VaultEmbeddings | None,
+    index_rows: list[dict[str, str]],
+    anchor: QueryAnchor,
+    weights: ScoreWeights,
+    available_data: frozenset[str] | None,
+    failure_keywords: frozenset[str],
+) -> _ModelV2RankingPayload | None:
+    if not _research_bridge_v2_enabled():
+        return None
+
+    expansion = expand_query(idea=idea, mode=mode)
+    if not expansion.enabled:
+        return None
+
+    resolved_workspace = Path(workspace_root or PROJECT_ROOT).expanduser().resolve()
+    mechanism_embeddings = mechanism_index.load_mechanism_embeddings(
+        workspace_root=resolved_workspace,
+        vault_root=vault_root,
+    )
+    candidate_pool, literal_top_paths = _collect_model_v2_candidate_pool(
+        idea=idea,
+        expansion=expansion,
+        embeddings=embeddings,
+        mechanism_embeddings=mechanism_embeddings,
+        index_rows=index_rows,
+    )
+    if not candidate_pool:
+        return None
+    capped_pool, pool_cap_dropped = _apply_model_v2_pool_cap(
+        pool=candidate_pool,
+        literal_top_paths=literal_top_paths,
+        cap=40,
+    )
+
+    dropped_cards: list[dict[str, str]] = []
+    scored: list[tuple[SearchResult, CardMetadata, ScoreComponents]] = []
+    for pooled in capped_pool.values():
+        match = pooled.result
+        if not match.name:
+            continue
+        card = _build_model_card_metadata(
+            graph=graph,
+            name=match.name,
+            fallback_type=match.type,
+        )
+        components, kept, drop_reason = score_card(
+            anchor=anchor,
+            card=card,
+            semantic_score=float(match.score),
+            available_data=available_data,
+            failure_keywords=failure_keywords,
+        )
+        if not kept:
+            dropped_cards.append({"name": match.name, "reason": drop_reason})
+            continue
+        scored.append((match, card, components))
+    if not scored:
+        return None
+
+    fingerprints = {
+        match.path: fingerprint
+        for match, _card, _components in scored
+        if match.path
+        for fingerprint in [
+            mechanism_index.load_card_fingerprint(
+                workspace_root=resolved_workspace,
+                vault_root=vault_root,
+                path=match.path,
+            )
+        ]
+        if fingerprint is not None
+    }
+    provenance = {
+        path: list(candidate.hit_by) for path, candidate in capped_pool.items()
+    }
+    categorize_outcome = categorize_and_compress(
+        idea=idea,
+        mode=mode,
+        candidates=[
+            RerankCandidate(
+                name=match.name,
+                summary=match.summary or "",
+                domain=card.domain,
+                mechanism=card.mechanism,
+                factor_family=card.factor_family,
+                path=match.path,
+            )
+            for match, card, _components in scored[:DEFAULT_MAX_CANDIDATES]
+        ],
+        fingerprints=fingerprints,
+        provenance=provenance,
+    )
+    if not categorize_outcome.enabled:
+        return None
+
+    categorized_by_path = categorize_outcome.by_path
+    score_components_by_name: dict[str, dict[str, float]] = {}
+    ranked: list[tuple[float, SearchResult]] = []
+    for match, _card, components in scored:
+        category = categorized_by_path.get(match.path)
+        if category is not None and category.category == "unrelated":
+            if match.path in literal_top_paths:
+                llm_relevance = 0.0
+            else:
+                continue
+        else:
+            llm_relevance = category.relevance if category is not None else 0.0
+        components = replace(components, llm_relevance=llm_relevance)
+        aggregate = aggregate_score(components, weights)
+        score_components_by_name[match.name] = {
+            **components.to_dict(),
+            "aggregate": aggregate,
+        }
+        ranked.append((aggregate, match))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda pair: (-pair[0], getattr(pair[1], "name", "")))
+
+    diagnostics = {
+        "v2_enabled": True,
+        "query_expansion": _model_expansion_diagnostics(expansion),
+        "mechanism_tier": {
+            "enabled": mechanism_embeddings is not None,
+            "hit_paths": sorted(
+                path
+                for path, candidate in capped_pool.items()
+                if any(tag.endswith("@mechanism") for tag in candidate.hit_by)
+            ),
+            "fallback_reason": None if mechanism_embeddings is not None else "missing_index",
+        },
+        "categorize": _model_categorize_diagnostics(categorize_outcome),
+        "pool_cap_dropped": pool_cap_dropped,
+    }
+    return _ModelV2RankingPayload(
+        ranked=ranked,
+        score_components_by_name=score_components_by_name,
+        dropped_cards=dropped_cards,
+        insight_brief=list(categorize_outcome.insight_brief),
+        diagnostics=diagnostics,
+    )
+
+
+def _collect_model_v2_candidate_pool(
+    *,
+    idea: str,
+    expansion: ExpansionOutcome,
+    embeddings: VaultEmbeddings | None,
+    mechanism_embeddings: VaultEmbeddings | None,
+    index_rows: list[dict[str, str]],
+) -> tuple[dict[str, _ModelV2PooledCandidate], set[str]]:
+    pool: dict[str, _ModelV2PooledCandidate] = {}
+    literal_top_paths: set[str] = set()
+    for probe in _dedupe_model_v2([idea, *expansion.probes.direct]):
+        for match in bridge_loaders.search_explore_matches(
+            idea=probe,
+            embeddings=embeddings,
+            index_rows=index_rows,
+            top_k=10,
+        ):
+            is_literal_top = probe == idea
+            _model_pool_add(
+                pool,
+                match=match,
+                tag=f"direct:{probe}@literal",
+                literal_top=is_literal_top,
+            )
+            if is_literal_top and match.path:
+                literal_top_paths.add(match.path)
+
+    if mechanism_embeddings is not None:
+        for probe_class, probes in _model_query_probe_items(expansion):
+            for probe in probes:
+                for match in mechanism_embeddings.search(probe, top_k=5):
+                    _model_pool_add(
+                        pool,
+                        match=match,
+                        tag=f"{probe_class}:{probe}@mechanism",
+                        literal_top=False,
+                    )
+    return pool, literal_top_paths
+
+
+def _model_pool_add(
+    pool: dict[str, _ModelV2PooledCandidate],
+    *,
+    match: SearchResult,
+    tag: str,
+    literal_top: bool,
+) -> None:
+    path = str(match.path or "").strip()
+    if not path:
+        return
+    existing = pool.get(path)
+    if existing is None:
+        pool[path] = _ModelV2PooledCandidate(
+            result=match,
+            hit_by=[tag],
+            literal_top=literal_top,
+        )
+        return
+    if tag not in existing.hit_by:
+        existing.hit_by.append(tag)
+    if literal_top:
+        existing.literal_top = True
+    if match.score > existing.result.score:
+        existing.result = match
+
+
+def _apply_model_v2_pool_cap(
+    *,
+    pool: dict[str, _ModelV2PooledCandidate],
+    literal_top_paths: set[str],
+    cap: int,
+) -> tuple[dict[str, _ModelV2PooledCandidate], list[str]]:
+    selected: dict[str, _ModelV2PooledCandidate] = {
+        path: pool[path] for path in pool if path in literal_top_paths
+    }
+    remaining = [
+        (path, candidate)
+        for path, candidate in pool.items()
+        if path not in selected
+    ]
+    remaining.sort(key=lambda item: _model_v2_pool_priority(item[1]), reverse=True)
+    class_limits = {
+        "direct": 15,
+        "mechanism": 10,
+        "analogy": 8,
+        "failure": 5,
+        "construction": 5,
+    }
+    class_counts: Counter[str] = Counter()
+    for path, candidate in remaining:
+        if len(selected) >= cap:
+            break
+        classes = _model_candidate_probe_classes(candidate)
+        chosen_class = next(
+            (
+                probe_class
+                for probe_class in classes
+                if class_counts[probe_class] < class_limits.get(probe_class, 5)
+            ),
+            "",
+        )
+        if not chosen_class:
+            continue
+        class_counts[chosen_class] += 1
+        selected[path] = candidate
+    dropped = sorted(path for path in pool if path not in selected)
+    return selected, dropped
+
+
+def _model_v2_pool_priority(
+    candidate: _ModelV2PooledCandidate,
+) -> tuple[float, float, float]:
+    distinct_provenance = float(len(set(candidate.hit_by)))
+    mechanism_hit = (
+        1.0 if any(tag.endswith("@mechanism") for tag in candidate.hit_by) else 0.0
+    )
+    return distinct_provenance, mechanism_hit, float(candidate.result.score)
+
+
+def _model_candidate_probe_classes(candidate: _ModelV2PooledCandidate) -> list[str]:
+    classes: list[str] = []
+    for tag in candidate.hit_by:
+        probe_class = tag.split(":", 1)[0].strip()
+        if probe_class and probe_class not in classes:
+            classes.append(probe_class)
+    return classes or ["direct"]
+
+
+def _model_query_probe_items(expansion: ExpansionOutcome) -> list[tuple[str, list[str]]]:
+    probes = expansion.probes
+    return [
+        ("direct", probes.direct),
+        ("mechanism", probes.mechanism),
+        ("analogy", probes.analogy),
+        ("failure", probes.failure),
+        ("construction", probes.construction),
+    ]
+
+
+def _dedupe_model_v2(values: list[str]) -> list[str]:
+    rows: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        rows.append(text)
+    return rows
+
+
+def _model_expansion_diagnostics(outcome: ExpansionOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "fallback_reason": outcome.fallback_reason,
+        "probes": {
+            "direct": list(outcome.probes.direct),
+            "mechanism": list(outcome.probes.mechanism),
+            "analogy": list(outcome.probes.analogy),
+            "failure": list(outcome.probes.failure),
+            "construction": list(outcome.probes.construction),
+        },
+    }
+
+
+def _model_categorize_diagnostics(outcome: CategorizeOutcome) -> dict[str, object]:
+    return {
+        "enabled": outcome.enabled,
+        "model": outcome.model,
+        "tokens_input": outcome.tokens_input,
+        "tokens_output": outcome.tokens_output,
+        "cache_hit_input": outcome.cache_hit_input,
+        "dropped_invalid_paths": list(outcome.dropped_invalid_paths),
+        "fallback_reason": outcome.fallback_reason,
+        "categories_by_path": {
+            item.path: item.category for item in outcome.categorized
+        },
     }
 
 
@@ -883,6 +1356,16 @@ def _collect_experiment_context(
     current_spec: dict[str, object],
     top_k: int,
 ) -> dict[str, object]:
+    model_specs = _collect_model_spec_inventory(
+        workspace_root=workspace_root,
+        idea=idea,
+        top_k=top_k,
+    )
+    factor_inventory = _collect_factor_inventory(
+        workspace_root=workspace_root,
+        idea=idea,
+        top_k=top_k,
+    )
     dist_root = workspace_root / "dist"
     if not dist_root.exists():
         return {
@@ -890,6 +1373,9 @@ def _collect_experiment_context(
             "run_matches": [],
             "validated_baselines": [],
             "recent_failures": [],
+            "single_factor_runs": [],
+            "model_specs": model_specs,
+            "factor_inventory": factor_inventory,
             "warnings": [],
         }
 
@@ -899,16 +1385,28 @@ def _collect_experiment_context(
         reverse=True,
     )[:200]
     run_rows: list[dict[str, object]] = []
+    single_factor_run_rows: list[dict[str, object]] = []
     for manifest_path in manifest_paths:
         parsed = _parse_model_run_record(manifest_path)
         if parsed is not None:
             run_rows.append(parsed)
+        single_factor_parsed = _parse_single_factor_run_record(manifest_path)
+        if single_factor_parsed is not None:
+            single_factor_run_rows.append(single_factor_parsed)
+    single_factor_runs = _summarize_single_factor_runs(
+        rows=single_factor_run_rows,
+        idea=idea,
+        top_k=top_k,
+    )
     if not run_rows:
         return {
-            "status": "no_runs",
+            "status": "no_model_runs",
             "run_matches": [],
             "validated_baselines": [],
             "recent_failures": [],
+            "single_factor_runs": single_factor_runs,
+            "model_specs": model_specs,
+            "factor_inventory": factor_inventory,
             "warnings": [],
         }
 
@@ -985,8 +1483,214 @@ def _collect_experiment_context(
         "run_matches": run_matches,
         "validated_baselines": validated_baselines,
         "recent_failures": recent_failures,
+        "single_factor_runs": single_factor_runs,
+        "model_specs": model_specs,
+        "factor_inventory": factor_inventory,
         "warnings": [],
     }
+
+
+def _collect_model_spec_inventory(
+    *,
+    workspace_root: Path,
+    idea: str,
+    top_k: int,
+) -> list[dict[str, object]]:
+    spec_root = workspace_root / "configs" / "real_cases" / "model_factor"
+    if not spec_root.exists():
+        return []
+    rows: list[dict[str, object]] = []
+    for path in sorted(spec_root.glob("*.yaml"))[:200]:
+        try:
+            parsed = load_model_factor_case_spec(path)
+        except Exception:
+            continue
+        feature_columns = [str(item) for item in parsed.feature_columns]
+        rows.append(
+            {
+                "name": parsed.name,
+                "path": _relative_path_text(path, workspace_root),
+                "factor_name": parsed.factor_name,
+                "model_family": parsed.model.family,
+                "feature_count": len(feature_columns),
+                "feature_columns_sample": feature_columns[:16],
+                "features_path": str(parsed.features_path),
+                "feature_availability_mode": parsed.feature_availability.mode,
+                "feature_availability_column": parsed.feature_availability.column,
+                "feature_availability_safety_lag_days": (
+                    parsed.feature_availability.safety_lag_days
+                ),
+                "training_window_type": parsed.training.window_type,
+                "model_selection_enabled": bool(parsed.model_selection.enabled),
+                "model_selection_metric": parsed.model_selection.metric,
+                "mtime": float(path.stat().st_mtime),
+            }
+        )
+    return _rank_inventory_rows(
+        rows=rows,
+        idea=idea,
+        fields=(
+            "name",
+            "path",
+            "factor_name",
+            "model_family",
+            "features_path",
+            "feature_columns_sample",
+        ),
+        top_k=max(top_k, 8),
+    )
+
+
+def _collect_factor_inventory(
+    *,
+    workspace_root: Path,
+    idea: str,
+    top_k: int,
+) -> dict[str, object]:
+    builtin_methods = sorted(set(factor_registry.supported_methods()) | {"vcimom"})
+    baseline_factors = _rank_inventory_rows(
+        rows=[
+            {
+                "name": item.get("name"),
+                "family": item.get("family"),
+                "label": item.get("label"),
+                "description": item.get("description"),
+                "base_method": item.get("base_method"),
+                "required_columns": item.get("required_columns", []),
+                "tags": item.get("tags", []),
+            }
+            for item in baseline_factor_suite_payload(include_non_default=True)
+        ],
+        idea=idea,
+        fields=("name", "family", "label", "description", "base_method", "tags"),
+        top_k=max(top_k, 8),
+    )
+    custom_factors: list[dict[str, object]] = []
+    for path in iter_custom_factor_meta_paths(workspace_root):
+        try:
+            source = read_custom_factor_source(path)
+        except Exception:
+            continue
+        custom_factors.append(
+            {
+                "name": source.name,
+                "scope": source.scope,
+                "path": _relative_path_text(source.path, workspace_root),
+                "description": source.description,
+                "required_columns": list(source.required_columns),
+                "optional_columns": list(source.optional_columns),
+                "frequency": source.frequency,
+                "pit_assumption": source.pit_assumption,
+                "mtime": float(source.path.stat().st_mtime),
+            }
+        )
+    custom_factors = _rank_inventory_rows(
+        rows=custom_factors,
+        idea=idea,
+        fields=("name", "scope", "description", "required_columns", "optional_columns"),
+        top_k=max(top_k, 8),
+    )
+    single_factor_cases = _collect_single_factor_case_inventory(
+        workspace_root=workspace_root,
+        idea=idea,
+        top_k=max(top_k, 8),
+    )
+    return {
+        "builtin_methods": builtin_methods,
+        "baseline_factors": baseline_factors,
+        "custom_factors": custom_factors,
+        "single_factor_cases": single_factor_cases,
+    }
+
+
+def _collect_single_factor_case_inventory(
+    *,
+    workspace_root: Path,
+    idea: str,
+    top_k: int,
+) -> list[dict[str, object]]:
+    spec_root = workspace_root / "configs" / "real_cases" / "single_factor"
+    if not spec_root.exists():
+        return []
+    rows: list[dict[str, object]] = []
+    for path in sorted(spec_root.glob("*.yaml"))[:200]:
+        try:
+            parsed = load_single_factor_case_spec(path)
+        except Exception:
+            continue
+        recipe = parsed.factor_input.recipe if parsed.factor_input is not None else None
+        base_method = ""
+        if isinstance(recipe, dict):
+            base = recipe.get("base")
+            if isinstance(base, dict):
+                base_method = str(base.get("method") or "")
+        rows.append(
+            {
+                "name": parsed.name,
+                "path": _relative_path_text(path, workspace_root),
+                "factor_name": parsed.factor_name,
+                "factor_path": parsed.factor_path,
+                "factor_input_mode": (
+                    parsed.factor_input.mode if parsed.factor_input is not None else "file"
+                ),
+                "base_method": base_method,
+                "target_horizon": parsed.target.horizon,
+                "rebalance_frequency": parsed.rebalance_frequency,
+                "preprocess": {
+                    "winsorize": parsed.preprocess.winsorize,
+                    "standardization": parsed.preprocess.standardization,
+                },
+                "mtime": float(path.stat().st_mtime),
+            }
+        )
+    return _rank_inventory_rows(
+        rows=rows,
+        idea=idea,
+        fields=("name", "path", "factor_name", "factor_path", "base_method"),
+        top_k=top_k,
+    )
+
+
+def _rank_inventory_rows(
+    *,
+    rows: list[dict[str, object]],
+    idea: str,
+    fields: tuple[str, ...],
+    top_k: int,
+) -> list[dict[str, object]]:
+    keywords = _idea_keywords(idea)
+    ranked: list[dict[str, object]] = []
+    for row in rows:
+        haystack_parts: list[str] = []
+        for field in fields:
+            value = row.get(field)
+            if isinstance(value, list):
+                haystack_parts.extend(str(item) for item in value)
+            else:
+                haystack_parts.append(str(value or ""))
+        haystack = " ".join(haystack_parts).lower()
+        score = float(sum(1 for keyword in keywords if keyword in haystack))
+        ranked.append({**row, "score": round(score, 4)})
+    ranked.sort(
+        key=lambda item: (
+            -_sort_float(item.get("score")),
+            -_sort_float(item.get("mtime")),
+            str(item.get("name") or ""),
+        )
+    )
+    cleaned: list[dict[str, object]] = []
+    for item in ranked[:top_k]:
+        row = dict(item)
+        row.pop("mtime", None)
+        cleaned.append(row)
+    return cleaned
+
+
+def _relative_path_text(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path.resolve())
 
 
 def model_idea_sessions_root(*, workspace_root: str | Path = PROJECT_ROOT) -> Path:
@@ -1027,6 +1731,7 @@ def list_model_idea_sessions(
     *,
     workspace_root: str | Path = PROJECT_ROOT,
     limit: int = 20,
+    include_archived: bool = False,
 ) -> list[dict[str, object]]:
     session_root = model_idea_sessions_root(workspace_root=workspace_root)
     if not session_root.exists():
@@ -1036,6 +1741,8 @@ def list_model_idea_sessions(
     for path in _iter_session_paths(session_root):
         payload = _read_model_idea_session_file(path)
         if payload is None:
+            continue
+        if bool(payload.get("archived")) and not include_archived:
             continue
         rows.append(_summarize_session_payload(payload, path=path))
         if len(rows) >= normalized_limit:
@@ -1059,6 +1766,28 @@ def read_model_idea_session(
     return payload
 
 
+def delete_model_idea_session(
+    *,
+    session_id: str,
+    workspace_root: str | Path = PROJECT_ROOT,
+) -> dict[str, object]:
+    normalized_session_id = _normalize_session_id(session_id)
+    session_root = model_idea_sessions_root(workspace_root=workspace_root)
+    session_path = (session_root / f"{normalized_session_id}.json").resolve()
+    if not session_path.exists() or not session_path.is_file():
+        raise FileNotFoundError(f"model-idea session not found: {normalized_session_id}")
+    payload = _read_model_idea_session_file(session_path)
+    if payload is None:
+        raise ValueError(f"invalid model-idea session payload: {normalized_session_id}")
+    payload["archived"] = True
+    payload["archived_at_utc"] = dt.datetime.now(dt.UTC).isoformat()
+    session_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {"ok": True, "session_id": normalized_session_id, "archived": True}
+
+
 def record_model_idea_response(
     *,
     session_id: str,
@@ -1078,7 +1807,10 @@ def record_model_idea_response(
     if payload is None:
         raise ValueError(f"invalid model-idea session payload: {normalized_session_id}")
 
-    stage = normalize_workflow_stage(str(payload.get("stage") or MECHANISM_DISCOVERY))
+    stage = normalize_workflow_stage(
+        str(payload.get("stage") or MECHANISM_DISCOVERY),
+        allow_stage3_helper=True,
+    )
     mode = str(payload.get("mode") or "explore").strip().lower() or "explore"
     report = lint_model_idea_response(text, stage=stage, mode=mode)
     response_sections = extract_model_stage_sections(text, stage=stage)
@@ -1378,6 +2110,92 @@ def _parse_model_run_record(manifest_path: Path) -> dict[str, object] | None:
     }
 
 
+def _parse_single_factor_run_record(manifest_path: Path) -> dict[str, object] | None:
+    try:
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest_payload, dict):
+        return None
+
+    workflow = str(manifest_payload.get("workflow") or "").strip().lower()
+    if workflow and "single_factor" not in workflow:
+        return None
+    metrics_path = _resolve_metrics_path(manifest_payload, manifest_path.parent)
+    metrics_summary = _load_metrics_summary(metrics_path)
+    if metrics_summary.get("model_family"):
+        return None
+    factor_name = str(
+        metrics_summary.get("factor_name")
+        or manifest_payload.get("factor_name")
+        or ""
+    ).strip()
+    if "single_factor" not in workflow and not factor_name:
+        return None
+    outputs = manifest_payload.get("outputs")
+    output_keys = sorted(str(key) for key in outputs.keys()) if isinstance(outputs, dict) else []
+    status = str(
+        manifest_payload.get("status")
+        or manifest_payload.get("run_status")
+        or metrics_summary.get("run_status")
+        or "unknown"
+    ).strip()
+    return {
+        "run_id": str(manifest_payload.get("run_id") or manifest_path.parent.name).strip(),
+        "case_name": str(manifest_payload.get("case_name") or manifest_path.parent.name).strip(),
+        "factor_name": factor_name,
+        "status": status.lower(),
+        "mean_rank_ic": _to_float_or_none(metrics_summary.get("mean_rank_ic")),
+        "mean_ic": _to_float_or_none(metrics_summary.get("mean_ic")),
+        "rank_ic_ir": _first_metric_float(
+            metrics_summary, "rank_ic_ir", "rank_ic_information_ratio"
+        ),
+        "long_short_ir": _first_metric_float(
+            metrics_summary, "long_short_ir", "long_short_information_ratio"
+        ),
+        "cost_aware_long_short_ir": _first_metric_float(
+            metrics_summary,
+            "cost_aware_long_short_ir",
+            "net_long_short_ir",
+            "cost_adjusted_long_short_ir",
+        ),
+        "factor_verdict": str(metrics_summary.get("factor_verdict") or "").strip(),
+        "output_keys": output_keys,
+        "path": str(manifest_path),
+        "mtime": float(manifest_path.stat().st_mtime),
+    }
+
+
+def _summarize_single_factor_runs(
+    *,
+    rows: list[dict[str, object]],
+    idea: str,
+    top_k: int,
+) -> list[dict[str, object]]:
+    ranked = _rank_inventory_rows(
+        rows=rows,
+        idea=idea,
+        fields=("run_id", "case_name", "factor_name", "status", "factor_verdict"),
+        top_k=max(top_k, 5),
+    )
+    return [
+        {
+            "run_id": row.get("run_id"),
+            "case_name": row.get("case_name"),
+            "factor_name": row.get("factor_name"),
+            "status": row.get("status"),
+            "mean_rank_ic": row.get("mean_rank_ic"),
+            "mean_ic": row.get("mean_ic"),
+            "rank_ic_ir": row.get("rank_ic_ir"),
+            "long_short_ir": row.get("long_short_ir"),
+            "cost_aware_long_short_ir": row.get("cost_aware_long_short_ir"),
+            "factor_verdict": row.get("factor_verdict"),
+            "output_keys": row.get("output_keys", []),
+        }
+        for row in ranked
+    ]
+
+
 def _resolve_metrics_path(manifest_payload: dict[str, object], run_dir: Path) -> Path | None:
     outputs = manifest_payload.get("outputs")
     if isinstance(outputs, dict):
@@ -1482,8 +2300,8 @@ def _build_recommendations(
         next_actions = [
             "Surface 2-4 structurally different model mechanisms; do NOT converge yet.",
             "Separate loss/regularization, feature interaction, target construction, sample weighting, training window, and model selection stories.",
-            "For each mechanism, mark touched contract surfaces and the earliest falsifier.",
-            "Defer final spec patches and winner selection to signal_mapping or validation_kill_tests.",
+            "For each mechanism, mark optional inspired_by/fusion_of, touched contract surfaces, and data-validation concerns.",
+            "Defer final spec patches and winner selection to Stage 3 data validation after additive ledger expansion.",
         ]
     elif stage == SIGNAL_MAPPING:
         next_actions = [
@@ -1491,6 +2309,7 @@ def _build_recommendations(
             "Tag every required field as necessary, decorative, or risk control.",
             "Address model confounds: PIT, target leakage, complexity, turnover/cost, feature stability, and split fragility.",
             "Explain which mechanism the current implementation captures and which cannot be disambiguated at this data tier.",
+            "Emit ledger_v1/retrieval_log-ready synthesis notes; do not make kill verdicts in Stage 1.",
         ]
     else:
         next_actions = [
@@ -1534,10 +2353,14 @@ def _build_recommendations(
             "knowledge_context_status": knowledge_context["status"],
             "knowledge_matches": knowledge_context["knowledge_matches"],
             "knowledge_handling_patterns": knowledge_context["knowledge_handling_patterns"],
+            "insight_brief": knowledge_context.get("insight_brief", []),
             "frontier_matches": knowledge_context["frontier_matches"],
             "failure_refs": knowledge_context["failure_refs"],
             "run_context_status": experiment_context["status"],
             "run_matches": experiment_context["run_matches"],
+            "existing_model_specs": experiment_context["model_specs"],
+            "factor_inventory": experiment_context["factor_inventory"],
+            "single_factor_runs": experiment_context["single_factor_runs"],
             "session_memory_status": session_memory_context["status"],
             "session_memory": session_memory_context["session_memory"],
         },
@@ -1554,36 +2377,6 @@ def _build_model_idea_exploration_prompt(
     drift_header: str = "",
     upstream_header: str = "",
 ) -> str:
-    if stage == MECHANISM_DISCOVERY:
-        if mode == "start":
-            return _build_model_idea_mechanism_start_prompt(
-                idea=idea,
-                mode=mode,
-                report=report,
-                spec_patch_hint=spec_patch_hint,
-                stage=stage,
-                drift_header=drift_header,
-                upstream_header=upstream_header,
-            )
-        if mode == "constrained":
-            return _build_model_idea_mechanism_constrained_prompt(
-                idea=idea,
-                mode=mode,
-                report=report,
-                spec_patch_hint=spec_patch_hint,
-                stage=stage,
-                drift_header=drift_header,
-                upstream_header=upstream_header,
-            )
-        return _build_model_idea_mechanism_structured_prompt(
-            idea=idea,
-            mode=mode,
-            report=report,
-            spec_patch_hint=spec_patch_hint,
-            stage=stage,
-            drift_header=drift_header,
-            upstream_header=upstream_header,
-        )
     if stage == SIGNAL_MAPPING:
         return _build_model_idea_signal_mapping_prompt(
             idea=idea,
@@ -1595,13 +2388,43 @@ def _build_model_idea_exploration_prompt(
             drift_header=drift_header,
             upstream_header=upstream_header,
         )
-    return _build_model_idea_validation_kill_tests_prompt(
+    if stage == VALIDATION_KILL_TESTS:
+        return _build_model_idea_validation_kill_tests_prompt(
+            idea=idea,
+            mode=mode,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            stage=stage,
+            strict=mode == "constrained",
+            drift_header=drift_header,
+            upstream_header=upstream_header,
+        )
+    if mode == "start":
+        return _build_model_idea_mechanism_start_prompt(
+            idea=idea,
+            mode=mode,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            stage=MECHANISM_DISCOVERY,
+            drift_header=drift_header,
+            upstream_header=upstream_header,
+        )
+    if mode == "constrained":
+        return _build_model_idea_mechanism_constrained_prompt(
+            idea=idea,
+            mode=mode,
+            report=report,
+            spec_patch_hint=spec_patch_hint,
+            stage=MECHANISM_DISCOVERY,
+            drift_header=drift_header,
+            upstream_header=upstream_header,
+        )
+    return _build_model_idea_mechanism_structured_prompt(
         idea=idea,
         mode=mode,
         report=report,
         spec_patch_hint=spec_patch_hint,
-        stage=stage,
-        strict=mode == "constrained",
+        stage=MECHANISM_DISCOVERY,
         drift_header=drift_header,
         upstream_header=upstream_header,
     )
@@ -1721,6 +2544,11 @@ def _build_model_idea_validation_kill_tests_prompt(
     drift_header: str = "",
     upstream_header: str = "",
 ) -> str:
+    raise ValueError(
+        "validation_kill_tests has moved out of model-lab idea exploration; "
+        "use mechanism_discovery/signal_mapping here and run Stage 3 data "
+        "validation separately."
+    )
     lines = _build_model_idea_common_prompt_lines(
         idea=idea,
         mode=mode,
@@ -1767,6 +2595,10 @@ def _build_model_idea_common_prompt_lines(
     extras = _as_mapping(recommendations.get("extras"))
     knowledge_matches = _as_dict_list(extras.get("knowledge_matches"))
     handling_patterns = _as_str_list(extras.get("knowledge_handling_patterns"))
+    insight_brief = _as_str_list(extras.get("insight_brief"))
+    existing_model_specs = _as_dict_list(extras.get("existing_model_specs"))
+    factor_inventory = _as_mapping(extras.get("factor_inventory"))
+    single_factor_runs = _as_dict_list(extras.get("single_factor_runs"))
     session_memory_rows = _as_dict_list(extras.get("session_memory"))
     warnings = _as_str_list(extras.get("warnings"))
     source_anchors = _as_dict_list(recommendations.get("source_anchors"))
@@ -1794,11 +2626,15 @@ def _build_model_idea_common_prompt_lines(
         lines,
         knowledge_matches=knowledge_matches,
         handling_patterns=handling_patterns,
+        insight_brief=insight_brief,
     )
     _append_model_experiment_session_memory_section(
         lines,
         recent_failures=recent_failures,
         validated_baselines=validated_baselines,
+        existing_model_specs=existing_model_specs,
+        factor_inventory=factor_inventory,
+        single_factor_runs=single_factor_runs,
         session_memory_rows=session_memory_rows,
         source_anchors=source_anchors,
         spec_patch_hint=spec_patch_hint,
@@ -1918,6 +2754,7 @@ def _append_model_knowledge_cards_section(
     *,
     knowledge_matches: list[dict[str, object]],
     handling_patterns: list[str],
+    insight_brief: list[str],
 ) -> None:
     lines.extend(["", "## Knowledge Context"])
     if knowledge_matches:
@@ -1925,10 +2762,26 @@ def _append_model_knowledge_cards_section(
             lines.append(
                 f"- [K{idx}] {item.get('name')} ({item.get('type')}): {item.get('summary')}"
             )
+            transferable_moves = _as_str_list(item.get("transferable_moves"))
+            operative_claims = _as_str_list(item.get("operative_claims"))
+            if transferable_moves:
+                lines.append(
+                    "  - transferable_moves: "
+                    + "; ".join(transferable_moves[:3])
+                )
+            if operative_claims:
+                lines.append(
+                    "  - operative_claims (weak_hint_only): "
+                    + "; ".join(operative_claims[:3])
+                )
     else:
         lines.append("- No direct knowledge matches; treat this as greenfield.")
     for pattern in handling_patterns[:4]:
         lines.append(f"- handling: {pattern}")
+    if insight_brief:
+        lines.extend(["", "## Cross-card synthesis"])
+        for brief in insight_brief[:6]:
+            lines.append(f"- {brief}")
 
 
 def _append_model_experiment_session_memory_section(
@@ -1936,6 +2789,9 @@ def _append_model_experiment_session_memory_section(
     *,
     recent_failures: list[dict[str, object]],
     validated_baselines: list[dict[str, object]],
+    existing_model_specs: list[dict[str, object]],
+    factor_inventory: dict[str, object],
+    single_factor_runs: list[dict[str, object]],
     session_memory_rows: list[dict[str, object]],
     source_anchors: list[dict[str, object]],
     spec_patch_hint: dict[str, object] | None,
@@ -1972,6 +2828,79 @@ def _append_model_experiment_session_memory_section(
             )
     else:
         lines.append("- No validated baseline runs found in local dist/ artifacts.")
+
+    lines.extend(["", "## Existing Model And Factor Inventory"])
+    if existing_model_specs:
+        lines.append("### Model-factor specs")
+        for idx, item in enumerate(existing_model_specs[:6], start=1):
+            features = ", ".join(_as_str_list(item.get("feature_columns_sample"))[:8])
+            lines.append(
+                "- [S{idx}] {name} model={model} factor={factor} features={n} sample={sample} path={path}".format(
+                    idx=idx,
+                    name=item.get("name") or "-",
+                    model=item.get("model_family") or "-",
+                    factor=item.get("factor_name") or "-",
+                    n=item.get("feature_count") or "-",
+                    sample=features or "-",
+                    path=item.get("path") or "-",
+                )
+            )
+    else:
+        lines.append("- No model-factor specs found under configs/real_cases/model_factor.")
+
+    baseline_factors = _as_dict_list(factor_inventory.get("baseline_factors"))
+    custom_factors = _as_dict_list(factor_inventory.get("custom_factors"))
+    single_factor_cases = _as_dict_list(factor_inventory.get("single_factor_cases"))
+    builtin_methods = _as_str_list(factor_inventory.get("builtin_methods"))
+    lines.append("### Factor registry / cases")
+    lines.append("- Built-in factor methods: " + (", ".join(builtin_methods) or "-"))
+    if baseline_factors:
+        for idx, item in enumerate(baseline_factors[:6], start=1):
+            lines.append(
+                "- [B{idx}] {name} family={family} method={method} required={required}".format(
+                    idx=idx,
+                    name=item.get("name") or "-",
+                    family=item.get("family") or "-",
+                    method=item.get("base_method") or "-",
+                    required=", ".join(_as_str_list(item.get("required_columns"))) or "-",
+                )
+            )
+    if custom_factors:
+        for idx, item in enumerate(custom_factors[:6], start=1):
+            lines.append(
+                "- [C{idx}] {name} scope={scope} required={required} path={path}".format(
+                    idx=idx,
+                    name=item.get("name") or "-",
+                    scope=item.get("scope") or "-",
+                    required=", ".join(_as_str_list(item.get("required_columns"))) or "-",
+                    path=item.get("path") or "-",
+                )
+            )
+    if single_factor_cases:
+        for idx, item in enumerate(single_factor_cases[:6], start=1):
+            lines.append(
+                "- [FCase{idx}] {name} factor={factor} method={method} horizon={horizon} path={path}".format(
+                    idx=idx,
+                    name=item.get("name") or "-",
+                    factor=item.get("factor_name") or "-",
+                    method=item.get("base_method") or "-",
+                    horizon=item.get("target_horizon") or "-",
+                    path=item.get("path") or "-",
+                )
+            )
+    if single_factor_runs:
+        lines.append("### Single-factor run references")
+        for idx, item in enumerate(single_factor_runs[:5], start=1):
+            lines.append(
+                "- [FR{idx}] run={run_id} factor={factor} rank_ic={rank_ic} ls_ir={ls_ir} verdict={verdict}".format(
+                    idx=idx,
+                    run_id=item.get("run_id") or "-",
+                    factor=item.get("factor_name") or "-",
+                    rank_ic=item.get("mean_rank_ic"),
+                    ls_ir=item.get("long_short_ir"),
+                    verdict=item.get("factor_verdict") or "-",
+                )
+            )
 
     lines.extend(["", "## Session Memory"])
     if session_memory_rows:
@@ -2024,6 +2953,25 @@ def _append_model_warnings_section(
             lines.append(f"- {warning}")
 
 
+def _append_model_stage1_ledger_protocol(lines: list[str]) -> None:
+    lines.extend(
+        [
+            "",
+            "## Stage 1 ledger 协议",
+            "本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。"
+            "输出必须能转写为 `ledger_v1.yaml` + `retrieval_log.md`；不要给 kill 结论。",
+            "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
+            "- `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。",
+            "- 每条 model mechanism 至少写 `hypothesis` / `signal_sketch` / `data_needs`，"
+            "并说明 touched contract surfaces。",
+            "- `inspired_by` / `fusion_of` / `cross_domain_jump` 都是可选溯源字段；"
+            "有来源就写，novel synthesis 无来源也合法。",
+            "- 不要强制 lineage 或从来源卡继承 kill 条件。"
+            "需要担心的点写成 `concern`，留给 Stage 3 数据验证。",
+        ]
+    )
+
+
 def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> None:
     lines.extend(
         [
@@ -2035,22 +2983,29 @@ def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> No
             "1. 只讨论模型改进机制：loss/regularization、feature interaction、target construction、sample weighting、training window、model selection。",
             "2. 每个机制必须写清 touched contract surfaces：model、feature_preprocess、feature_availability、training、model_selection、feature_importance。",
             "3. 必须说明该机制与当前 spec / baseline 的差异：是新机制、现有机制强化，还是只是参数调节。",
-            "4. 必须保留不确定性，并写 early falsifier：第一轮什么证据会让这个机制被放弃。",
+            "4. 必须保留不确定性，并写 concern：第一轮数据验证要重点观察什么。",
             "5. 禁止输出最终 spec patch、JSON patch、single best model、推荐版本或完整训练方案。",
+        ]
+    )
+    _append_model_stage1_ledger_protocol(lines)
+    lines.extend(
+        [
+            "6. 优先尝试跨领域迁移：把 daily PV、组合构建、稳健统计或其他 asset class 的 move 搬到模型机制。",
+            "7. 尝试至少一个多卡 fusion 候选；弱点只标 concern，不删除。",
         ]
     )
     if mode == "start":
         lines.extend(
             [
-                "6. start 模式允许提出 contract extension 作为讨论对象，但必须标记 needs-extension。",
-                "7. 使用跨领域类比时，必须说明 transfer cost：金融 panel 数据的 PIT、稀疏样本、噪声标签或交易成本会如何破坏类比。",
+                "8. start 模式允许提出 contract extension 作为讨论对象，但必须标记 needs-extension。",
+                "9. 使用跨领域类比时，必须说明 transfer cost：金融 panel 数据的 PIT、稀疏样本、噪声标签或交易成本会如何破坏类比。",
             ]
         )
     elif mode == "constrained":
         lines.extend(
             [
-                "6. constrained 模式最多保留 3 个机制候选，且每个候选必须在当前 contracts 内可落地；否则标记 requires_code_change。",
-                "7. 如果一个候选只是在调 alpha/lambda/window/depth 等参数，必须删除或改写成真正机制。",
+                "8. constrained 模式输出 2-4 个机制候选，且每个候选必须说明当前 contracts 内可落地还是 requires_code_change。",
+                "9. 如果一个候选只是在调 alpha/lambda/window/depth 等参数，必须改写成真正机制或标 `concern: parameter-only`。",
             ]
         )
     lines.extend(
@@ -2064,7 +3019,10 @@ def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> No
             "- touched contract surfaces:",
             "- why it is not just parameter tuning:",
             "- evidence anchor: [Kx] / [Ex] / [Fx] / external analogy + transfer cost",
-            "- early falsifier:",
+            "- inspired_by: [{card, what_i_took, cross_domain_jump}]（可选）",
+            "- fusion_of: [[card_1, card_2]]（可选）",
+            "- novel_delta:",
+            "- concern:",
             "",
             "[实现假设草图]",
             "- 每个候选只写可讨论的实现轮廓，不写最终 patch。",
@@ -2080,6 +3038,10 @@ def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> No
             "- overfit / split fragility risk:",
             "- turnover / cost risk:",
             "- feature instability risk:",
+            "",
+            "[ledger_v1.yaml 草案]",
+            "- mechanisms: hypothesis / inspired_by（可选）/ fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern",
+            "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
         ]
     )
 
@@ -2096,9 +3058,11 @@ def _append_model_signal_mapping_task(lines: list[str], *, mode: str) -> None:
             "2. 对每个 required field 标注 role: necessary / decorative / risk control。",
             "3. necessary 字段必须写 remove-and-test 理由：删掉它会破坏哪条机制链。",
             "4. 每个版本都要说明控制哪些模型风险，哪些风险暂不控制以及原因。",
-            "5. 输出 2-3 个可测试模型版本；禁止推荐 final pick。",
+            "5. 输出 2-3 个可测试模型版本；禁止推荐 final pick。"
+            "Stage 3 数据验证 / spec 审计才做最终 KILL / HOLD-FOR-AUDIT。",
         ]
     )
+    _append_model_stage1_ledger_protocol(lines)
     if mode == "constrained":
         lines.extend(
             [
@@ -2142,6 +3106,15 @@ def _append_model_signal_mapping_task(lines: list[str], *, mode: str) -> None:
             "- v1: mechanism | minimal spec/run delta | controls | residual assumptions",
             "- v2: mechanism | minimal spec/run delta | controls | residual assumptions",
             "- v3: optional; only if structurally different",
+            "",
+            "[ledger_v1.yaml 草案]",
+            "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
+            "novel_delta / signal_sketch / data_needs / concern",
+            "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
+            "",
+            "[retrieval_log.md 草案]",
+            "- surfaced_cards: 本阶段实际使用的 [Kx] / [Ex] / [Fx] 与用途",
+            "- spec_dependency_notes: 当前 contracts、required fields 与 data tier 边界",
         ]
     )
 
@@ -2294,6 +3267,97 @@ def _read_card_snippet(vault_root: Path, rel_path: str, max_chars: int = 220) ->
     return text[:max_chars].strip()
 
 
+def _read_card_frontmatter_field_items(
+    vault_root: Path,
+    rel_path: str,
+    field_name: str,
+    *,
+    max_items: int = 4,
+    max_chars: int = 180,
+) -> list[str]:
+    normalized = str(rel_path or "").strip()
+    if not normalized:
+        return []
+    card_path = (vault_root / normalized).resolve()
+    if not str(card_path).startswith(str(vault_root.resolve())):
+        return []
+    if not card_path.exists() or not card_path.is_file():
+        return []
+    try:
+        text = card_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return _extract_frontmatter_field_items(
+        text,
+        field_name,
+        max_items=max_items,
+        max_chars=max_chars,
+    )
+
+
+def _extract_frontmatter_field_items(
+    text: str,
+    field_name: str,
+    *,
+    max_items: int,
+    max_chars: int,
+) -> list[str]:
+    if not text.startswith("---\n"):
+        return []
+    try:
+        _, frontmatter, _ = text.split("---\n", 2)
+    except ValueError:
+        return []
+    target = field_name.strip()
+    if not target:
+        return []
+    captured: list[str] = []
+    in_field = False
+    for line in frontmatter.splitlines():
+        stripped = line.strip()
+        if not in_field:
+            if stripped.startswith(f"{target}:"):
+                value = stripped.split(":", 1)[1].strip()
+                if value:
+                    captured.append(value)
+                    break
+                in_field = True
+            continue
+        if stripped and not line[:1].isspace() and not stripped.startswith("-"):
+            break
+        captured.append(stripped)
+    if not captured:
+        return []
+
+    items: list[str] = []
+    current: list[str] = []
+    for line in captured:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            if current:
+                items.append(" ".join(current))
+            current = [stripped[2:].strip()]
+        else:
+            current.append(stripped)
+    if current:
+        items.append(" ".join(current))
+    if not items:
+        items = [" ".join(captured)]
+    return [
+        _compact_prompt_text(item, max_chars=max_chars)
+        for item in items[:max_items]
+    ]
+
+
+def _compact_prompt_text(text: str, *, max_chars: int) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= max_chars:
+        return compact
+    return compact[: max(max_chars - 3, 0)].rstrip() + "..."
+
+
 def _infer_target_family(idea_l: str, supported_families: list[str]) -> str:
     supported = {item.strip().lower() for item in supported_families if item.strip()}
     for token, family in _MODEL_ALIAS_MAP:
@@ -2431,6 +3495,8 @@ def _build_session_payload(
         "response_sections": {},
         "responded_at_utc": None,
         "lint_report": None,
+        "archived": False,
+        "archived_at_utc": None,
     }
 
 
@@ -2457,6 +3523,8 @@ def _summarize_session_payload(
         "spec_name": spec_name,
         "patch_summary": str(patch_hint.get("summary") or "").strip(),
         "requires_code_change": bool(patch_hint.get("requires_code_change", False)),
+        "archived": bool(payload.get("archived")),
+        "archived_at_utc": payload.get("archived_at_utc"),
         "prompt_chars": len(str(payload.get("gpt_prompt") or "")),
         "has_response": bool(str(payload.get("response") or "").strip()),
         "has_lint_errors": bool(lint_report.get("has_errors", False)),

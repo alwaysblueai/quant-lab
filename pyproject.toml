@@ -5,6 +5,7 @@ description = "Level 1/2 quant research system for factor discovery and portfoli
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=0.40",
     "baostock>=0.8.9",
     "cvxpy>=1.6",
     "duckdb>=1.5.1",

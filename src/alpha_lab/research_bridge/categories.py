@@ -14,6 +14,21 @@ from typing import Any
 
 from alpha_lab.config import PROJECT_ROOT
 
+_DEFAULT_FACTOR_RECIPE_DATA_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "real_case_inputs"
+    / "ashare_institutional_20160418_20260415_supplemented"
+)
+_LEGACY_FACTOR_RECIPE_DATA_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "real_case_inputs"
+    / "tushare_qfq_listed90_20200401_20260401"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CategoryProfile:
@@ -114,22 +129,118 @@ FACTOR_RECIPE = CategoryProfile(
             "default": "momentum",
         },
         {
+            "name": "direction",
+            "label": "direction（long / short）",
+            "type": "select",
+            "options": ("long", "short"),
+            "default": "long",
+        },
+        {
+            "name": "lookback",
+            "label": "lookback（回看窗口）",
+            "type": "number",
+            "default": "20",
+        },
+        {
+            "name": "skip_recent",
+            "label": "skip_recent（信号滞后）",
+            "type": "number",
+            "default": "5",
+        },
+        {
+            "name": "target_horizon",
+            "label": "target_horizon（持有期）",
+            "type": "number",
+            "default": "5",
+        },
+        {
+            "name": "rebalance_frequency",
+            "label": "rebalance_frequency（调仓频率）",
+            "type": "select",
+            "options": ("D", "W", "M"),
+            "default": "W",
+        },
+        {
+            "name": "shock_gate_mode",
+            "label": "shock_gate_mode（冲击事件门控）",
+            "type": "select",
+            "options": ("", "cs_quantile", "ts_threshold", "none"),
+            "default": "",
+        },
+        {
+            "name": "shock_q",
+            "label": "shock_q（截面分位阈值）",
+            "type": "number",
+            "placeholder": "0.70",
+        },
+        {
+            "name": "shock_threshold",
+            "label": "shock_threshold（时序阈值）",
+            "type": "number",
+            "placeholder": "1.0",
+        },
+        {
+            "name": "outside_event_policy",
+            "label": "outside_event_policy（事件外处理）",
+            "type": "select",
+            "options": ("", "nan", "zero"),
+            "default": "",
+        },
+        {
+            "name": "neutralize_basic",
+            "label": "neutralize_basic（基础残差化）",
+            "type": "select",
+            "options": ("", "true", "false"),
+            "default": "",
+        },
+        {
+            "name": "invert",
+            "label": "invert（输出取反）",
+            "type": "select",
+            "options": ("", "true", "false"),
+            "default": "",
+        },
+        {
+            "name": "exclude_limit",
+            "label": "exclude_limit（过滤涨跌停）",
+            "type": "select",
+            "options": ("", "true", "false"),
+            "default": "",
+        },
+        {
+            "name": "exclude_st",
+            "label": "exclude_st（过滤 ST）",
+            "type": "select",
+            "options": ("", "true", "false"),
+            "default": "",
+        },
+        {
+            "name": "exclude_suspended",
+            "label": "exclude_suspended（过滤停牌）",
+            "type": "select",
+            "options": ("", "true", "false"),
+            "default": "",
+        },
+        {
+            "name": "builder_kwargs_json",
+            "label": "builder_kwargs_json（可选，JSON）",
+            "type": "textarea",
+            "placeholder": (
+                "{\"shock_gate_mode\":\"cs_quantile\",\"shock_q\":0.7,"
+                "\"neutralize_basic\":true}"
+            ),
+        },
+        {
             "name": "prices_path",
             "label": "prices_path（价格数据路径）",
             "type": "text",
-            "default": (
-                "data/processed/real_case_inputs/"
-                "tushare_qfq_listed90_20200401_20260401/prices.csv"
-            ),
+            "default": str(_DEFAULT_FACTOR_RECIPE_DATA_DIR / "prices.parquet"),
         },
         {
             "name": "universe_path",
             "label": "universe_path（选股域路径）",
             "type": "text",
-            "default": (
-                "data/processed/real_case_inputs/"
-                "tushare_qfq_listed90_20200401_20260401/universe.csv"
-            ),
+            "default": str(_DEFAULT_FACTOR_RECIPE_DATA_DIR / "universe_mask.parquet"),
         },
     ),
 )
@@ -394,7 +505,7 @@ def _resolve_factor_recipe_data_defaults() -> dict[str, str]:
         "ALPHA_LAB_FACTOR_RECIPE_DATA_DIR",
         "ALPHA_LAB_REAL_CASE_INPUT_DIR",
     )
-    candidate_roots: list[Path] = []
+    env_roots: list[Path] = []
     for env_var in env_vars:
         raw_roots = os.getenv(env_var, "").strip()
         if not raw_roots:
@@ -402,20 +513,21 @@ def _resolve_factor_recipe_data_defaults() -> dict[str, str]:
         for raw_root in raw_roots.split(os.pathsep):
             normalized = raw_root.strip()
             if normalized:
-                candidate_roots.append(Path(normalized).expanduser().resolve())
-
-    candidate_roots.extend(
-        (
-            PROJECT_ROOT,
-            PROJECT_ROOT / "data",
-            Path(tempfile.gettempdir()),
-        )
-    )
+                env_roots.append(Path(normalized).expanduser().resolve())
 
     dataset_bases: list[Path] = []
-    for root in candidate_roots:
+    for root in env_roots:
         dataset_bases.append(root)
         dataset_bases.append(root / "alpha_lab_single_factor_inputs")
+        dataset_bases.append(root / "ashare_institutional_20160418_20260415")
+        dataset_bases.append(root / "tushare_qfq_listed90_20200401_20260401")
+        dataset_bases.append(
+            root
+            / "data"
+            / "processed"
+            / "real_case_inputs"
+            / "ashare_institutional_20160418_20260415"
+        )
         dataset_bases.append(
             root
             / "data"
@@ -423,6 +535,26 @@ def _resolve_factor_recipe_data_defaults() -> dict[str, str]:
             / "real_case_inputs"
             / "tushare_qfq_listed90_20200401_20260401"
         )
+
+    dataset_bases.append(_DEFAULT_FACTOR_RECIPE_DATA_DIR)
+    for root in (PROJECT_ROOT, PROJECT_ROOT / "data", Path(tempfile.gettempdir())):
+        dataset_bases.append(root)
+        dataset_bases.append(root / "alpha_lab_single_factor_inputs")
+        dataset_bases.append(
+            root
+            / "data"
+            / "processed"
+            / "real_case_inputs"
+            / "ashare_institutional_20160418_20260415"
+        )
+        dataset_bases.append(
+            root
+            / "data"
+            / "processed"
+            / "real_case_inputs"
+            / "tushare_qfq_listed90_20200401_20260401"
+        )
+    dataset_bases.append(_LEGACY_FACTOR_RECIPE_DATA_DIR)
 
     seen_bases: dict[Path, None] = {}
     for base in dataset_bases:
@@ -445,24 +577,29 @@ def _resolve_factor_recipe_data_defaults() -> dict[str, str]:
                 "universe_path": str(universe_csv),
             }
 
-        prices_legacy = base / "prices.csv"
-        universe_legacy = base / "universe.csv"
-        if prices_legacy.exists() and universe_legacy.exists():
-            return {
-                "prices_path": str(prices_legacy),
-                "universe_path": str(universe_legacy),
-            }
+        prices_direct_parquet = base / "prices.parquet"
+        for universe_direct_parquet in (
+            base / "universe_mask.parquet",
+            base / "universe.parquet",
+        ):
+            if prices_direct_parquet.exists() and universe_direct_parquet.exists():
+                return {
+                    "prices_path": str(prices_direct_parquet),
+                    "universe_path": str(universe_direct_parquet),
+                }
 
-    fallback = (
-        PROJECT_ROOT
-        / "data"
-        / "processed"
-        / "real_case_inputs"
-        / "tushare_qfq_listed90_20200401_20260401"
-    )
+        prices_legacy = base / "prices.csv"
+        for universe_legacy in (base / "universe_mask.csv", base / "universe.csv"):
+            if prices_legacy.exists() and universe_legacy.exists():
+                return {
+                    "prices_path": str(prices_legacy),
+                    "universe_path": str(universe_legacy),
+                }
+
+    fallback = _DEFAULT_FACTOR_RECIPE_DATA_DIR
     return {
-        "prices_path": str(fallback / "prices.csv"),
-        "universe_path": str(fallback / "universe.csv"),
+        "prices_path": str(fallback / "prices.parquet"),
+        "universe_path": str(fallback / "universe_mask.parquet"),
     }
 
 

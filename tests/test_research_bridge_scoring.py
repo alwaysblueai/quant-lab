@@ -117,12 +117,28 @@ def test_failure_proximity_direct_and_token_overlap() -> None:
 
 def test_aggregate_score_uses_weighted_sum() -> None:
     components = ScoreComponents(
-        semantic=0.8, metadata=0.5, mechanism=1.0, dependency=0.5, failure=1.0
+        semantic=0.8,
+        metadata=0.5,
+        mechanism=1.0,
+        dependency=0.5,
+        failure=1.0,
+        llm_relevance=0.0,
     )
     weights = ScoreWeights(
-        semantic=1.0, metadata=0.0, mechanism=0.0, dependency=0.0, failure=-0.5
+        semantic=1.0,
+        metadata=0.0,
+        mechanism=0.0,
+        dependency=0.0,
+        failure=-0.5,
+        llm_relevance=0.0,
     )
     assert aggregate_score(components, weights) == pytest.approx(0.8 - 0.5)
+
+
+def test_aggregate_includes_llm_relevance() -> None:
+    components = ScoreComponents(semantic=0.8, llm_relevance=1.0)
+    weights = ScoreWeights(semantic=1.0, llm_relevance=0.6)
+    assert aggregate_score(components, weights) == pytest.approx(1.4)
 
 
 def test_score_card_drops_when_dependency_unsatisfied() -> None:
@@ -164,18 +180,29 @@ def test_score_card_keeps_when_no_inventory_provided() -> None:
 
 def test_alpha_mode_weights_have_three_modes_and_distinct_profiles() -> None:
     assert set(ALPHA_MODE_WEIGHTS.keys()) == {"start", "free", "constrained"}
-    # start should down-weight failure proximity (encourage cross-domain)
-    assert ALPHA_MODE_WEIGHTS["start"].failure < 0
+    # failure proximity is diagnostic-only in Stage 1; it must not rank or kill.
+    assert ALPHA_MODE_WEIGHTS["start"].failure == 0
+    assert ALPHA_MODE_WEIGHTS["constrained"].failure == 0
     # constrained should up-weight dependency satisfaction
     assert ALPHA_MODE_WEIGHTS["constrained"].dependency > ALPHA_MODE_WEIGHTS["start"].dependency
-    # free sits in the middle for failure (neutral)
     assert ALPHA_MODE_WEIGHTS["free"].failure == 0
 
 
 def test_model_mode_weights_have_three_modes_and_share_shape() -> None:
     assert set(MODEL_MODE_WEIGHTS.keys()) == {"start", "explore", "constrained"}
-    assert MODEL_MODE_WEIGHTS["start"].failure < 0
+    assert MODEL_MODE_WEIGHTS["start"].failure == 0
+    assert MODEL_MODE_WEIGHTS["constrained"].failure == 0
     assert MODEL_MODE_WEIGHTS["constrained"].dependency > MODEL_MODE_WEIGHTS["explore"].dependency
+
+
+def test_mode_weights_have_llm_relevance() -> None:
+    assert ALPHA_MODE_WEIGHTS["start"].llm_relevance == pytest.approx(1.0)
+    assert ALPHA_MODE_WEIGHTS["free"].llm_relevance == pytest.approx(0.6)
+    assert ALPHA_MODE_WEIGHTS["constrained"].llm_relevance == pytest.approx(0.3)
+
+    assert MODEL_MODE_WEIGHTS["start"].llm_relevance == pytest.approx(1.0)
+    assert MODEL_MODE_WEIGHTS["explore"].llm_relevance == pytest.approx(0.6)
+    assert MODEL_MODE_WEIGHTS["constrained"].llm_relevance == pytest.approx(0.3)
 
 
 def test_normalize_data_set_strips_and_lowercases() -> None:
@@ -190,9 +217,9 @@ def test_normalize_data_set_strips_and_lowercases() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_workflow_stages_three_named() -> None:
+def test_workflow_stages_are_stage1_substeps_only() -> None:
     assert WORKFLOW_STAGES == frozenset(
-        {MECHANISM_DISCOVERY, SIGNAL_MAPPING, VALIDATION_KILL_TESTS}
+        {MECHANISM_DISCOVERY, SIGNAL_MAPPING}
     )
 
 
@@ -206,7 +233,9 @@ def test_normalize_workflow_stage_defaults_to_mechanism_discovery() -> None:
 
 def test_recommend_next_stage_progresses_then_stops() -> None:
     assert recommend_next_stage(MECHANISM_DISCOVERY) == SIGNAL_MAPPING
-    assert recommend_next_stage(SIGNAL_MAPPING) == VALIDATION_KILL_TESTS
+    assert recommend_next_stage(SIGNAL_MAPPING) is None
+    # Legacy Stage 3 helper is retained for direct prompt/lint use, but it
+    # is no longer part of the idea-explorer progression.
     assert recommend_next_stage(VALIDATION_KILL_TESTS) is None
     # Unknown stage normalizes to mechanism_discovery, which then progresses.
     assert recommend_next_stage("garbage") == SIGNAL_MAPPING

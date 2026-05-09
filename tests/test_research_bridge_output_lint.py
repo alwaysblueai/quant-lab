@@ -146,6 +146,44 @@ def test_mechanism_discovery_single_mechanism_is_warning_in_start_mode() -> None
     assert single_mech.severity == "warning"
 
 
+def test_mechanism_discovery_start_accepts_mechanism_table_only() -> None:
+    text = """\
+下面只讨论机制假设，不写公式、不做排序、不收敛成最终因子。
+
+| 机制候选 | 经济解释 | 反例 / 失败路径 | 最像的旧因子 |
+| --- | --- | --- | --- |
+| **1. 恐慌卖压被资金承接** | 下跌日有资金吸收抛压。 | 真实坏消息。 | 价格修复类因子 |
+| **2. 坏消息冲击中的信息分歧** | 交易者对信息理解不一致。 | 利空被证实。 | 预期修正因子 |
+| **3. 流动性真空后的价格回填** | 卖盘集中造成临时打穿。 | 流动性长期恶化。 | 盘口深度因子 |
+"""
+
+    report = lint_explore_response(text, stage="mechanism_discovery", mode="start")
+
+    assert report.has_errors is False
+    assert "机制候选" in report.sections_seen
+    missing = [v for v in report.violations if v.code == "missing_section"]
+    assert missing
+    assert {v.severity for v in missing} == {"warning"}
+    assert not any(v.code == "single_mechanism" for v in report.violations)
+
+
+def test_mechanism_discovery_free_still_requires_full_sections_for_table() -> None:
+    text = """\
+| 机制候选 | 经济解释 | 反例 / 失败路径 |
+| --- | --- | --- |
+| **1. 资金承接** | 有资金吸收抛压。 | 真实坏消息。 |
+| **2. 信息分歧** | 交易者理解不一致。 | 利空被证实。 |
+"""
+
+    report = lint_explore_response(text, stage="mechanism_discovery", mode="free")
+
+    assert report.has_errors is True
+    assert any(
+        v.code == "missing_section" and v.severity == "error"
+        for v in report.violations
+    )
+
+
 # ---------------------------------------------------------------------------
 # signal_mapping
 # ---------------------------------------------------------------------------

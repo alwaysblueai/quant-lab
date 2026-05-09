@@ -33,6 +33,18 @@ Pass `overwrite=True` to replace an existing card intentionally.
 **Rule**: quant-knowledge is read-only from this repo's perspective except for
 `50_experiments/` which alpha-lab writes to via `export_experiment_card`.
 
+`research_bridge` v2 mechanism recall is opt-in. Set
+`ALPHA_LAB_RESEARCH_BRIDGE_V2=1` plus `ANTHROPIC_API_KEY`, then build the
+sidecar with:
+
+```bash
+python -m alpha_lab.research_bridge.mechanism_index build --vault /mnt/c/quant/vault/quant-knowledge
+```
+
+The sidecar is stored under `.research_bridge_cache/mechanism_index/<vault_hash>/`.
+Without the flag or API key, idea exploration falls back to the v1 literal
+recall + rerank path.
+
 ---
 
 ## Research rules
@@ -43,6 +55,9 @@ Pass `overwrite=True` to replace an existing card intentionally.
 - Always state transaction cost and slippage assumptions.
 - Prefer small, auditable functions over long scripts.
 - Add tests for edge cases and empty data.
+- New diagnostics and factor-specific analyses default to Tier 2. Tier 1/Tier 2
+  boundaries, promotion rules, and task labels are defined in
+  `docs/research_playbook.md`.
 
 ## Canonical data contracts
 - Reusable factor outputs must use the long-form schema: `date`, `asset`, `factor`, `value`.

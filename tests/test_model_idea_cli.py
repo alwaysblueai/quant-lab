@@ -5,8 +5,32 @@ from pathlib import Path
 
 import pytest
 
+import alpha_lab.research_bridge.model_idea as model_idea_module
+from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.research_bridge.model_idea import main as model_idea_main
 from tests.model_factor_case_helpers import write_demo_model_factor_case
+
+
+@pytest.fixture(autouse=True)
+def _disable_model_idea_llm_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=False,
+            model="claude-sonnet-4-6",
+            scores={},
+            reasons={},
+            tokens_input=0,
+            tokens_output=0,
+            cache_hit_input=0,
+            dropped_invalid_names=[],
+            fallback_reason="no_api_key",
+        )
+
+    monkeypatch.setattr(
+        model_idea_module,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
 
 
 def _minimal_model_prompt_report() -> dict[str, object]:
@@ -159,7 +183,7 @@ def test_model_idea_explicit_stage_progresses_recommended_next() -> None:
     assert payload["stage"] == "signal_mapping"
     diag = payload["retrieval_diagnostics"]
     assert diag["stage"] == "signal_mapping"
-    assert diag["recommended_next_stage"] == "validation_kill_tests"
+    assert diag["recommended_next_stage"] is None
     prompt = payload["gpt_prompt"]
     assert "Stage Notice" not in prompt
     assert "[Model Mechanism Mapping]" in prompt
@@ -168,17 +192,15 @@ def test_model_idea_explicit_stage_progresses_recommended_next() -> None:
     assert "输出自检" in prompt
 
 
-def test_model_idea_validation_kill_tests_stage_has_no_next() -> None:
+def test_model_idea_rejects_validation_kill_tests_public_stage() -> None:
     from alpha_lab.research_bridge.model_idea import explore_model_idea
 
-    payload = explore_model_idea(
-        idea="Audit existing model.",
-        mode="constrained",
-        stage="validation_kill_tests",
-    )
-    diag = payload["retrieval_diagnostics"]
-    assert diag["stage"] == "validation_kill_tests"
-    assert diag["recommended_next_stage"] is None
+    with pytest.raises(ValueError, match="moved out of model-lab idea exploration"):
+        explore_model_idea(
+            idea="Audit existing model.",
+            mode="constrained",
+            stage="validation_kill_tests",
+        )
 
 
 def test_model_idea_cli_save_session_writes_session(
@@ -277,14 +299,6 @@ def test_model_idea_stage_prompts_align_with_lint_anchors() -> None:
             "[模型风险控制]",
             "[可测试模型版本]",
         ),
-        "validation_kill_tests": (
-            "[Alias / 问题归因审计]",
-            "[数据与时间完整性]",
-            "[训练与验证稳健性]",
-            "[特征与解释稳定性]",
-            "[成本与组合影响]",
-            "[最终判定]",
-        ),
     }
 
     for stage, anchors in expected_by_stage.items():
@@ -343,7 +357,7 @@ def test_model_idea_mechanism_structured_prompt_builder_contract_direct() -> Non
     assert "why it is not just parameter tuning" in prompt
     assert "single best model" in prompt
     assert "contract extension" not in prompt
-    assert "最多保留 3 个机制候选" not in prompt
+    assert "输出 2-4 个机制候选" not in prompt
     assert "binary alias-tag" not in prompt
     assert "[Model Mechanism Mapping]" not in prompt
 
@@ -364,7 +378,7 @@ def test_model_idea_mechanism_constrained_prompt_builder_contract_direct() -> No
     assert "> Mode: constrained" in prompt
     assert "[模型机制候选]" in prompt
     assert "[不确定性与失败路径]" in prompt
-    assert "最多保留 3 个机制候选" in prompt
+    assert "输出 2-4 个机制候选" in prompt
     assert "requires_code_change" in prompt
     assert "alpha/lambda/window/depth" in prompt
     assert "[Alias / 问题归因审计]" not in prompt
@@ -401,22 +415,11 @@ def test_model_idea_validation_kill_tests_prompt_builder_contract_direct() -> No
         _build_model_idea_validation_kill_tests_prompt,
     )
 
-    prompt = _build_model_idea_validation_kill_tests_prompt(
-        idea="Audit whether the model idea survives kill tests.",
-        mode="constrained",
-        report=_minimal_model_prompt_report(),
-        spec_patch_hint=None,
-        strict=True,
-    )
-
-    assert "> Stage: validation_kill_tests" in prompt
-    assert "> Mode: constrained" in prompt
-    assert "[Alias / 问题归因审计]" in prompt
-    assert "[数据与时间完整性]" in prompt
-    assert "[训练与验证稳健性]" in prompt
-    assert "[特征与解释稳定性]" in prompt
-    assert "[成本与组合影响]" in prompt
-    assert "[最终判定]" in prompt
-    assert "KILL 或 HOLD-FOR-AUDIT" in prompt
-    assert "`baseline linear/ridge`" in prompt
-    assert "[Model Mechanism Mapping]" not in prompt
+    with pytest.raises(ValueError, match="moved out of model-lab idea exploration"):
+        _build_model_idea_validation_kill_tests_prompt(
+            idea="Audit whether the model idea survives kill tests.",
+            mode="constrained",
+            report=_minimal_model_prompt_report(),
+            spec_patch_hint=None,
+            strict=True,
+        )

@@ -3,10 +3,36 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
+import alpha_lab.research_bridge.model_idea as model_idea_module
+from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.research_bridge.model_idea import apply_spec_patch_hint, explore_model_idea
+from alpha_lab.research_bridge.scoring import MODEL_MODE_WEIGHTS
 from tests.model_factor_case_helpers import write_demo_model_factor_case
+
+
+@pytest.fixture(autouse=True)
+def _disable_model_idea_llm_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=False,
+            model="claude-sonnet-4-6",
+            scores={},
+            reasons={},
+            tokens_input=0,
+            tokens_output=0,
+            cache_hit_input=0,
+            dropped_invalid_names=[],
+            fallback_reason="no_api_key",
+        )
+
+    monkeypatch.setattr(
+        model_idea_module,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
 
 
 def _build_minimal_vault(tmp_path: Path) -> Path:
@@ -261,6 +287,105 @@ def test_model_idea_loads_knowledge_context(tmp_path: Path) -> None:
     assert isinstance(extras["frontier_matches"], list)
     assert isinstance(extras["failure_refs"], list)
     assert "[K1]" in payload["gpt_prompt"]
+    diag = payload["retrieval_diagnostics"]
+    assert diag["llm_rerank"]["enabled"] is False
+    assert diag["llm_rerank"]["fallback_reason"] == "no_api_key"
+    assert "llm_relevance" in diag["score_weights"]
+
+
+def test_v2_flag_disabled_keeps_model_idea_prompt_byte_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _build_minimal_vault(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    baseline = explore_model_idea(
+        idea="Need a turnover-aware lightgbm model with industry grouping.",
+        mode="explore",
+        vault_root=vault,
+        workspace_root=workspace,
+        top_k=3,
+        memory_limit=0,
+    )
+
+    def fail_if_v2_called(**_: object) -> object:
+        raise AssertionError("v2 path should not run when feature flag is disabled")
+
+    monkeypatch.setattr(model_idea_module, "expand_query", fail_if_v2_called)
+    monkeypatch.setattr(
+        model_idea_module,
+        "categorize_and_compress",
+        fail_if_v2_called,
+    )
+    monkeypatch.setattr(
+        model_idea_module.mechanism_index,
+        "load_mechanism_embeddings",
+        fail_if_v2_called,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+
+    candidate = explore_model_idea(
+        idea="Need a turnover-aware lightgbm model with industry grouping.",
+        mode="explore",
+        vault_root=vault,
+        workspace_root=workspace,
+        top_k=3,
+        memory_limit=0,
+    )
+
+    assert candidate["gpt_prompt"] == baseline["gpt_prompt"]
+    assert "Cross-card synthesis" not in str(candidate["gpt_prompt"])
+    assert "query_expansion" not in candidate["retrieval_diagnostics"]
+
+
+def test_model_idea_llm_rerank_score_flows_into_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _build_minimal_vault(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=True,
+            model="claude-sonnet-4-6",
+            scores={"Finance Tree": 1.0},
+            reasons={"Finance Tree": "direct"},
+            tokens_input=200,
+            tokens_output=30,
+            cache_hit_input=50,
+            dropped_invalid_names=[],
+            fallback_reason=None,
+        )
+
+    monkeypatch.setattr(
+        model_idea_module,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
+    payload = explore_model_idea(
+        idea="Need a turnover-aware lightgbm model with industry grouping.",
+        mode="explore",
+        vault_root=vault,
+        workspace_root=workspace,
+        top_k=3,
+    )
+
+    diag = payload["retrieval_diagnostics"]
+    components = diag["score_components_by_name"]["Finance Tree"]
+    assert diag["llm_rerank"]["enabled"] is True
+    assert diag["llm_rerank"]["cache_hit_input"] == 50
+    assert components["llm_relevance"] == 1.0
+    assert components["aggregate"] >= MODEL_MODE_WEIGHTS["explore"].llm_relevance
+    extras = payload["constraint_report"]["recommendations"]["extras"]
+    knowledge_match = extras["knowledge_matches"][0]
+    assert knowledge_match["score_components"]["llm_relevance"] == 1.0
 
 
 def test_model_idea_spec_frequency_infers_inventory_and_filters_hft(

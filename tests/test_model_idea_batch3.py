@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+import alpha_lab.research_bridge.model_idea as model_idea_module
+from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.research_bridge.model_idea import (
     explore_model_idea,
     list_model_idea_sessions,
@@ -12,6 +16,28 @@ from alpha_lab.research_bridge.model_idea import (
     save_model_idea_session,
 )
 from tests.model_factor_case_helpers import write_demo_model_factor_case
+
+
+@pytest.fixture(autouse=True)
+def _disable_model_idea_llm_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=False,
+            model="claude-sonnet-4-6",
+            scores={},
+            reasons={},
+            tokens_input=0,
+            tokens_output=0,
+            cache_hit_input=0,
+            dropped_invalid_names=[],
+            fallback_reason="no_api_key",
+        )
+
+    monkeypatch.setattr(
+        model_idea_module,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
 
 
 def test_model_idea_session_save_list_read(tmp_path: Path) -> None:

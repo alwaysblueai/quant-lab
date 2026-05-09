@@ -8,18 +8,24 @@ from pathlib import Path
 import pytest
 import yaml
 
+import alpha_lab.research_bridge.service as research_bridge_service
+from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.research_bridge.model_idea import _build_model_idea_exploration_prompt
 from alpha_lab.research_bridge.models import load_project_config
 from alpha_lab.research_bridge.preflight import run_preflight
 from alpha_lab.research_bridge.scoring import (
+    ALPHA_MODE_WEIGHTS,
     MECHANISM_DISCOVERY,
     SIGNAL_MAPPING,
-    VALIDATION_KILL_TESTS,
 )
 from alpha_lab.research_bridge.service import (
+    ExploreIdeaCard,
+    ExploreIdeaResult,
     _build_factor_recipe_signal_mapping_prompt,
     _build_factor_recipe_validation_kill_tests_prompt,
+    _render_idea_model_dispatch,
     apply_writeback,
+    draft_idea,
     explore_idea,
     init_project,
     normalize_fast_decision_log,
@@ -32,6 +38,28 @@ GOLDEN_ROOT = Path(__file__).resolve().parent / "goldens" / "research_bridge"
 MODEL_IDEA_PROMPT_GOLDEN = (
     GOLDEN_ROOT / "model_idea_exploration_prompt_constrained_stages.md"
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_service_llm_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=False,
+            model="claude-sonnet-4-6",
+            scores={},
+            reasons={},
+            tokens_input=0,
+            tokens_output=0,
+            cache_hit_input=0,
+            dropped_invalid_names=[],
+            fallback_reason="no_api_key",
+        )
+
+    monkeypatch.setattr(
+        research_bridge_service,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
 
 
 def _build_vault(tmp_path: Path) -> Path:
@@ -700,7 +728,7 @@ def test_explore_idea_emits_retrieval_diagnostics_in_all_modes(tmp_path: Path) -
         diag = payload["retrieval_diagnostics"]
         assert isinstance(diag, dict)
         assert diag["mode"] == mode
-        # Five-component weights table is present and matches mode.
+        # Six-component weights table is present and matches mode.
         weights = diag["score_weights"]
         assert set(weights.keys()) == {
             "semantic",
@@ -708,15 +736,73 @@ def test_explore_idea_emits_retrieval_diagnostics_in_all_modes(tmp_path: Path) -
             "mechanism",
             "dependency",
             "failure",
+            "llm_relevance",
         }
+        assert diag["llm_rerank"]["enabled"] is False
+        assert diag["llm_rerank"]["fallback_reason"] == "no_api_key"
         # Every kept candidate carries score components.
         components_by_name = diag["score_components_by_name"]
         assert isinstance(components_by_name, dict)
         for name, payload_components in components_by_name.items():
             assert isinstance(name, str) and name
             assert "aggregate" in payload_components
-            for key in ("semantic", "metadata", "mechanism", "dependency", "failure"):
+            for key in (
+                "semantic",
+                "metadata",
+                "mechanism",
+                "dependency",
+                "failure",
+                "llm_relevance",
+            ):
                 assert key in payload_components
+
+
+def test_v2_flag_disabled_keeps_explore_prompt_byte_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _build_vault_with_uses_data(tmp_path)
+    monkeypatch.setattr(
+        research_bridge_service,
+        "_utc_now_iso",
+        lambda: "2026-05-03T00:00:00Z",
+    )
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    baseline = explore_idea(
+        vault_root=vault,
+        idea="æ—¥é¢‘åŠ¨é‡ä»·é‡",
+        mode="free",
+    ).to_payload()
+
+    def fail_if_v2_called(**_: object) -> object:
+        raise AssertionError("v2 path should not run when feature flag is disabled")
+
+    monkeypatch.setattr(research_bridge_service, "expand_query", fail_if_v2_called)
+    monkeypatch.setattr(
+        research_bridge_service,
+        "categorize_and_compress",
+        fail_if_v2_called,
+    )
+    monkeypatch.setattr(
+        research_bridge_service.mechanism_index,
+        "load_mechanism_embeddings",
+        fail_if_v2_called,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+
+    candidate = explore_idea(
+        vault_root=vault,
+        idea="æ—¥é¢‘åŠ¨é‡ä»·é‡",
+        mode="free",
+    ).to_payload()
+
+    assert candidate["gpt_prompt"] == baseline["gpt_prompt"]
+    assert candidate["insight_brief"] == []
+    assert "Cross-card synthesis" not in str(candidate["gpt_prompt"])
+    assert "query_expansion" not in candidate["retrieval_diagnostics"]
 
 
 def test_explore_idea_prompt_surfaces_per_card_score_components(
@@ -733,8 +819,70 @@ def test_explore_idea_prompt_surfaces_per_card_score_components(
     assert "mechanism=" in prompt
     assert "dependency=" in prompt
     assert "failure=" in prompt
+    assert "llm_relevance=" in prompt
     assert "aggregate=" in prompt
     assert "检索分量说明" in prompt
+
+
+def test_explore_idea_records_llm_rerank_diagnostics_when_disabled(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault_with_uses_data(tmp_path)
+
+    result = explore_idea(vault_root=vault, idea="Daily PV momentum", mode="start")
+    diag = result.to_payload()["retrieval_diagnostics"]
+
+    assert diag["llm_rerank"] == {
+        "enabled": False,
+        "model": "claude-sonnet-4-6",
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "cache_hit_input": 0,
+        "dropped_invalid_names": [],
+        "fallback_reason": "no_api_key",
+    }
+
+
+def test_explore_idea_llm_rerank_lifts_aggregate_when_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _build_vault_with_uses_data(tmp_path)
+    fallback = explore_idea(vault_root=vault, idea="Daily PV momentum", mode="start")
+    fallback_components = fallback.to_payload()["retrieval_diagnostics"][
+        "score_components_by_name"
+    ]
+    lifted_name = next(iter(fallback_components))
+
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=True,
+            model="claude-sonnet-4-6",
+            scores={lifted_name: 1.0},
+            reasons={lifted_name: "direct"},
+            tokens_input=123,
+            tokens_output=45,
+            cache_hit_input=67,
+            dropped_invalid_names=[],
+            fallback_reason=None,
+        )
+
+    monkeypatch.setattr(
+        research_bridge_service,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
+    enabled = explore_idea(vault_root=vault, idea="Daily PV momentum", mode="start")
+    enabled_diag = enabled.to_payload()["retrieval_diagnostics"]
+    enabled_components = enabled_diag["score_components_by_name"][lifted_name]
+
+    assert enabled_diag["llm_rerank"]["enabled"] is True
+    assert enabled_diag["llm_rerank"]["tokens_input"] == 123
+    assert enabled_components["llm_relevance"] == 1.0
+    assert enabled_components["aggregate"] == pytest.approx(
+        fallback_components[lifted_name]["aggregate"]
+        + ALPHA_MODE_WEIGHTS["start"].llm_relevance
+    )
 
 
 def test_explore_idea_constrained_prompt_requires_score_component_rationale(
@@ -746,6 +894,101 @@ def test_explore_idea_constrained_prompt_requires_score_component_rationale(
     prompt = result.to_payload()["gpt_prompt"]
 
     assert "constrained 模式下，引用某张卡片时必须说明你主要依赖哪个检索分量" in prompt
+
+
+def test_draft_idea_prepares_dual_engine_additive_artifacts(tmp_path: Path) -> None:
+    vault = _build_vault_with_uses_data(tmp_path)
+    workspace = tmp_path / "workspace"
+
+    result = draft_idea(
+        vault_root=vault,
+        idea="跨领域成交额机制",
+        models="claude,codex",
+        mode="start",
+        workspace_root=workspace,
+    )
+
+    assert result.shared_prompt_path.exists()
+    assert set(result.ledger_paths) == {"claude", "codex"}
+    assert not result.ledger_paths["claude"].exists()
+    assert not result.ledger_paths["codex"].exists()
+    assert not result.final_ledger_path.exists()
+    assert result.reconcile_path.exists()
+    assert result.retrieval_log_path.exists()
+    assert result.manifest_path.exists()
+
+    reconcile = result.reconcile_path.read_text(encoding="utf-8")
+    assert "## union" in reconcile
+    assert "## fusion_candidates" in reconcile
+    assert "## notes" in reconcile
+    assert "keep / kill / add" not in reconcile
+
+    codex_dispatch = result.model_dispatch_paths["codex"].read_text(encoding="utf-8")
+    assert "## 1. 新 idea" in codex_dispatch
+    assert "## 2. 工作目录与资料位置" in codex_dispatch
+    assert "## 3. Stage 1 纪律" in codex_dispatch
+    assert "## 4. 相关卡片列表" in codex_dispatch
+    assert "## 5. 输出流程 + YAML schema + 生成偏好" in codex_dispatch
+    assert "第一轮回复必须是 Markdown 研究草稿" in codex_dispatch
+    assert "不要输出 YAML，不要写文件" in codex_dispatch
+    assert "用户明确同意后，再输出最终 YAML" in codex_dispatch
+    assert "只写自己的输出文件" not in codex_dispatch
+    assert "ledger_v1.codex.yaml" not in codex_dispatch
+    assert "ledger_v1.claude.yaml" not in codex_dispatch
+    assert "偏广度迁移" in codex_dispatch
+    assert f"- vault_root：`{vault}`" in codex_dispatch
+    assert "### Cross-card synthesis" in codex_dispatch
+    assert "不是约束或 keep/kill 规则" in codex_dispatch
+    assert "score_components_by_name" not in codex_dispatch
+    assert "dropped_cards" not in codex_dispatch
+    assert "输出自检" not in codex_dispatch
+
+
+def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> None:
+    result = ExploreIdeaResult(
+        idea="下跌冲击后承接观察",
+        mode="start",
+        related_cards=[
+            ExploreIdeaCard(
+                path="40_papers/Paper - Example.md",
+                name="Example Card",
+                type="paper",
+                lifecycle="theoretical",
+                mechanism="microstructure",
+                factor_family="liquidity",
+                summary="一张测试卡。",
+                snippet="",
+                reasons=[],
+                transferable_moves=["id: move one_line: 可迁移动作。"],
+            )
+        ],
+        constraint_report={},
+        gpt_prompt="",
+        insight_brief=[
+            "因此承接信号必须在控制普通波动率暴露后单独检验，否则是必要步骤。",
+            "建议持有期覆盖1-",
+            "提示可在月度调仓节点",
+        ],
+        retrieval_diagnostics={},
+    )
+
+    dispatch = _render_idea_model_dispatch(
+        model="claude",
+        idea=result.idea,
+        result=result,
+        draft_dir=tmp_path,
+        vault_root=tmp_path / "quant-knowledge",
+    )
+
+    assert "- vault_root：" in dispatch
+    assert "### Cross-card synthesis" in dispatch
+    assert "不是约束或 keep/kill 规则" in dispatch
+    assert "必须在控制普通波动率暴露" not in dispatch
+    assert "否则是必要步骤" not in dispatch
+    assert "可尝试在控制普通波动率暴露" in dispatch
+    assert "对应的 concern 是可选构建分支" in dispatch
+    assert "建议持有期覆盖1-" not in dispatch
+    assert "提示可在月度调仓节点" not in dispatch
 
 
 def test_model_idea_exploration_prompt_matches_byte_golden() -> None:
@@ -785,7 +1028,7 @@ def _build_model_idea_prompt_golden_text() -> str:
         },
     }
     prompts: list[str] = []
-    for stage in (MECHANISM_DISCOVERY, SIGNAL_MAPPING, VALIDATION_KILL_TESTS):
+    for stage in (MECHANISM_DISCOVERY, SIGNAL_MAPPING):
         prompt = _build_model_idea_exploration_prompt(
             idea=(
                 "用更强的非线性模型刻画成交额加权动量，但必须保持 PIT、"
@@ -988,7 +1231,7 @@ def test_explore_idea_stage_overrides_recommended_next_stage(tmp_path: Path) -> 
     )
     diag = result.to_payload()["retrieval_diagnostics"]
     assert diag["stage"] == "signal_mapping"
-    assert diag["recommended_next_stage"] == "validation_kill_tests"
+    assert diag["recommended_next_stage"] is None
     # Real prompt (no longer a stub).
     prompt = result.to_payload()["gpt_prompt"]
     assert "stub" not in prompt
@@ -1089,83 +1332,25 @@ def test_explore_idea_signal_mapping_constrained_adds_strict_rules(
     assert "变量论证" in prompt
 
 
-def test_explore_idea_validation_kill_tests_emits_full_audit(tmp_path: Path) -> None:
+def test_explore_idea_rejects_validation_kill_tests_public_stage(tmp_path: Path) -> None:
     vault = _build_vault_with_uses_data(tmp_path)
-    result = explore_idea(
-        vault_root=vault,
-        idea="非对称的上下行 realized volatility 因子",
-        mode="free",
-        stage="validation_kill_tests",
-    )
-    payload = result.to_payload()
-    diag = payload["retrieval_diagnostics"]
-    assert diag["stage"] == "validation_kill_tests"
-    assert diag["recommended_next_stage"] is None
-    prompt = payload["gpt_prompt"]
-    # No longer a stub.
-    assert "stub" not in prompt
-    assert "Validation & Kill Tests Prompt" in prompt
-    # Stage declaration: explicitly KILL-oriented.
-    assert "try to KILL this factor" in prompt
-    # Alias targets: forbidden labels return as audit targets, not as
-    # forbidden words. All five canonical targets must be present.
-    assert "`reversal`" in prompt
-    assert "`volatility`" in prompt
-    assert "`skewness / downside risk`" in prompt
-    assert "`liquidity / turnover`" in prompt
-    assert "`size / industry / price level`" in prompt
-    # Required audit sections.
-    assert "暴露分解" in prompt
-    assert "数据健全性 kill tests" in prompt
-    assert "实现稳健性 kill tests" in prompt
-    assert "子样本稳定性 kill tests" in prompt
-    assert "死亡条件" in prompt
-    # mechanism_discovery prohibitions must NOT contaminate the audit
-    # prompt — labels are TARGETS here, not forbidden words.
-    assert "概念禁用约束（mechanism_discovery 阶段）" not in prompt
-    assert "禁止用以下既有标签" not in prompt
+    with pytest.raises(ValueError, match="moved out of the idea explorer"):
+        explore_idea(
+            vault_root=vault,
+            idea="非对称的上下行 realized volatility 因子",
+            mode="free",
+            stage="validation_kill_tests",
+        )
 
 
 def test_validation_kill_tests_prompt_builder_contract_direct() -> None:
-    prompt = _build_factor_recipe_validation_kill_tests_prompt(
-        idea="up/down realized volatility asymmetry",
-        mode="constrained",
-        project=None,
-        context={},
-    )
-
-    assert "# AlphaLab Validation & Kill Tests Prompt" in prompt
-    assert "Validation & Kill Tests" in prompt
-    assert "try to KILL this factor" in prompt
-    assert "`reversal`" in prompt
-    assert "`volatility`" in prompt
-    assert "`skewness / downside risk`" in prompt
-    assert "`liquidity / turnover`" in prompt
-    assert "`size / industry / price level`" in prompt
-    assert "Exposure Decomposition" in prompt
-    assert "Kill Verdict Rules" in prompt
-    assert "KILL / HOLD-FOR-AUDIT" in prompt
-    assert "## 输出自检（系统会用 lint 校验你的输出）" in prompt
-
-
-def test_explore_idea_validation_kill_tests_constrained_forces_binary_verdict(
-    tmp_path: Path,
-) -> None:
-    vault = _build_vault_with_uses_data(tmp_path)
-    result = explore_idea(
-        vault_root=vault,
-        idea="非对称的上下行 realized volatility 因子",
-        mode="constrained",
-        stage="validation_kill_tests",
-    )
-    prompt = result.to_payload()["gpt_prompt"]
-    assert "Validation & Kill Tests · Strict" in prompt
-    # Strict variant: cite anchor for each alias verdict.
-    assert "cite 至少一张知识库卡片" in prompt
-    # Strict variant: binary final verdict, no hedging.
-    assert "二值最终判定" in prompt
-    assert "KILL / HOLD-FOR-AUDIT" in prompt
-    assert "follow-up 实证检查" in prompt
+    with pytest.raises(ValueError, match="moved out of the idea explorer"):
+        _build_factor_recipe_validation_kill_tests_prompt(
+            idea="up/down realized volatility asymmetry",
+            mode="constrained",
+            project=None,
+            context={},
+        )
 
 
 def test_explore_idea_mechanism_discovery_emits_concept_prohibitions(
@@ -1436,7 +1621,7 @@ def test_explore_idea_prompt_includes_lint_self_check(tmp_path: Path) -> None:
         vault_root=vault,
         idea="上下行 realized volatility asymmetry",
         mode="constrained",
-        stage="validation_kill_tests",
+        stage="signal_mapping",
     )
     prompt = result.to_payload()["gpt_prompt"]
 
@@ -1462,10 +1647,18 @@ def test_explore_idea_prompt_includes_per_card_score_chip(tmp_path: Path) -> Non
     assert isinstance(diag.get("score_components_by_name"), dict)
     assert diag["score_components_by_name"], "expected at least one scored card"
 
-    # Each scored card emits a `- retrieval score:` line with all five
+    # Each scored card emits a `- retrieval score:` line with all six
     # components and the aggregate.
+    assert "- [K1]" in prompt
     assert "- retrieval score:" in prompt
-    for label in ("semantic", "metadata", "mechanism", "dependency", "failure"):
+    for label in (
+        "semantic",
+        "metadata",
+        "mechanism",
+        "dependency",
+        "failure",
+        "llm_relevance",
+    ):
         assert f"{label}=" in prompt, f"score component {label!r} missing"
     assert "aggregate=" in prompt
 

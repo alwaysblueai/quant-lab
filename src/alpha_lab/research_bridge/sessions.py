@@ -34,7 +34,6 @@ from alpha_lab.research_bridge.output_lint import (
 from alpha_lab.research_bridge.scoring import (
     MECHANISM_DISCOVERY,
     SIGNAL_MAPPING,
-    VALIDATION_KILL_TESTS,
     normalize_workflow_stage,
 )
 
@@ -127,6 +126,8 @@ def start_explore_session(
         "response_sections": None,
         "responded_at_utc": None,
         "lint_report": None,
+        "archived": False,
+        "archived_at_utc": None,
     }
     path = root / f"{sid}.json"
     path.write_text(
@@ -179,20 +180,52 @@ def read_explore_session(
     return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
 
 
+def delete_explore_session(
+    *,
+    session_id: str,
+    workspace_root: str | Path,
+) -> dict[str, object]:
+    sid = _safe_session_id(session_id)
+    path = explore_sessions_root(workspace_root) / f"{sid}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"explore session not found: {sid}")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict):
+        raise ValueError(f"invalid explore session payload: {sid}")
+    record["archived"] = True
+    record["archived_at_utc"] = _utc_iso_now()
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {"ok": True, "session_id": sid, "archived": True}
+
+
 def list_explore_sessions(
     *,
     workspace_root: str | Path,
     limit: int = 20,
+    project_slug: str | None = None,
+    include_archived: bool = False,
 ) -> list[dict[str, object]]:
     root = explore_sessions_root(workspace_root)
     if not root.exists():
         return []
     paths = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     rows: list[dict[str, object]] = []
-    for path in paths[: max(int(limit), 0)]:
+    normalized_limit = max(int(limit), 0)
+    if normalized_limit <= 0:
+        return []
+    wanted_project = str(project_slug or "").strip()
+    for path in paths:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
+            continue
+        if bool(record.get("archived")) and not include_archived:
+            continue
+        record_project = str(record.get("project_slug") or "").strip()
+        if wanted_project and record_project and record_project != wanted_project:
             continue
         rows.append(
             {
@@ -204,6 +237,8 @@ def list_explore_sessions(
                 "mode": record.get("mode"),
                 "project_slug": record.get("project_slug"),
                 "recommended_next_stage": record.get("recommended_next_stage"),
+                "archived": bool(record.get("archived")),
+                "archived_at_utc": record.get("archived_at_utc"),
                 "has_response": record.get("response") is not None,
                 "has_lint_errors": bool(
                     (record.get("lint_report") or {}).get("has_errors")
@@ -215,22 +250,17 @@ def list_explore_sessions(
                 ],
             }
         )
+        if len(rows) >= normalized_limit:
+            break
     return rows
 
 
 _PREVIOUS_STAGE: dict[str, str] = {
     SIGNAL_MAPPING: MECHANISM_DISCOVERY,
-    VALIDATION_KILL_TESTS: SIGNAL_MAPPING,
 }
 
 _UPSTREAM_SECTION_PRIORITY: dict[str, tuple[str, ...]] = {
     SIGNAL_MAPPING: ("机制候选", "信号思路"),
-    VALIDATION_KILL_TESTS: (
-        "Mechanism Mapping",
-        "当前实现解释",
-        "Confound 控制",
-        "可测试信号版本",
-    ),
 }
 
 
@@ -255,6 +285,8 @@ def _iter_session_records(
         except (json.JSONDecodeError, OSError):
             continue
         if isinstance(record, dict):
+            if bool(record.get("archived")):
+                continue
             records.append(record)
     return records
 
@@ -380,8 +412,7 @@ def list_recent_violations(
     Used by ``explore_idea`` to build the "known drift patterns" header.
     Sessions without a lint report are skipped. ``stage`` (and ``mode``)
     filter to violations from sessions of the same workflow stage so we
-    don't, e.g., inject mechanism_discovery violations into a
-    validation_kill_tests prompt.
+    don't, e.g., inject mechanism_discovery violations into a signal_mapping prompt.
     """
     root = explore_sessions_root(workspace_root)
     if not root.exists():
