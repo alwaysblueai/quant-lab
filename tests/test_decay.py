@@ -167,6 +167,42 @@ def test_ic_decay_dense_panel_uses_wide_fast_path(
     assert_frame_equal(actual, expected, check_dtype=False, atol=1e-12, rtol=1e-12)
 
 
+def test_ic_decay_dense_panel_with_missing_factor_uses_public_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prices = _prices_panel(n_dates=28, n_assets=9)
+    dates = pd.Index(pd.to_datetime(prices["date"]).drop_duplicates()).sort_values()
+    assets = pd.Index(prices["asset"].drop_duplicates()).sort_values()
+    complete_prices = (
+        prices.pivot(index="date", columns="asset", values="close")
+        .reindex(index=dates, columns=assets)
+        .ffill()
+        .bfill()
+        .stack()
+        .rename("close")
+        .reset_index()
+    )
+    rng = np.random.default_rng(20260429)
+    factor_df = complete_prices[["date", "asset"]].copy()
+    factor_df["factor"] = "dense_factor_with_gap"
+    factor_df["value"] = rng.normal(size=len(factor_df))
+    factor_df.loc[0, "value"] = np.nan
+    horizons = (1, 3)
+    expected = _ic_decay_reference(factor_df, complete_prices, horizons)
+    called_horizons: list[int] = []
+
+    def wrapped_forward_return(prices_df: pd.DataFrame, *, horizon: int) -> pd.DataFrame:
+        called_horizons.append(int(horizon))
+        return forward_return(prices_df, horizon=horizon)
+
+    monkeypatch.setattr(decay, "forward_return", wrapped_forward_return)
+
+    actual = decay.compute_ic_decay(factor_df, complete_prices, horizons=horizons)
+
+    assert called_horizons == list(horizons)
+    assert_frame_equal(actual, expected, check_dtype=False, atol=1e-12, rtol=1e-12)
+
+
 def test_ic_decay_matches_public_ic_metric_path_on_sparse_panel() -> None:
     prices = _prices_panel()
     rng = np.random.default_rng(20260427)
@@ -179,6 +215,24 @@ def test_ic_decay_matches_public_ic_metric_path_on_sparse_panel() -> None:
 
     actual = decay.compute_ic_decay(factor_df, prices, horizons=horizons)
     expected = _ic_decay_reference(factor_df, prices, horizons)
+
+    assert_frame_equal(actual, expected, check_dtype=False, atol=1e-12, rtol=1e-12)
+
+
+def test_autocorr_high_coverage_missing_uses_overlap_ranking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factor_df = _factor_panel(n_dates=16, n_assets=300)
+    factor_df.loc[0, "value"] = np.nan
+    lags = (1, 2, 5)
+
+    def fail_fast_path(_wide: pd.DataFrame, _lags: tuple[int, ...]) -> pd.DataFrame:
+        raise AssertionError("pre-ranked fast path is only exact for complete panels")
+
+    monkeypatch.setattr(decay, "_autocorr_preranked_fast_path", fail_fast_path)
+
+    actual = decay.compute_factor_autocorrelation(factor_df, lags=lags)
+    expected = _autocorr_reference(factor_df, lags)
 
     assert_frame_equal(actual, expected, check_dtype=False, atol=1e-12, rtol=1e-12)
 

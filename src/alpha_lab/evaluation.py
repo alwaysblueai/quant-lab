@@ -5,6 +5,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import readonly_shallow_copy
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.numba_kernels import (
     cross_sectional_corr_by_group_numba,
@@ -38,7 +39,7 @@ def compute_mutual_information(
     factor_name = _extract_single_factor_name(factors, table_name="factors")
     label_name = _extract_single_factor_name(labels, table_name="labels")
 
-    merged = _resolve_merged_pairs(
+    merged = _maybe_borrow_or_resolve_merged_pairs(
         factors=factors,
         labels=labels,
         merged_pairs=merged_pairs,
@@ -123,7 +124,7 @@ def compute_mean_rank_ic_permutation_null(
 
     validate_factor_output(factors)
     validate_factor_output(labels)
-    merged = _resolve_merged_pairs(
+    merged = _maybe_borrow_or_resolve_merged_pairs(
         factors=factors,
         labels=labels,
         merged_pairs=merged_pairs,
@@ -187,7 +188,7 @@ def _compute_cross_sectional_metric(
     factor_name = _extract_single_factor_name(factors, table_name="factors")
     label_name = _extract_single_factor_name(labels, table_name="labels")
 
-    merged = _resolve_merged_pairs(
+    merged = _maybe_borrow_or_resolve_merged_pairs(
         factors=factors,
         labels=labels,
         merged_pairs=merged_pairs,
@@ -363,10 +364,7 @@ def _resolve_merged_pairs(
     merged_pairs: pd.DataFrame | None,
 ) -> pd.DataFrame:
     if merged_pairs is not None:
-        required = {"date", "asset", "value_factor", "value_label"}
-        missing = required - set(merged_pairs.columns)
-        if missing:
-            raise AlphaLabDataError(f"merged_pairs is missing required columns: {sorted(missing)}")
+        _validate_merged_pairs_contract(merged_pairs)
         return merged_pairs[["date", "asset", "value_factor", "value_label"]].copy()
 
     return factors.merge(
@@ -376,6 +374,43 @@ def _resolve_merged_pairs(
         suffixes=("_factor", "_label"),
         validate="one_to_one",
     )
+
+
+def _maybe_borrow_or_resolve_merged_pairs(
+    *,
+    factors: pd.DataFrame,
+    labels: pd.DataFrame,
+    merged_pairs: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if merged_pairs is not None:
+        return _borrow_merged_pairs(merged_pairs)
+    return _resolve_merged_pairs(factors=factors, labels=labels, merged_pairs=None)
+
+
+def _borrow_merged_pairs(merged_pairs: pd.DataFrame) -> pd.DataFrame:
+    """Borrow a read-only merged-pairs view for hot paths.
+
+    Callers must treat the returned frame as read-only. New columns may be
+    added to the shallow view, but existing shared column arrays are protected
+    so accidental in-place mutation fails instead of corrupting the source.
+    """
+    _validate_merged_pairs_contract(merged_pairs)
+    return readonly_shallow_copy(
+        merged_pairs,
+        columns=("date", "asset", "value_factor", "value_label"),
+    )
+
+
+def _validate_merged_pairs_contract(merged_pairs: pd.DataFrame) -> None:
+    required = {"date", "asset", "value_factor", "value_label"}
+    missing = required - set(merged_pairs.columns)
+    if missing:
+        raise AlphaLabDataError(f"merged_pairs is missing required columns: {sorted(missing)}")
+    if merged_pairs.duplicated(subset=["date", "asset"]).any():
+        raise AlphaLabDataError(
+            "merged_pairs contains duplicate (date, asset) rows; "
+            "factor/label pairs must be one-to-one"
+        )
 
 
 def _prepare_rank_ic_permutation_kernel(
@@ -525,13 +560,13 @@ def _rank_quantile_bins(values: np.ndarray, *, n_bins: int) -> np.ndarray | None
 
     valid_idx = np.flatnonzero(mask)
     # rank(method="first"): stable ordering for ties.
-    order = valid_idx[np.argsort(arr[valid_idx], kind="mergesort")]
+    sort_pos = np.argsort(arr[valid_idx], kind="mergesort")
     # Equal-count binning equivalent to qcut over strict ranks.
     pos = np.arange(n_valid, dtype=float)
     bins_sorted = np.floor(pos * float(n_bins) / float(n_valid)).astype(int)
 
     out = np.empty(n_valid, dtype=int)
-    out[np.argsort(order, kind="mergesort")] = bins_sorted
+    out[sort_pos] = bins_sorted
     if np.unique(out).size < 2:
         return None
     return out

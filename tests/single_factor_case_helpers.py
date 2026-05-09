@@ -13,13 +13,17 @@ def write_demo_single_factor_case(
     factor_name: str = "bp",
     direction: str = "long",
     enable_neutralization: bool = False,
+    n_days: int = 160,
 ) -> Path:
     """Create a fully runnable synthetic single-factor spec and input files."""
 
     data_dir = tmp_path / "inputs"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    prices, factors, universe, exposures = _synthetic_case_tables(factor_name=factor_name)
+    prices, factors, universe, exposures = _synthetic_case_tables(
+        factor_name=factor_name,
+        n_days=n_days,
+    )
 
     prices_path = data_dir / "prices.csv"
     factor_path = data_dir / f"{factor_name}.csv"
@@ -79,7 +83,7 @@ def _synthetic_case_tables(
     *,
     factor_name: str,
     n_assets: int = 12,
-    n_days: int = 90,
+    n_days: int = 160,
     seed: int = 20260326,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     rng = np.random.default_rng(seed)

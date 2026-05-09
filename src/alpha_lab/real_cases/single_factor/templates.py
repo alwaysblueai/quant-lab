@@ -38,14 +38,14 @@ def render_summary_markdown(
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
         f"| Level 1->2 Transition | {_fmt(metrics.get('level12_transition_label'))} |",
         f"| Portfolio Validation | {_portfolio_validation_note(metrics)} |",
-        f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
-        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
-        f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
+        f"| Mean Rank IC | {_fmt_dual_metric(metrics, 'mean_rank_ic')} |",
+        f"| Mean MI | {_fmt_dual_metric(metrics, 'mean_mutual_information')} |",
+        f"| ICIR | {_fmt_dual_metric(metrics, 'ic_ir')} |",
         f"| IC Half-Life | {_fmt_half_life(metrics)} |",
         f"| Decay vs Rebalance | {_fmt_decay_consistency(metrics)} |",
-        f"| Mean Long-Short Return | {_fmt(metrics.get('mean_long_short_return'))} |",
-        f"| Mean Turnover | {_fmt(metrics.get('mean_long_short_turnover'))} |",
-        f"| Coverage Mean | {_fmt(metrics.get('eval_coverage_ratio_mean'))} |",
+        f"| Mean Long-Short Return | {_fmt_dual_metric(metrics, 'mean_long_short_return')} |",
+        f"| Mean Turnover | {_fmt_dual_metric(metrics, 'mean_long_short_turnover')} |",
+        f"| Coverage Mean | {_fmt_dual_metric(metrics, 'eval_coverage_ratio_mean')} |",
         f"| Capacity | {_fmt_capacity_summary(metrics)} |",
         f"| Conditional IC | {_fmt_conditional_ic_summary(metrics)} |",
         (f"| 主要诊断 | {_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"),
@@ -79,6 +79,8 @@ def render_experiment_card_markdown(
         "status: draft",
         f"factor: {spec.factor_name}",
         f"direction: {spec.direction}",
+        "emergent_moves: []",
+        "operative_claims: []",
         f"horizon: {spec.target.horizon}",
         f"quantiles: {spec.n_quantiles}",
         f"rebalance_frequency: {spec.rebalance_frequency}",
@@ -106,18 +108,18 @@ def render_experiment_card_markdown(
         "",
         "| Metric | Value |",
         "|---|---|",
-        f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
-        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
-        f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
+        f"| Mean Rank IC | {_fmt_dual_metric(metrics, 'mean_rank_ic')} |",
+        f"| Mean MI | {_fmt_dual_metric(metrics, 'mean_mutual_information')} |",
+        f"| ICIR | {_fmt_dual_metric(metrics, 'ic_ir')} |",
         f"| IC Half-Life | {_fmt_half_life(metrics)} |",
         f"| Decay vs Rebalance | {_fmt_decay_consistency(metrics)} |",
         f"| Factor Verdict | {_fmt(metrics.get('factor_verdict'))} |",
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
         (f"| Level 2 Portfolio Validation | {_portfolio_validation_note(metrics)} |"),
-        f"| Mean Long-Short Return | {_fmt(metrics.get('mean_long_short_return'))} |",
-        f"| Mean Long-Short Turnover | {_fmt(metrics.get('mean_long_short_turnover'))} |",
-        f"| Coverage Mean | {_fmt(metrics.get('eval_coverage_ratio_mean'))} |",
+        f"| Mean Long-Short Return | {_fmt_dual_metric(metrics, 'mean_long_short_return')} |",
+        f"| Mean Long-Short Turnover | {_fmt_dual_metric(metrics, 'mean_long_short_turnover')} |",
+        f"| Coverage Mean | {_fmt_dual_metric(metrics, 'eval_coverage_ratio_mean')} |",
         f"| Capacity | {_fmt_capacity_summary(metrics)} |",
         f"| Conditional IC | {_fmt_conditional_ic_summary(metrics)} |",
         (f"| 主要诊断 | {_fmt_reason_list(metrics.get('factor_verdict_reasons'))} |"),
@@ -125,6 +127,11 @@ def render_experiment_card_markdown(
         "## 解释",
         "",
         "<!-- Manual: 只补充最关键的经济解释或失败原因 -->",
+        "",
+        "## 回灌素材",
+        "",
+        "- `emergent_moves`: <!-- Manual: 这次实验浮现、可被未来因子复用的新 move -->",
+        "- `operative_claims`: <!-- Manual: 观察到的现象 / 经验 / 边界条件；弱 hint，不作为 kill 条件 -->",
         "",
         "## 下一步",
         "",
@@ -151,6 +158,17 @@ def _fmt(value: object) -> str:
             return "—"
         return f"{value:.6f}"
     return str(value)
+
+
+def _fmt_dual_metric(metrics: dict[str, object], key: str) -> str:
+    full_value = metrics.get(f"{key}_full")
+    oos_value = metrics.get(f"{key}_oos")
+    base_value = metrics.get(key)
+    primary = _fmt(full_value if full_value is not None else base_value)
+    oos = _fmt(oos_value)
+    if oos_value is None or oos == "—":
+        return primary
+    return f"{primary} (OOS: {oos})"
 
 
 def _fmt_flags(value: object) -> str:

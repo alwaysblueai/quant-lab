@@ -11,6 +11,11 @@ from typing import Literal, cast
 
 import pandas as pd
 
+from alpha_lab.custom_factors import (
+    CustomFactorSource,
+    find_custom_factor_workspace_root,
+    load_persisted_custom_factors,
+)
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.factor_recipe import FactorRecipeError, build_factor_from_recipe_mapping
 from alpha_lab.interfaces import validate_factor_output
@@ -41,6 +46,11 @@ from alpha_lab.signal_transforms import (
     winsorize_cross_section,
     zscore_cross_section,
 )
+from alpha_lab.splits import (
+    TimeSeriesSplitContract,
+    infer_default_time_series_split_contract,
+    rebalance_frequency_to_step,
+)
 
 from .artifacts import SingleFactorArtifactPaths, export_artifact_bundle
 from .evaluate import SingleFactorEvaluationResult, evaluate_single_factor_case
@@ -61,6 +71,7 @@ class SingleFactorCaseRunResult:
     evaluation_result: SingleFactorEvaluationResult
     artifact_paths: SingleFactorArtifactPaths
     integrity_report: IntegrityReport
+    custom_factor_source: CustomFactorSource | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +162,29 @@ def prepare_base_features(
         prices_enriched=panel,
         trailing_return_columns=tuple(trailing_cols),
         forward_labels_by_horizon=labels,
+    )
+
+
+def _strict_split_contract_check(
+    contract: TimeSeriesSplitContract,
+    *,
+    object_name: str,
+    module_name: str,
+) -> IntegrityCheckResult:
+    metadata = contract.to_metadata()
+    return IntegrityCheckResult(
+        check_name="strict_time_series_split_contract",
+        status="pass",
+        severity="info",
+        object_name=object_name,
+        module_name=module_name,
+        message=(
+            "Strict chronological IS/OOS split resolved before evaluation: "
+            f"IS {metadata['is_start']}..{metadata['is_end']}, "
+            f"OOS {metadata['oos_start']}..{metadata['oos_end']}, "
+            f"embargo={metadata['embargo_days']}."
+        ),
+        metrics=metadata,
     )
 
 
@@ -829,6 +863,12 @@ def run_single_factor_case(
         spec_path = Path(spec_or_path).resolve()
         spec = load_single_factor_case_spec(spec_path)
 
+    custom_factor_source = _load_custom_factor_source_for_spec(
+        spec,
+        spec_path=spec_path,
+        enabled=factor_loader is None,
+    )
+
     evaluation_config = get_research_evaluation_config(evaluation_profile)
     _emit_progress("实验合同与评估配置已加载", 10)
 
@@ -867,6 +907,19 @@ def run_single_factor_case(
                 object_name="single_factor_universe_asof",
             )
         )
+    split_contract = infer_default_time_series_split_contract(
+        prices["date"],
+        target_horizon=int(spec.target.horizon),
+        rebalance_step=rebalance_frequency_to_step(spec.rebalance_frequency),
+        source="single_factor_pipeline",
+    )
+    _record_integrity(
+        _strict_split_contract_check(
+            split_contract,
+            object_name="single_factor_strict_split",
+            module_name="real_cases.single_factor.pipeline",
+        )
+    )
 
     _emit_progress("加载因子输入", 30)
     raw_factor = (
@@ -925,6 +978,7 @@ def run_single_factor_case(
         neutralization_summary=neutral_diag,
         precomputed_forward_labels=bundle.base_feature_cache.forward_labels_by_horizon,
         evaluation_config=evaluation_config,
+        split_contract=split_contract,
         progress_callback=lambda message, percent: _emit_progress(
             message,
             min(83, 68 + max(0, min(int(percent), 100)) * 15 // 100),
@@ -951,6 +1005,7 @@ def run_single_factor_case(
             "factor_path": spec.factor_path,
             "factor_name": spec.factor_name,
             "neutralization_enabled": bool(spec.neutralization.enabled),
+            "split_contract": split_contract.to_metadata(),
         },
     )
 
@@ -971,6 +1026,9 @@ def run_single_factor_case(
         evaluation_config=evaluation_config,
         vault_root=vault_root,
         vault_export_mode=vault_export_mode,
+        custom_factor_source=(
+            custom_factor_source.to_audit_dict() if custom_factor_source is not None else None
+        ),
     )
     _emit_progress("实验产物导出完成", 90)
 
@@ -1005,7 +1063,33 @@ def run_single_factor_case(
         evaluation_result=evaluation_result,
         artifact_paths=artifact_paths,
         integrity_report=integrity_report,
+        custom_factor_source=custom_factor_source,
     )
+
+
+def _load_custom_factor_source_for_spec(
+    spec: SingleFactorCaseSpec,
+    *,
+    spec_path: Path | None,
+    enabled: bool,
+) -> CustomFactorSource | None:
+    if not enabled:
+        return None
+    workspace_root = find_custom_factor_workspace_root(spec_path)
+    sources = load_persisted_custom_factors(workspace_root, ignore_errors=True)
+    method = _recipe_base_method(spec) or spec.factor_name
+    return sources.get(method.strip().lower()) if method else None
+
+
+def _recipe_base_method(spec: SingleFactorCaseSpec) -> str | None:
+    factor_input = spec.factor_input
+    if factor_input is None or factor_input.recipe is None:
+        return None
+    base = factor_input.recipe.get("base")
+    if not isinstance(base, Mapping):
+        return None
+    method = base.get("method")
+    return method.strip() if isinstance(method, str) and method.strip() else None
 
 
 def _resolve_single_factor_spec(

@@ -188,6 +188,25 @@ def test_cost_adjusted_long_short_sorted_by_date():
     assert dates == sorted(dates)
 
 
+def test_cost_adjusted_long_short_rejects_duplicate_return_rows():
+    ls_df = pd.concat([_make_ls_df([0.02]), _make_ls_df([0.02])], ignore_index=True)
+    ls_turn_df = _make_ls_turnover_df([0.5])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        cost_adjusted_long_short(ls_df, ls_turn_df, cost_rate=0.001)
+
+
+def test_cost_adjusted_long_short_rejects_duplicate_turnover_rows():
+    ls_df = _make_ls_df([0.02])
+    ls_turn_df = pd.concat(
+        [_make_ls_turnover_df([0.5]), _make_ls_turnover_df([0.5])],
+        ignore_index=True,
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        cost_adjusted_long_short(ls_df, ls_turn_df, cost_rate=0.001)
+
+
 # ---------------------------------------------------------------------------
 # 5. cost_adjusted_long_short — integration with experiment runner
 # ---------------------------------------------------------------------------

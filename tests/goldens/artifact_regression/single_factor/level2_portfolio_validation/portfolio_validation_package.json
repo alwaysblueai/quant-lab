@@ -12,7 +12,8 @@
     "Portfolio validation skipped because promotion gate was not passed."
   ],
   "major_risks": [
-    "blocked by unstable rolling evidence"
+    "blocked by unstable rolling evidence",
+    "blocked by sharp IC decay under 1-day execution lag"
   ],
   "package_type": "alpha_lab_level2_portfolio_validation_package",
   "portfolio_robustness_summary": {
@@ -20,7 +21,8 @@
     "concentration_turnover_risk_note": "Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.",
     "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
     "fragility_reasons": [
-      "blocked by unstable rolling evidence"
+      "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag"
     ],
     "scenario_sensitivity_notes": [
       "Sensitivity diagnostics are inconclusive because portfolio validation did not complete."
@@ -64,16 +66,17 @@
   },
   "promotion_decision_context": {
     "blockers": [
-      "blocked by unstable rolling evidence"
+      "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag"
     ],
     "decision": "Blocked from Level 2",
     "reasons": [
       "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag",
       "factor verdict is not yet strong",
-      "factor performance is regime-dependent",
       "neutralization evidence is unavailable",
-      "IC decays materially under 1-day execution lag",
-      "uncertainty remains supportive"
+      "uncertainty remains supportive",
+      "robust across subperiods"
     ],
     "source": "level2_promotion_gate"
   },

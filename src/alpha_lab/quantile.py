@@ -51,7 +51,7 @@ def quantile_assignments(
     validate_factor_output(factors)
     factor_name = _single_factor_name(factors, "factors")
 
-    df = factors[["date", "asset", "value"]].dropna(subset=["value"]).copy()
+    df = factors.loc[factors["value"].notna(), ["date", "asset", "value"]]
     if df.empty:
         return pd.DataFrame(columns=list(_QUANTILE_ASSIGNMENT_COLUMNS))
 
@@ -128,9 +128,15 @@ def quantile_returns(
         missing = required - set(merged_pairs.columns)
         if missing:
             raise AlphaLabDataError(f"merged_pairs is missing required columns: {sorted(missing)}")
-        merged = merged_pairs[["date", "asset", "value_factor", "value_label"]].rename(
-            columns={"value_factor": "value", "value_label": "_label"}
-        )
+        dupes = merged_pairs.duplicated(subset=["date", "asset"])
+        if dupes.any():
+            raise AlphaLabDataError(
+                "merged_pairs contains duplicate (date, asset) rows; "
+                "factor/label pairs must be one-to-one"
+            )
+        merged = merged_pairs[["date", "asset", "value_factor", "value_label"]]
+        value_col = "value_factor"
+        label_col = "value_label"
     else:
         # Merge strictly on (date, asset) — the only safe join key.
         # validate="one_to_one" is a hard guard: after the single-label check above
@@ -141,7 +147,9 @@ def quantile_returns(
             how="inner",
             validate="one_to_one",
         )
-    merged = merged.dropna(subset=["value", "_label"])
+        value_col = "value"
+        label_col = "_label"
+    merged = merged.dropna(subset=[value_col, label_col])
 
     if merged.empty:
         return pd.DataFrame(columns=list(_QUANTILE_RETURN_COLUMNS))
@@ -149,17 +157,17 @@ def quantile_returns(
     # Cross-sectional quantile assignment per date — uses only same-date data.
     merged["quantile"] = _assign_quantiles_by_date(
         merged,
-        value_col="value",
+        value_col=value_col,
         n_quantiles=n_quantiles,
     )
     merged = merged.dropna(subset=["quantile"])
     merged["quantile"] = merged["quantile"].astype(int)
 
     result = (
-        merged.groupby(["date", "quantile"], sort=True)["_label"]
+        merged.groupby(["date", "quantile"], sort=True)[label_col]
         .mean()
         .reset_index()
-        .rename(columns={"_label": "mean_return"})
+        .rename(columns={label_col: "mean_return"})
     )
     result["factor"] = factor_name
     return result[list(_QUANTILE_RETURN_COLUMNS)].reset_index(drop=True)
@@ -285,7 +293,7 @@ def _assign_quantiles_by_date(
     value_col: str,
     n_quantiles: int,
 ) -> pd.Series:
-    """Vectorised per-date wrapper around _assign_quantile semantics."""
+    """Assign dense-rank quantile buckets per date with a sorted-date fast path."""
     n_rows = len(df)
     out = np.full(n_rows, np.nan, dtype=float)
     if n_rows == 0:
@@ -302,19 +310,22 @@ def _assign_quantiles_by_date(
     valid_dates = dates[valid_rows]
     valid_values = values[valid_rows]
 
-    order = np.argsort(valid_dates, kind="mergesort")
-    ordered_idx = valid_idx[order]
-    ordered_dates = valid_dates[order]
-    ordered_values = valid_values[order]
+    if len(valid_dates) > 1 and not bool(np.all(valid_dates[1:] >= valid_dates[:-1])):
+        order = np.argsort(valid_dates, kind="mergesort")
+        ordered_idx = valid_idx[order]
+        ordered_dates = valid_dates[order]
+        ordered_values = valid_values[order]
+    else:
+        ordered_idx = valid_idx
+        ordered_dates = valid_dates
+        ordered_values = valid_values
 
-    unique_dates, start_idx = np.unique(ordered_dates, return_index=True)
+    _, start_idx = np.unique(ordered_dates, return_index=True)
     end_idx = np.append(start_idx[1:], len(ordered_dates))
 
-    for i in range(len(unique_dates)):
-        begin = int(start_idx[i])
-        end = int(end_idx[i])
-        row_idx = ordered_idx[begin:end]
-        group_values = ordered_values[begin:end]
+    for begin, end in zip(start_idx, end_idx, strict=True):
+        row_idx = ordered_idx[int(begin) : int(end)]
+        group_values = ordered_values[int(begin) : int(end)]
 
         n_valid = int(group_values.size)
         if n_valid < 2:

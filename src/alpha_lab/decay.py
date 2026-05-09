@@ -17,7 +17,7 @@ from alpha_lab.evaluation import compute_ic, compute_ic_summary, compute_rank_ic
 from alpha_lab.labels import forward_return
 from alpha_lab.sorted_panel import ensure_sorted
 
-AUTOCORR_FAST_PATH_COVERAGE = 0.995
+AUTOCORR_FAST_PATH_COVERAGE = 1.0
 AUTOCORR_MIN_ASSETS = 3
 
 
@@ -239,6 +239,10 @@ def _compute_ic_decay_wide_fast_path(
     )
     close_wide = close_wide.where(close_wide > 0.0)
     factor_values = factor_wide.to_numpy(dtype=float, copy=False)
+    close_values = close_wide.to_numpy(dtype=float, copy=False)
+    if not np.isfinite(factor_values).all() or not np.isfinite(close_values).all():
+        return None
+
     factor_rank_values = factor_wide.rank(axis=1, method="average").to_numpy(
         dtype=float,
         copy=False,

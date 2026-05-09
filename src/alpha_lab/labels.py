@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.frame_utils import readonly_shallow_copy
 from alpha_lab.interfaces import FACTOR_OUTPUT_COLUMNS
 from alpha_lab.sorted_panel import ensure_sorted
 
@@ -27,7 +28,7 @@ class LabelCache:
         self._prices = _prepare_forward_return_prices(prices, mode=self._mode)
         self._cache: dict[int, pd.DataFrame] = {}
 
-    def forward_return(self, horizon: int) -> pd.DataFrame:
+    def forward_return(self, horizon: int, *, copy: bool = True) -> pd.DataFrame:
         horizon_int = int(horizon)
         if horizon_int not in self._cache:
             self._cache[horizon_int] = _forward_return_from_prepared(
@@ -35,7 +36,10 @@ class LabelCache:
                 horizon=horizon_int,
                 mode=self._mode,
             )
-        return self._cache[horizon_int].copy()
+        cached = self._cache[horizon_int]
+        if copy:
+            return cached.copy()
+        return readonly_shallow_copy(cached)
 
     def forward_returns(self, horizons: tuple[int, ...] | list[int]) -> dict[int, pd.DataFrame]:
         return {int(horizon): self.forward_return(int(horizon)) for horizon in horizons}

@@ -5,6 +5,9 @@ import pandas as pd
 import pytest
 
 from alpha_lab.evaluation import (
+    _borrow_merged_pairs,
+    _rank_quantile_bins,
+    _resolve_merged_pairs,
     compute_ic,
     compute_mean_rank_ic_permutation_null,
     compute_mutual_information,
@@ -27,6 +30,64 @@ def _canonical(
             "value": values,
         }
     )
+
+
+def test_resolve_merged_pairs_keeps_copy_semantics_for_supplied_pairs() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="f",
+        values=[1.0, 2.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="y",
+        values=[3.0, 4.0],
+    )
+    merged = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-02"]),
+            "asset": ["A", "B"],
+            "value_factor": [1.0, 2.0],
+            "value_label": [3.0, 4.0],
+        }
+    )
+
+    resolved = _resolve_merged_pairs(
+        factors=factors,
+        labels=labels,
+        merged_pairs=merged,
+    )
+    resolved.loc[0, "value_factor"] = 999.0
+
+    assert float(merged.loc[0, "value_factor"]) == pytest.approx(1.0)
+
+
+def test_borrow_merged_pairs_is_read_only_for_shared_columns() -> None:
+    merged = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-02"]),
+            "asset": ["A", "B"],
+            "value_factor": [1.0, 2.0],
+            "value_label": [3.0, 4.0],
+            "extra": [5.0, 6.0],
+        }
+    )
+
+    borrowed = _borrow_merged_pairs(merged)
+    borrowed["scratch"] = 1.0
+
+    assert list(borrowed.columns) == [
+        "date",
+        "asset",
+        "value_factor",
+        "value_label",
+        "scratch",
+    ]
+    assert "scratch" not in merged.columns
+    with pytest.raises(ValueError):
+        borrowed["value_factor"].to_numpy(copy=False)[0] = 999.0
 
 
 def test_compute_ic_basic_correctness():
@@ -241,6 +302,42 @@ def test_compute_mutual_information_detects_nonlinear_dependence() -> None:
     assert list(result.columns) == ["date", "factor", "label", "mutual_information"]
     mi = float(result.loc[0, "mutual_information"])
     assert mi > 0.0
+
+
+def test_rank_quantile_bins_are_row_order_aligned() -> None:
+    values = np.array([3.0, 1.0, 2.0, 4.0])
+
+    bins = _rank_quantile_bins(values, n_bins=4)
+
+    assert bins is not None
+    assert bins.tolist() == [2, 0, 1, 3]
+
+
+def test_compute_mutual_information_is_row_order_invariant() -> None:
+    factors = _canonical(
+        dates=["2024-01-02"] * 6,
+        assets=["A", "B", "C", "D", "E", "F"],
+        factor_name="f",
+        values=[3.0, 1.0, 2.0, 6.0, 4.0, 5.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02"] * 6,
+        assets=["A", "B", "C", "D", "E", "F"],
+        factor_name="y",
+        values=[30.0, 10.0, 20.0, 60.0, 40.0, 50.0],
+    )
+    order = [3, 0, 5, 1, 4, 2]
+
+    original = compute_mutual_information(factors, labels, max_bins=3)
+    shuffled = compute_mutual_information(
+        factors.iloc[order].reset_index(drop=True),
+        labels.iloc[order].reset_index(drop=True),
+        max_bins=3,
+    )
+
+    assert float(original["mutual_information"].iloc[0]) == pytest.approx(
+        float(shuffled["mutual_information"].iloc[0])
+    )
 
 
 def test_compute_mutual_information_returns_nan_for_degenerate_cross_section() -> None:
@@ -472,3 +569,65 @@ def test_merged_pairs_path_matches_default_for_ic_rankic_and_mi():
     mi_default = compute_mutual_information(factors, labels)
     mi_merged = compute_mutual_information(factors, labels, merged_pairs=merged_pairs)
     pd.testing.assert_frame_equal(mi_default, mi_merged)
+
+
+def test_merged_pairs_rejects_duplicate_date_asset_rows_for_metrics() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="y",
+        values=[10.0, 20.0, 30.0],
+    )
+    merged_pairs = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-02"]),
+            "asset": ["A", "A", "B"],
+            "value_factor": [1.0, 1.0, 2.0],
+            "value_label": [10.0, 10.0, 20.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        compute_ic(factors, labels, merged_pairs=merged_pairs)
+    with pytest.raises(ValueError, match="duplicate"):
+        compute_rank_ic(factors, labels, merged_pairs=merged_pairs)
+    with pytest.raises(ValueError, match="duplicate"):
+        compute_mutual_information(factors, labels, merged_pairs=merged_pairs)
+
+
+def test_merged_pairs_rejects_duplicate_date_asset_rows_for_permutation_null() -> None:
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02", "2024-01-02"],
+        assets=["A", "B", "C"],
+        factor_name="y",
+        values=[10.0, 20.0, 30.0],
+    )
+    merged_pairs = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-02"]),
+            "asset": ["A", "A", "B"],
+            "value_factor": [1.0, 1.0, 2.0],
+            "value_label": [10.0, 10.0, 20.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        compute_mean_rank_ic_permutation_null(
+            factors,
+            labels,
+            n_permutations=10,
+            seed=1,
+            merged_pairs=merged_pairs,
+        )

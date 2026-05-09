@@ -16,21 +16,21 @@
 | Factor Verdict | Promising but fragile |
 | Campaign Triage | Fragile / monitor |
 | Level 2 Promotion | Blocked from Level 2 |
-| Level 1->2 Transition | — |
-| Portfolio Validation | — |
-| Mean Rank IC | 0.076923 |
-| Mean MI | 0.230997 |
-| ICIR | 0.344757 |
-| IC Half-Life | 2.59 |
-| Decay vs Rebalance | rebalance=5; ratio=1.93 |
-| Mean Long-Short Return | 0.003812 |
-| Mean Turnover | 0.848214 |
-| Coverage Mean | 0.997059 |
-| Capacity | available; upper=4951840.69; adv=84004440.33 |
-| Conditional IC | Q5-Q1=0.0159; large-small=-0.1917 |
-| 主要诊断 | positive IC and RankIC means; IC and RankIC signs are consistently positive; signal weakens materially in some periods; rebalance cadence may be too slow for IC decay; factor performance is regime-dependent; confidence interval overlaps zero: long-short |
-| 主要阻断项 | blocked by unstable rolling evidence |
-| 主要风险 | none |
+| Level 1->2 Transition | Inconclusive transition |
+| Portfolio Validation | skipped_not_promoted (Not evaluated (not promoted)) |
+| Mean Rank IC | 0.065094 (OOS: 0.088228) |
+| Mean MI | 0.236611 (OOS: 0.236906) |
+| ICIR | 0.217827 (OOS: 0.256815) |
+| IC Half-Life | 4.03 |
+| Decay vs Rebalance | rebalance=5; ratio=1.24 |
+| Mean Long-Short Return | 0.005259 (OOS: 0.004856) |
+| Mean Turnover | 0.847403 (OOS: 0.843220) |
+| Coverage Mean | 0.998387 (OOS: 1.000000) |
+| Capacity | available; upper=7063874.77; adv=119128057.53 |
+| Conditional IC | Q5-Q1=0.1476; large-small=-0.0816 |
+| 主要诊断 | positive IC and RankIC means; IC and RankIC signs are consistently positive; signal weakens materially in some periods; rebalance cadence may be too slow for IC decay; confidence interval overlaps zero: long-short; apparent edge is weak relative to estimation noise |
+| 主要阻断项 | blocked by unstable rolling evidence; blocked by sharp IC decay under 1-day execution lag |
+| 主要风险 | blocked by unstable rolling evidence; blocked by sharp IC decay under 1-day execution lag |
 
 ## 产物路径
 

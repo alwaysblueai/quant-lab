@@ -16,6 +16,7 @@ from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.key_metrics_contracts import project_level12_transition_summary
 from alpha_lab.real_cases.artifact_enrichment import (
     build_backtest_summary_payload,
+    build_group_nav_table,
     build_portfolio_recipe_controls,
 )
 from alpha_lab.reporting.level2_portfolio_validation import (
@@ -62,8 +63,15 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "conditional_ic_by_cross_section_size.csv",
     "rolling_stability.csv",
     "group_returns.csv",
+    "group_nav.csv",
+    "quantile_membership.csv",
+    "quantile_equal_weights.csv",
+    "portfolio_weights.csv",
     "turnover.csv",
     "coverage.csv",
+    "lag_sensitivity.csv",
+    "random_baseline_null.csv",
+    "daily_pnl_attribution.csv",
     "factor_definition.yaml",
     "summary.md",
     "experiment_card.md",
@@ -81,16 +89,80 @@ _FAST_SCREEN_PROFILE_NAMES = frozenset({"exploratory_screening", "quick_screenin
 
 _FAST_SCREEN_CORE_METRIC_KEYS: tuple[str, ...] = (
     "mean_rank_ic",
+    "mean_rank_ic_full",
+    "mean_rank_ic_is",
+    "mean_rank_ic_oos",
+    "mean_rank_ic_oos_decay_ratio",
+    "mean_ic",
+    "mean_ic_full",
+    "mean_ic_is",
+    "mean_ic_oos",
+    "mean_ic_oos_decay_ratio",
     "rank_ic_ir",
+    "rank_ic_ir_full",
+    "rank_ic_ir_is",
+    "rank_ic_ir_oos",
+    "rank_ic_ir_oos_decay_ratio",
+    "ic_ir",
+    "ic_ir_full",
+    "ic_ir_is",
+    "ic_ir_oos",
+    "ic_ir_oos_decay_ratio",
     "ic_positive_rate",
+    "ic_positive_rate_full",
+    "ic_positive_rate_is",
+    "ic_positive_rate_oos",
     "group_monotonicity_summary",
     "ic_decay_half_life_summary",
     "ic_decay_retention_5_over_1",
+    "mean_long_short_return",
+    "mean_long_short_return_full",
+    "mean_long_short_return_is",
+    "mean_long_short_return_oos",
+    "mean_long_short_return_oos_decay_ratio",
+    "long_short_ir",
+    "long_short_ir_full",
+    "long_short_ir_is",
+    "long_short_ir_oos",
+    "long_short_ir_oos_decay_ratio",
     "mean_long_short_turnover",
+    "mean_long_short_turnover_full",
+    "mean_long_short_turnover_is",
+    "mean_long_short_turnover_oos",
     "coverage_summary",
+    "coverage_break_days",
+    "eval_coverage_ratio_mean",
+    "eval_coverage_ratio_mean_full",
+    "eval_coverage_ratio_mean_is",
+    "eval_coverage_ratio_mean_oos",
+    "eval_coverage_ratio_min",
+    "eval_coverage_ratio_min_full",
+    "eval_coverage_ratio_min_is",
+    "eval_coverage_ratio_min_oos",
     "cost_aware_long_short_ir",
+    "cost_aware_long_short_ir_full",
+    "cost_aware_long_short_ir_is",
+    "cost_aware_long_short_ir_oos",
+    "cost_aware_long_short_ir_oos_decay_ratio",
     "ic_t_stat",
     "max_drawdown",
+    "max_drawdown_full",
+    "max_drawdown_is",
+    "max_drawdown_oos",
+    "max_drawdown_oos_decay_ratio",
+    "random_baseline_n_permutations",
+    "random_baseline_mean_ic_mean",
+    "random_baseline_mean_ic_std",
+    "random_baseline_p_value",
+    "random_baseline_observed_mean_rank_ic",
+    "random_baseline_observed_z_score",
+    "metric_scope",
+    "primary_metric_scope",
+    "report_metric_scope",
+    "report_timeseries_scope",
+    "report_split_phase_column",
+    "split_semantics",
+    "split_semantics_label",
 )
 
 _FAST_SCREEN_REQUIRED_CONTRACT_KEYS: tuple[str, ...] = (
@@ -103,6 +175,21 @@ _FAST_SCREEN_REQUIRED_CONTRACT_KEYS: tuple[str, ...] = (
     "promotion_reasons",
     "promotion_blockers",
     "split_description",
+    "split_contract",
+    "split_policy",
+    "split_source",
+    "is_start",
+    "is_end",
+    "oos_start",
+    "oos_end",
+    "split_embargo_days",
+    "split_min_oos_dates",
+    "split_min_is_dates",
+    "split_n_dates",
+    "split_n_is_dates",
+    "split_n_oos_dates",
+    "split_target_horizon",
+    "split_rebalance_step",
 )
 
 
@@ -123,6 +210,10 @@ class SingleFactorArtifactPaths(TypedDict):
     conditional_ic_by_cross_section_size: Path
     rolling_stability: Path
     group_returns: Path
+    group_nav: Path
+    quantile_membership: Path
+    quantile_equal_weights: Path
+    portfolio_weights: Path
     turnover: Path
     coverage: Path
     lag_sensitivity: Path
@@ -151,6 +242,7 @@ def export_artifact_bundle(
     spec_path: str | Path | None = None,
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
+    custom_factor_source: Mapping[str, object] | None = None,
 ) -> SingleFactorArtifactPaths:
     """Write standardized artifact bundle for one single-factor case run."""
 
@@ -176,6 +268,10 @@ def export_artifact_bundle(
         ),
         "rolling_stability": out_dir / "rolling_stability.csv",
         "group_returns": out_dir / "group_returns.csv",
+        "group_nav": out_dir / "group_nav.csv",
+        "quantile_membership": out_dir / "quantile_membership.csv",
+        "quantile_equal_weights": out_dir / "quantile_equal_weights.csv",
+        "portfolio_weights": out_dir / "portfolio_weights.csv",
         "turnover": out_dir / "turnover.csv",
         "coverage": out_dir / "coverage.csv",
         "lag_sensitivity": out_dir / "lag_sensitivity.csv",
@@ -222,6 +318,21 @@ def export_artifact_bundle(
     )
     evaluation_result.rolling_stability.to_csv(paths["rolling_stability"], index=False)
     evaluation_result.group_returns.to_csv(paths["group_returns"], index=False)
+    build_group_nav_table(
+        evaluation_result.group_returns,
+        rebalance_frequency=spec.rebalance_frequency,
+        label_horizon=int(spec.target.horizon),
+    ).to_csv(paths["group_nav"], index=False)
+    quantile_membership = evaluation_result.experiment_result.quantile_assignments_df.copy()
+    quantile_membership.to_csv(paths["quantile_membership"], index=False)
+    _build_quantile_equal_weights(quantile_membership).to_csv(
+        paths["quantile_equal_weights"],
+        index=False,
+    )
+    portfolio_weights = evaluation_result.experiment_result.portfolio_weights_df
+    if portfolio_weights is None:
+        portfolio_weights = pd.DataFrame(columns=["date", "asset", "weight"])
+    portfolio_weights.to_csv(paths["portfolio_weights"], index=False)
     evaluation_result.turnover.to_csv(paths["turnover"], index=False)
     evaluation_result.coverage.to_csv(paths["coverage"], index=False)
     evaluation_result.lag_sensitivity.to_csv(paths["lag_sensitivity"], index=False)
@@ -230,20 +341,6 @@ def export_artifact_bundle(
 
     factor_definition_yaml = _dump_yaml_payload(_compact_spec_payload(spec))
     paths["factor_definition"].write_text(factor_definition_yaml, encoding="utf-8")
-
-    summary_md = render_summary_markdown(
-        spec=spec,
-        metrics=evaluation_result.metrics,
-        output_dir=out_dir,
-    )
-    paths["summary"].write_text(summary_md, encoding="utf-8")
-
-    card_md = render_experiment_card_markdown(
-        spec=spec,
-        metrics=evaluation_result.metrics,
-        result=evaluation_result.experiment_result,
-    )
-    paths["experiment_card"].write_text(card_md, encoding="utf-8")
 
     report = integrity_report or build_integrity_report(
         (),
@@ -372,6 +469,21 @@ def export_artifact_bundle(
     metrics_for_payload["level12_transition_confirmation_note"] = level12_transition[
         "confirmation_vs_degradation_note"
     ]
+    split_contract_payload = _split_contract_payload(metrics_for_payload)
+
+    summary_md = render_summary_markdown(
+        spec=spec,
+        metrics=metrics_for_payload,
+        output_dir=out_dir,
+    )
+    paths["summary"].write_text(summary_md, encoding="utf-8")
+
+    card_md = render_experiment_card_markdown(
+        spec=spec,
+        metrics=metrics_for_payload,
+        result=evaluation_result.experiment_result,
+    )
+    paths["experiment_card"].write_text(card_md, encoding="utf-8")
 
     metrics_payload = {
         "metrics": _to_jsonable(
@@ -380,27 +492,16 @@ def export_artifact_bundle(
                 profile_name=evaluation_config.profile_name,
             )
         ),
-        "coverage_by_date_summary": {
-            "n_dates": int(evaluation_result.coverage["date"].nunique())
-            if not evaluation_result.coverage.empty
-            else 0,
-            "mean_coverage": _finite_or_none(
-                evaluation_result.coverage["coverage"].mean()
-                if not evaluation_result.coverage.empty
-                else float("nan")
-            ),
-            "min_coverage": _finite_or_none(
-                evaluation_result.coverage["coverage"].min()
-                if not evaluation_result.coverage.empty
-                else float("nan")
-            ),
-        },
+        "coverage_by_date_summary": _build_coverage_by_date_summary(
+            evaluation_result.coverage
+        ),
     }
     _write_json(paths["metrics"], metrics_payload)
 
     factor_definition_payload = _build_factor_definition_payload(
         spec=spec,
         output_paths=paths,
+        custom_factor_source=custom_factor_source,
     )
     _write_json(paths["factor_definition_json"], factor_definition_payload)
 
@@ -450,6 +551,7 @@ def export_artifact_bundle(
             "universe_name": spec.universe.name,
             "target_kind": spec.target.kind,
             "target_horizon": spec.target.horizon,
+            "split_contract": split_contract_payload,
         },
     )
     _write_json(paths["research_tearsheet"], tearsheet_payload)
@@ -458,19 +560,23 @@ def export_artifact_bundle(
         output_path=paths["research_tearsheet_pdf"],
     )
 
+    inputs_payload: dict[str, object] = {
+        "prices_path": spec.prices_path,
+        "factor_path": spec.factor_path,
+        "factor_name": spec.factor_name,
+        "universe_path": spec.universe.path,
+        "neutralization_exposures_path": spec.neutralization.exposures_path,
+    }
+    if custom_factor_source is not None:
+        inputs_payload["custom_factor_source"] = dict(custom_factor_source)
+
     manifest: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "real_case_single_factor_bundle",
         "run_timestamp_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "case_name": spec.name,
         "spec_path": str(Path(spec_path).resolve()) if spec_path is not None else None,
-        "inputs": {
-            "prices_path": spec.prices_path,
-            "factor_path": spec.factor_path,
-            "factor_name": spec.factor_name,
-            "universe_path": spec.universe.path,
-            "neutralization_exposures_path": spec.neutralization.exposures_path,
-        },
+        "inputs": inputs_payload,
         "outputs": {name: str(path) for name, path in paths.items()},
         "required_bundle_files": list(REQUIRED_BUNDLE_FILES),
         "integrity_summary": report.summary.to_dict(),
@@ -478,6 +584,7 @@ def export_artifact_bundle(
             "profile_name": evaluation_config.profile_name,
             "snapshot": research_evaluation_audit_snapshot(evaluation_config),
         },
+        "split_contract": split_contract_payload,
         "vault_export": {
             "enabled": False,
             "mode": "skip",
@@ -486,6 +593,8 @@ def export_artifact_bundle(
             "error": None,
         },
     }
+    if custom_factor_source is not None:
+        manifest["custom_factor_source"] = dict(custom_factor_source)
 
     _write_json(paths["run_manifest"], manifest)
 
@@ -520,8 +629,9 @@ def _build_factor_definition_payload(
     *,
     spec: SingleFactorCaseSpec,
     output_paths: SingleFactorArtifactPaths,
+    custom_factor_source: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_factor_definition",
         "case_name": spec.name,
@@ -534,6 +644,9 @@ def _build_factor_definition_payload(
         },
         "fallback_derived_fields": [],
     }
+    if custom_factor_source is not None:
+        payload["custom_factor_source"] = dict(custom_factor_source)
+    return payload
 
 
 def _build_signal_validation_payload(
@@ -645,7 +758,8 @@ def _build_backtest_result_payload(
         for field in fallback_fields
         if field in compact_summary and field not in _BACKTEST_OMITTED_DETAIL_FIELDS
     ]
-    return {
+    split_contract = _split_contract_payload(metrics_for_payload)
+    payload: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_backtest_result",
         "case_name": spec.name,
@@ -655,11 +769,15 @@ def _build_backtest_result_payload(
         "summary": compact_summary,
         "source_artifacts": {
             "group_returns_path": str(output_paths["group_returns"]),
+            "group_nav_path": str(output_paths["group_nav"]),
             "turnover_path": str(output_paths["turnover"]),
             "metrics_path": str(output_paths["metrics"]),
         },
         "fallback_derived_fields": compact_fallback_fields,
     }
+    if split_contract:
+        payload.update(_split_contract_top_level_fields(split_contract))
+    return payload
 
 
 def _write_json(path: Path, payload: Mapping[str, object], *, pretty: bool = True) -> None:
@@ -721,6 +839,101 @@ def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _series_float_stat(frame: pd.DataFrame, column: str, stat: str) -> float | None:
+    if frame.empty or column not in frame.columns:
+        return None
+    values = (
+        pd.to_numeric(frame[column], errors="coerce")
+        .replace([float("inf"), -float("inf")], pd.NA)
+        .dropna()
+    )
+    if values.empty:
+        return None
+    if stat == "mean":
+        return _finite_or_none(float(values.mean()))
+    if stat == "median":
+        return _finite_or_none(float(values.median()))
+    if stat == "min":
+        return _finite_or_none(float(values.min()))
+    if stat == "max":
+        return _finite_or_none(float(values.max()))
+    if stat == "sum":
+        return _finite_or_none(float(values.sum()))
+    return None
+
+
+def _coverage_int_stat(frame: pd.DataFrame, column: str, stat: str) -> int | None:
+    value = _series_float_stat(frame, column, stat)
+    return int(round(value)) if value is not None else None
+
+
+def _build_coverage_by_date_summary(frame: pd.DataFrame) -> dict[str, object]:
+    if frame.empty:
+        return {
+            "n_dates": 0,
+            "n_valid_dates": 0,
+            "date_coverage": None,
+            "mean_coverage": None,
+            "min_coverage": None,
+            "mean_asset_coverage": None,
+            "median_asset_coverage": None,
+            "min_asset_coverage": None,
+            "max_asset_coverage": None,
+            "overall_sample_coverage": None,
+            "avg_assets": None,
+            "coverage_warmup_excluded_days": 0,
+        }
+    raw_frame = frame
+    warmup_excluded_days = 0
+    if "coverage_eval_included" in frame.columns:
+        included = frame["coverage_eval_included"].fillna(True).astype(bool)
+        warmup_excluded_days = int((~included).sum())
+        frame = frame.loc[included].reset_index(drop=True)
+        if frame.empty:
+            frame = raw_frame
+    n_dates = int(frame["date"].nunique()) if "date" in frame.columns else int(len(frame))
+    valid_sample = pd.to_numeric(
+        frame["valid_sample_count"]
+        if "valid_sample_count" in frame.columns
+        else pd.Series(dtype=float),
+        errors="coerce",
+    ).fillna(0)
+    n_valid_dates = int((valid_sample > 0).sum())
+    total_eligible = _series_float_stat(frame, "eligible_count", "sum")
+    total_valid_samples = _series_float_stat(frame, "valid_sample_count", "sum")
+    overall_sample_coverage = (
+        _finite_or_none(float(total_valid_samples) / float(total_eligible))
+        if total_eligible and total_valid_samples is not None
+        else None
+    )
+    mean_asset_coverage = _series_float_stat(frame, "asset_coverage", "mean")
+    min_asset_coverage = _series_float_stat(frame, "asset_coverage", "min")
+    return {
+        "n_dates": n_dates,
+        "n_valid_dates": n_valid_dates,
+        "date_coverage": _finite_or_none(n_valid_dates / n_dates) if n_dates else None,
+        "mean_coverage": mean_asset_coverage,
+        "min_coverage": min_asset_coverage,
+        "mean_asset_coverage": mean_asset_coverage,
+        "median_asset_coverage": _series_float_stat(frame, "asset_coverage", "median"),
+        "min_asset_coverage": min_asset_coverage,
+        "max_asset_coverage": _series_float_stat(frame, "asset_coverage", "max"),
+        "overall_sample_coverage": overall_sample_coverage,
+        "avg_assets": _series_float_stat(frame, "eligible_count", "mean"),
+        "avg_valid_score_assets": _series_float_stat(frame, "valid_score_count", "mean"),
+        "avg_valid_forward_return_assets": _series_float_stat(
+            frame,
+            "valid_forward_return_count",
+            "mean",
+        ),
+        "total_eligible_samples": _coverage_int_stat(frame, "eligible_count", "sum"),
+        "total_valid_samples": _coverage_int_stat(frame, "valid_sample_count", "sum"),
+        "coverage_warmup_excluded_days": warmup_excluded_days,
+        "mean_asset_coverage_raw": _series_float_stat(raw_frame, "asset_coverage", "mean"),
+        "min_asset_coverage_raw": _series_float_stat(raw_frame, "asset_coverage", "min"),
+    }
+
+
 def _finite_if_number(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -738,6 +951,19 @@ def _text_or_none(value: object) -> str | None:
 
 def _as_object(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _split_contract_payload(metrics: Mapping[str, object]) -> dict[str, object]:
+    raw = metrics.get("split_contract")
+    return {str(key): value for key, value in raw.items()} if isinstance(raw, Mapping) else {}
+
+
+def _split_contract_top_level_fields(split_contract: Mapping[str, object]) -> dict[str, object]:
+    fields: dict[str, object] = {"split_contract": dict(split_contract)}
+    for key in ("is_start", "is_end", "oos_start", "oos_end"):
+        if key in split_contract:
+            fields[key] = split_contract[key]
+    return fields
 
 
 def _compact_metrics_payload(
@@ -786,6 +1012,10 @@ def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object
             "statistics_series_policy": summary.get("statistics_series_policy"),
             "statistics_rebalance_step": summary.get("statistics_rebalance_step"),
             "statistics_periods_per_year": summary.get("statistics_periods_per_year"),
+            "max_drawdown_oos": summary.get("max_drawdown_oos"),
+            "pre_cost_return_oos": summary.get("pre_cost_return_oos"),
+            "post_cost_return_oos": summary.get("post_cost_return_oos"),
+            "turnover_oos": summary.get("turnover_oos"),
         }
     )
     return compact
@@ -887,6 +1117,31 @@ _BACKTEST_OMITTED_DETAIL_FIELDS = frozenset(
         "regime_analysis",
     }
 )
+
+
+def _build_quantile_equal_weights(quantile_membership: pd.DataFrame) -> pd.DataFrame:
+    """Derive equal-weight holdings for each quantile bucket from assignments."""
+
+    columns = ["date", "asset", "factor", "quantile", "weight"]
+    if quantile_membership.empty:
+        return pd.DataFrame(columns=columns)
+
+    required = {"date", "asset", "quantile"}
+    if not required.issubset(quantile_membership.columns):
+        return pd.DataFrame(columns=columns)
+
+    frame = quantile_membership.copy()
+    if "factor" not in frame.columns:
+        frame["factor"] = ""
+    frame = frame.dropna(subset=["date", "asset", "quantile"]).copy()
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    counts = frame.groupby(["date", "factor", "quantile"], dropna=False)["asset"].transform(
+        "count"
+    )
+    frame["weight"] = 1.0 / counts.astype(float)
+    return frame[columns].reset_index(drop=True)
 
 
 def _sync_exported_manifest_copies(

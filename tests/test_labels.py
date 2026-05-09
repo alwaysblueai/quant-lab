@@ -28,6 +28,49 @@ def test_forward_return_basic_correctness():
     assert np.isnan(result["value"].iloc[2])
 
 
+def test_forward_return_next_open_uses_next_bar_entry_and_horizon_close_exit() -> None:
+    dates = pd.date_range("2024-01-02", periods=4, freq="B")
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "asset": ["A", "A", "A", "A"],
+            "open": [99.0, 101.0, 111.0, 124.0],
+            "close": [100.0, 110.0, 121.0, 133.1],
+        }
+    )
+
+    one_day = forward_return(df, horizon=1, execution_price_mode="next_open")
+    two_day = forward_return(df, horizon=2, execution_price_mode="next_open")
+
+    assert set(one_day["factor"]) == {"forward_return_1_next_open"}
+    assert one_day["value"].iloc[0] == pytest.approx(110.0 / 101.0 - 1.0)
+    assert one_day["value"].iloc[1] == pytest.approx(121.0 / 111.0 - 1.0)
+    assert np.isnan(one_day["value"].iloc[-1])
+    assert set(two_day["factor"]) == {"forward_return_2_next_open"}
+    assert two_day["value"].iloc[0] == pytest.approx(121.0 / 101.0 - 1.0)
+    assert two_day["value"].iloc[1] == pytest.approx(133.1 / 111.0 - 1.0)
+    assert np.isnan(two_day["value"].iloc[-2])
+
+
+def test_forward_return_vwap_uses_next_bar_vwap_entry_and_horizon_close_exit() -> None:
+    dates = pd.date_range("2024-01-02", periods=4, freq="B")
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "asset": ["A", "A", "A", "A"],
+            "close": [100.0, 110.0, 121.0, 133.1],
+            "vwap": [100.5, 105.0, 115.0, 128.0],
+        }
+    )
+
+    result = forward_return(df, horizon=2, execution_price_mode="vwap")
+
+    assert set(result["factor"]) == {"forward_return_2_vwap"}
+    assert result["value"].iloc[0] == pytest.approx(121.0 / 105.0 - 1.0)
+    assert result["value"].iloc[1] == pytest.approx(133.1 / 115.0 - 1.0)
+    assert np.isnan(result["value"].iloc[-2])
+
+
 def test_forward_return_bad_horizon_raises():
     df = _make_df({"A": [100.0, 101.0]})
 
@@ -109,6 +152,28 @@ def test_label_cache_matches_forward_return_multiple_horizons():
         expected = forward_return(df, horizon=horizon)
         actual = cache.forward_return(horizon)
         pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_label_cache_forward_return_defaults_to_safe_copy():
+    df = _make_df({"A": [100.0, 101.0, 103.0], "B": [200.0, 198.0, 202.0]})
+    cache = LabelCache(df)
+    expected = forward_return(df, horizon=1)
+
+    first = cache.forward_return(1)
+    first.loc[0, "value"] = 999.0
+    second = cache.forward_return(1)
+
+    pd.testing.assert_frame_equal(second, expected)
+
+
+def test_label_cache_forward_return_no_copy_is_read_only():
+    df = _make_df({"A": [100.0, 101.0, 103.0], "B": [200.0, 198.0, 202.0]})
+    cache = LabelCache(df)
+
+    borrowed = cache.forward_return(1, copy=False)
+
+    with pytest.raises(ValueError):
+        borrowed["value"].to_numpy(copy=False)[0] = 999.0
 
 
 def test_label_cache_matches_forward_return_execution_price_modes():

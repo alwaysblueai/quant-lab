@@ -1,0 +1,197 @@
+{
+  "artifact_type": "alpha_lab_portfolio_recipe",
+  "case_name": "demo_bp_single_factor",
+  "fallback_derived_fields": [],
+  "metrics_reference": {
+    "base_weighting_method": null,
+    "research_evaluation_profile": "default_research",
+    "transaction_cost_one_way_rate": 0.001
+  },
+  "package_type": "single_factor",
+  "portfolio_validation_metrics": {
+    "benchmark_relative_evaluation": {
+      "note": "benchmark-relative metrics are not present in case evidence",
+      "status": "not_available"
+    },
+    "concentration_exposure_diagnostics": {},
+    "holding_period_sensitivity": [],
+    "protocol_settings": {
+      "benchmark_relative_policy": "benchmark-relative evaluation is included only when benchmark metrics are already present in case evidence",
+      "holding_period_sensitivity": [
+        1,
+        3,
+        5
+      ],
+      "portfolio_construction_assumptions": {
+        "gross_exposure_target": 2.0,
+        "leg_size_policy": "quantile-implied k from assignment density",
+        "long_leg": "top-k cross-sectional signal bucket",
+        "net_exposure_target": 0.0,
+        "short_leg": "bottom-k cross-sectional signal bucket"
+      },
+      "rebalance_assumption": {
+        "input_frequency": "W",
+        "rebalance_step": 5,
+        "source": "calendar_alias"
+      },
+      "transaction_cost_sensitivity": [
+        0.0,
+        0.0005,
+        0.001,
+        0.002
+      ],
+      "weighting_scheme": {
+        "default": "rank",
+        "sensitivity_methods": [
+          "equal",
+          "rank",
+          "score"
+        ]
+      }
+    },
+    "scenario_metrics": [],
+    "transaction_cost_sensitivity": {},
+    "turnover_summary": {},
+    "weighting_sensitivity": []
+  },
+  "portfolio_validation_package": {
+    "created_at_utc": "<SCRUBBED_TIMESTAMP>",
+    "input_case_identity": {
+      "case_id": "demo_bp_single_factor",
+      "case_name": "demo_bp_single_factor",
+      "case_output_dir": "<OUTPUT_ROOT>/demo_bp_single_factor",
+      "experiment_name": "demo_bp_single_factor",
+      "package_type": "single_factor"
+    },
+    "key_portfolio_results": {},
+    "major_caveats": [
+      "Portfolio validation skipped because promotion gate was not passed."
+    ],
+    "major_risks": [
+      "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag"
+    ],
+    "package_type": "alpha_lab_level2_portfolio_validation_package",
+    "portfolio_robustness_summary": {
+      "benchmark_relative_support_note": "Benchmark-relative support is unavailable in current case evidence.",
+      "concentration_turnover_risk_note": "Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.",
+      "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
+      "fragility_reasons": [
+        "blocked by unstable rolling evidence",
+        "blocked by sharp IC decay under 1-day execution lag"
+      ],
+      "scenario_sensitivity_notes": [
+        "Sensitivity diagnostics are inconclusive because portfolio validation did not complete."
+      ],
+      "support_reasons": [],
+      "taxonomy_label": "Inconclusive portfolio evidence"
+    },
+    "portfolio_validation_settings": {
+      "benchmark_relative_policy": "benchmark-relative evaluation is included only when benchmark metrics are already present in case evidence",
+      "holding_period_sensitivity": [
+        1,
+        3,
+        5
+      ],
+      "portfolio_construction_assumptions": {
+        "gross_exposure_target": 2.0,
+        "leg_size_policy": "quantile-implied k from assignment density",
+        "long_leg": "top-k cross-sectional signal bucket",
+        "net_exposure_target": 0.0,
+        "short_leg": "bottom-k cross-sectional signal bucket"
+      },
+      "rebalance_assumption": {
+        "input_frequency": "W",
+        "rebalance_step": 5,
+        "source": "calendar_alias"
+      },
+      "transaction_cost_sensitivity": [
+        0.0,
+        0.0005,
+        0.001,
+        0.002
+      ],
+      "weighting_scheme": {
+        "default": "rank",
+        "sensitivity_methods": [
+          "equal",
+          "rank",
+          "score"
+        ]
+      }
+    },
+    "promotion_decision_context": {
+      "blockers": [
+        "blocked by unstable rolling evidence",
+        "blocked by sharp IC decay under 1-day execution lag"
+      ],
+      "decision": "Blocked from Level 2",
+      "reasons": [
+        "blocked by unstable rolling evidence",
+        "blocked by sharp IC decay under 1-day execution lag",
+        "factor verdict is not yet strong",
+        "neutralization evidence is unavailable",
+        "uncertainty remains supportive",
+        "robust across subperiods"
+      ],
+      "source": "level2_promotion_gate"
+    },
+    "recommendation": {
+      "label": "Not evaluated (not promoted)",
+      "rationale": [
+        "promotion gate not passed"
+      ],
+      "remains_credible_at_portfolio_level": null
+    },
+    "schema_version": "1.0.0"
+  },
+  "portfolio_validation_summary": {
+    "benchmark_relative_assessment": null,
+    "benchmark_relative_excess_return": null,
+    "benchmark_relative_risks": [],
+    "benchmark_relative_status": "not_available",
+    "benchmark_relative_tracking_error": null,
+    "major_caveats": [
+      "Portfolio validation skipped because promotion gate was not passed."
+    ],
+    "major_risks": [
+      "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag"
+    ],
+    "portfolio_robustness_summary": {
+      "benchmark_relative_support_note": "Benchmark-relative support is unavailable in current case evidence.",
+      "concentration_turnover_risk_note": "Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.",
+      "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
+      "fragility_reasons": [
+        "blocked by unstable rolling evidence",
+        "blocked by sharp IC decay under 1-day execution lag"
+      ],
+      "scenario_sensitivity_notes": [
+        "Sensitivity diagnostics are inconclusive because portfolio validation did not complete."
+      ],
+      "support_reasons": [],
+      "taxonomy_label": "Inconclusive portfolio evidence"
+    },
+    "promotion_decision": "Blocked from Level 2",
+    "recommendation": "Not evaluated (not promoted)",
+    "remains_credible_at_portfolio_level": null,
+    "validation_status": "skipped_not_promoted"
+  },
+  "position_limits": "N/A",
+  "recipe_context": {
+    "factor_name": "bp",
+    "neutralization_enabled": false,
+    "rebalance_frequency": "W",
+    "target_horizon": 5,
+    "universe_name": "demo_universe"
+  },
+  "schema_version": "1.0.0",
+  "source_artifacts": {
+    "metrics_path": "<OUTPUT_ROOT>/demo_bp_single_factor/metrics.json",
+    "portfolio_validation_metrics_path": "<OUTPUT_ROOT>/demo_bp_single_factor/level2_portfolio_validation/portfolio_validation_metrics.json",
+    "portfolio_validation_package_path": "<OUTPUT_ROOT>/demo_bp_single_factor/level2_portfolio_validation/portfolio_validation_package.json",
+    "portfolio_validation_summary_path": "<OUTPUT_ROOT>/demo_bp_single_factor/level2_portfolio_validation/portfolio_validation_summary.json"
+  },
+  "transaction_cost_assumptions": "one-way=0.0010; grid=0.0,0.0005,0.001,0.002",
+  "turnover_penalty_settings": "warn if mean turnover > 0.80"
+}

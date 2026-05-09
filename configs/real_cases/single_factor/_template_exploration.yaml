@@ -1,0 +1,62 @@
+# Exploration template for single-factor Stage 3 runs.
+#
+# Usage: copy this file to `<factor>_v1.yaml`, replace TODO markers, and run via
+#   alpha-lab real-case single-factor run <case>.yaml --evaluation-profile exploratory_screening
+#
+# Workflow conventions (see docs/factor_promotion_checklist.md):
+#   1. Exploration first run    → --evaluation-profile exploratory_screening (fast GO/NO-GO)
+#   2. Looks promising           → --evaluation-profile default_research      (full PIT/regime/cost)
+#   3. Promotion gate            → check thresholds in docs/factor_promotion_checklist.md
+#
+# Iteration log goes in custom_factors/research/<factor>/research_log.md
+# (one line per run: date / what changed / case path / artifact path / one-line conclusion).
+
+name: TODO_factor_v1                 # case identifier; matches output dir
+factor_name: TODO_factor             # method name registered in factor_registry
+factor_path: ./placeholder_factor.csv
+prices_path: ../../../data/processed/real_case_inputs/ashare_institutional_20160418_20260415/prices.parquet
+
+factor_input:
+  mode: recipe
+  disable_pipeline_preprocess: true
+  recipe:
+    base:
+      method: TODO_factor            # must equal factor_name above
+      # window: 20                   # builder kwargs go here
+      # skip_recent: 5
+    preprocess:
+      winsorize:
+        enabled: true
+        lower: 0.01
+        upper: 0.99
+        min_group_size: 5
+      standardization:
+        method: zscore
+        min_group_size: 5
+      min_coverage: 0.2
+
+rebalance_frequency: W
+n_quantiles: 5
+direction: long                       # flip to short if hypothesis predicts negative IC
+
+universe:
+  name: institutional_ashare
+  path: ../../../data/processed/real_case_inputs/ashare_institutional_20160418_20260415/universe_mask.parquet
+  in_universe_column: in_universe
+
+target:
+  kind: forward_return
+  horizon: 5
+
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+
+transaction_cost:
+  one_way_rate: 0.001                 # 10bps single-side; pre-promotion gate also stresses 5/10/20bps
+
+output:
+  root_dir: ../../../outputs/real_cases

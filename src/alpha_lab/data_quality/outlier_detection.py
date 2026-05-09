@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabDataError
@@ -73,16 +72,11 @@ def detect_stale_prices(
     out["close"] = pd.to_numeric(out["close"], errors="coerce")
     out = out.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
 
-    stale_flags = np.zeros(len(out), dtype=bool)
-    for _, idx in out.groupby("asset", sort=False).groups.items():
-        block = out.loc[idx].copy()
-        run_id = block["close"].ne(block["close"].shift(1)).cumsum()
-        run_len = block.groupby(run_id, sort=False)["close"].transform("size")
-        stale_flags[block.index.to_numpy()] = (
-            (run_len >= int(max_identical_days)) & block["close"].notna()
-        ).to_numpy()
-
-    out["is_stale_price"] = stale_flags
+    previous_close = out.groupby("asset", sort=False)["close"].shift(1)
+    run_start = out["close"].ne(previous_close)
+    run_id = run_start.groupby(out["asset"], sort=False).cumsum()
+    run_len = out.groupby([out["asset"], run_id], sort=False)["close"].transform("size")
+    out["is_stale_price"] = (run_len >= int(max_identical_days)) & out["close"].notna()
     return out
 
 

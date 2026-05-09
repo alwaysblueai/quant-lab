@@ -102,6 +102,12 @@ def test_param_and_baseline_sensitivity_do_not_rerun_full_experiment(
     assert metrics["param_sensitivity_n_variants"] == 2
     assert np.isfinite(float(metrics["baseline_momentum_mean_ic"]))
     assert np.isfinite(float(metrics["baseline_reversal_mean_ic"]))
+    assert int(metrics["baseline_suite_count"]) >= 8
+    assert int(metrics["baseline_suite_evaluated_count"]) >= 6
+    assert "mom_20d" in metrics["baseline_suite_evaluated_names"]
+    assert "rev_5d" in metrics["baseline_suite_evaluated_names"]
+    assert metrics["baseline_suite_best_name"]
+    assert np.isfinite(float(metrics["baseline_suite_best_mean_ic"]))
 
 
 def test_lag_sensitivity_reuses_base_run_for_lag_zero(

@@ -5,26 +5,30 @@
 - Workflow: `run-single-factor`
 
 ## Key Metrics
-- `baseline_best_mean_ic`: `0.014597022371948189`
-- `baseline_factor_mean_ic_advantage`: `0.08270353165793118`
-- `baseline_momentum_factor_rank_corr`: `-0.002527472527472529`
-- `baseline_momentum_long_short_ir`: `-0.08264078387125323`
-- `baseline_momentum_mean_ic`: `0.014597022371948189`
-- `baseline_reversal_factor_rank_corr`: `-0.003027560674619492`
-- `baseline_reversal_long_short_ir`: `-0.1437474864483255`
-- `baseline_reversal_mean_ic`: `-0.03268593087552618`
-- `campaign_rank_primary_metric`: `0.3447566292935903`
+- `avg_asset_coverage`: `1.0`
+- `avg_assets`: `11.98125`
+- `avg_valid_forward_return_assets`: `11.60625`
+- `avg_valid_score_assets`: `11.98125`
+- `baseline_best_mean_ic`: `-0.0162902633591915`
+- `baseline_factor_mean_ic_advantage`: `0.09313011448052301`
+- `baseline_momentum_factor_rank_corr`: `-0.002682317682317685`
+- `baseline_momentum_long_short_ir`: `-0.0016934569613127465`
+- `baseline_momentum_mean_ic`: `-0.0162902633591915`
+- `baseline_reversal_factor_rank_corr`: `-0.004967290773742386`
+- `baseline_reversal_long_short_ir`: `-0.13593315866666272`
+- `baseline_reversal_mean_ic`: `-0.031264666877588373`
+- `campaign_rank_primary_metric`: `0.25681515186015913`
 - `campaign_rank_primary_metric_name`: `ic_ir`
 - `campaign_rank_risk_count`: `4`
 - `campaign_rank_rule`: `triage_priority asc, ic_ir desc, mean_long_short_return desc, rolling_positive_share_min desc, risk_count asc, support_count desc`
-- `campaign_rank_secondary_metric`: `0.0038116218543476368`
+- `campaign_rank_secondary_metric`: `0.004855674205640039`
 - `campaign_rank_secondary_metric_name`: `mean_long_short_return`
-- `campaign_rank_stability_metric`: `0.7272727272727273`
+- `campaign_rank_stability_metric`: `0.8048780487804879`
 - `campaign_rank_stability_metric_name`: `rolling_positive_share_min`
 - `campaign_rank_support_count`: `7`
 - `campaign_triage`: `Fragile / monitor`
 - `campaign_triage_priority`: `4`
-- `campaign_triage_reasons`: `['fragile across rolling windows', 'rebalance cadence is slower than IC decay', 'single-case verdict indicates fragility', 'factor performance is regime-dependent', 'confidence intervals remain supportive']`
+- `campaign_triage_reasons`: `['fragile across rolling windows', 'rebalance cadence is slower than IC decay', 'single-case verdict indicates fragility', 'IC decays sharply after 1-day execution lag', 'confidence intervals remain supportive']`
 - `capacity_adv_lookback`: `20`
 - `capacity_enabled`: `True`
 - `capacity_market_cap_column`: `total_mv`
@@ -32,25 +36,38 @@
 - `capacity_participation_rate`: `0.05`
 - `capacity_status`: `available`
 - `case_name`: `demo_bp_single_factor`
-- `conditional_ic_extreme_minus_base_ic`: `0.015894300270508088`
-- `conditional_ic_large_cross_section_mean_ic`: `0.09053318468965867`
-- `conditional_ic_q1_mean_ic`: `0.1337271008223629`
-- `conditional_ic_q5_mean_ic`: `0.14962140109287098`
-- `conditional_ic_small_cross_section_mean_ic`: `0.2822753159959119`
-- `cost_aware_long_short_ir`: `0.12423115133854187`
+- `conditional_ic_extreme_minus_base_ic`: `0.1476174326124033`
+- `conditional_ic_large_cross_section_mean_ic`: `0.06572309336083194`
+- `conditional_ic_q1_mean_ic`: `0.024014895860192047`
+- `conditional_ic_q5_mean_ic`: `0.17163232847259532`
+- `conditional_ic_small_cross_section_mean_ic`: `0.14729331881199312`
+- `cost_aware_long_short_ir`: `0.15228192845432803`
+- `cost_aware_long_short_ir_full`: `0.1832474263797007`
+- `cost_aware_long_short_ir_is`: `0.166497583369963`
+- `cost_aware_long_short_ir_oos`: `0.15228192845432803`
+- `cost_aware_long_short_ir_oos_decay_ratio`: `0.9146194519589673`
+- `coverage_break_days`: `0`
+- `coverage_break_days_ex_warmup`: `0`
+- `coverage_break_days_raw`: `0`
 - `coverage_mean`: `1.0`
+- `coverage_mean_raw`: `1.0`
 - `coverage_min`: `1.0`
-- `coverage_summary`: `n_dates=85; avg_assets=12.0; coverage=99.7%`
-- `daily_pnl_best_day_net`: `0.056095334302644545`
-- `daily_pnl_cost_drag_mean`: `0.0008382352941176471`
-- `daily_pnl_cost_drag_share`: `0.21991564907246341`
-- `daily_pnl_gross_mean`: `0.0038116218543476368`
-- `daily_pnl_long_contribution_ratio`: `0.6116939582201941`
-- `daily_pnl_long_leg_mean`: `0.0023315460593245022`
-- `daily_pnl_n_dates`: `85`
-- `daily_pnl_net_mean`: `0.0029733865602299884`
-- `daily_pnl_short_leg_mean`: `-0.0014800757950231345`
-- `daily_pnl_worst_day_net`: `-0.05853704373410565`
+- `coverage_min_raw`: `1.0`
+- `coverage_summary`: `n_dates=160; avg_assets=12.0; asset_coverage=100.0%; sample_coverage=96.9%`
+- `coverage_warmup_end`: `None`
+- `coverage_warmup_excluded_days`: `0`
+- `coverage_warmup_policy`: `leading dates before first positive scored asset count are excluded from promotion coverage stats`
+- `coverage_warmup_start`: `None`
+- `daily_pnl_best_day_net`: `0.04689825094882241`
+- `daily_pnl_cost_drag_mean`: `0.0008432203389830509`
+- `daily_pnl_cost_drag_share`: `0.17365669591333383`
+- `daily_pnl_gross_mean`: `0.004855674205640039`
+- `daily_pnl_long_contribution_ratio`: `0.6015480586314249`
+- `daily_pnl_long_leg_mean`: `0.002920921391749452`
+- `daily_pnl_n_dates`: `60`
+- `daily_pnl_net_mean`: `0.0037847852715654482`
+- `daily_pnl_short_leg_mean`: `-0.0019347528138905872`
+- `daily_pnl_worst_day_net`: `-0.050859338859460645`
 - `data_quality_hard_fail_count`: `0`
 - `data_quality_integrity_fail_count`: `0`
 - `data_quality_integrity_warn_count`: `0`
@@ -58,89 +75,214 @@
 - `data_quality_status`: `pass`
 - `data_quality_suspected_split_rows`: `0`
 - `data_quality_suspended_rows`: `None`
+- `date_coverage`: `0.96875`
+- `diagnostic_max_dates`: `None`
+- `diagnostic_sample_mode`: `latest`
+- `diagnostic_sampled_dates`: `0`
 - `direction`: `long`
 - `dsr_pvalue`: `None`
-- `equal_weight_mean_long_short_return`: `0.0038116218543476368`
-- `estimated_capacity_upper_bound`: `4951840.693128701`
-- `eval_coverage_ratio_mean`: `0.9970588235294118`
-- `eval_coverage_ratio_min`: `0.9166666666666666`
+- `equal_weight_mean_long_short_return`: `0.004855674205640039`
+- `estimated_capacity_upper_bound`: `7063874.76813311`
+- `eval_coverage_ratio_mean`: `1.0`
+- `eval_coverage_ratio_mean_full`: `0.9983870967741936`
+- `eval_coverage_ratio_mean_is`: `0.9972222222222222`
+- `eval_coverage_ratio_mean_oos`: `1.0`
+- `eval_coverage_ratio_min`: `1.0`
+- `eval_coverage_ratio_min_full`: `0.9166666666666666`
+- `eval_coverage_ratio_min_is`: `0.9166666666666666`
+- `eval_coverage_ratio_min_oos`: `1.0`
 - `factor_name`: `bp`
 - `factor_verdict`: `Promising but fragile`
-- `factor_verdict_reasons`: `['positive IC and RankIC means', 'IC and RankIC signs are consistently positive', 'signal weakens materially in some periods', 'rebalance cadence may be too slow for IC decay', 'factor performance is regime-dependent', 'confidence interval overlaps zero: long-short']`
-- `fama_macbeth_mean_coefficient`: `0.002218787733297004`
-- `fama_macbeth_n_dates`: `85`
-- `fama_macbeth_p_value`: `0.0015902139946054874`
-- `fama_macbeth_t_statistic`: `3.263946440693626`
-- `group_monotonicity_qtop_qbottom`: `0.0038116218543476368`
+- `factor_verdict_reasons`: `['positive IC and RankIC means', 'IC and RankIC signs are consistently positive', 'signal weakens materially in some periods', 'rebalance cadence may be too slow for IC decay', 'confidence interval overlaps zero: long-short', 'apparent edge is weak relative to estimation noise']`
+- `fama_macbeth_mean_coefficient`: `0.0013969655189894166`
+- `fama_macbeth_n_dates`: `155`
+- `fama_macbeth_p_value`: `0.011336470534888187`
+- `fama_macbeth_t_statistic`: `2.5629686853523177`
+- `group_monotonicity_qtop_qbottom`: `0.004855674205640039`
 - `group_monotonicity_share`: `0.0`
-- `group_monotonicity_summary`: `Q5-Q1=0.003812; monotonic_share=0.0%`
-- `haircut_sharpe_adjusted`: `0.1640554861329143`
+- `group_monotonicity_summary`: `Q5-Q1=0.004856; monotonic_share=0.0%`
+- `haircut_sharpe_adjusted`: `0.19637844148848294`
 - `haircut_sharpe_expected_max`: `0.0`
 - `haircut_sharpe_n_trials_assumed`: `1`
-- `haircut_sharpe_observed`: `0.1640554861329143`
+- `haircut_sharpe_observed`: `0.19637844148848294`
 - `haircut_sharpe_ratio`: `1.0`
-- `ic_decay_half_life_summary`: `half_life=2.59; status=estimated`
+- `ic_decay_half_life_summary`: `half_life=4.03; status=estimated`
 - `ic_decay_mismatch_flag`: `True`
-- `ic_decay_rebalance_ratio`: `1.9335686999357777`
-- `ic_decay_retention_5_over_1`: `0.5365472328419353`
-- `ic_half_life_horizon`: `2.585892086568257`
+- `ic_decay_rebalance_ratio`: `1.2412654471994005`
+- `ic_decay_retention_5_over_1`: `0.4396349333648408`
+- `ic_half_life_horizon`: `4.028147251888166`
 - `ic_half_life_not_reached`: `False`
 - `ic_half_life_status`: `estimated`
-- `ic_ir`: `0.3447566292935903`
-- `ic_p_value`: `0.002072787857294328`
-- `ic_positive_rate`: `0.6352941176470588`
-- `ic_t_stat`: `3.178499070718699`
-- `ic_valid_ratio`: `0.9444444444444444`
+- `ic_ir`: `0.25681515186015913`
+- `ic_ir_full`: `0.21782703249841445`
+- `ic_ir_is`: `0.18623709878817735`
+- `ic_ir_oos`: `0.25681515186015913`
+- `ic_ir_oos_decay_ratio`: `1.3789688173367431`
+- `ic_p_value`: `0.05131269708964412`
+- `ic_p_value_full`: `0.007450056198902972`
+- `ic_p_value_is`: `0.08068998045757611`
+- `ic_p_value_oos`: `0.05131269708964412`
+- `ic_positive_rate`: `0.6333333333333333`
+- `ic_positive_rate_full`: `0.5612903225806452`
+- `ic_positive_rate_is`: `0.5`
+- `ic_positive_rate_oos`: `0.6333333333333333`
+- `ic_t_stat`: `1.9892816124162498`
+- `ic_t_stat_full`: `2.7119246843330886`
+- `ic_t_stat_is`: `1.7668002509772742`
+- `ic_t_stat_oos`: `1.9892816124162498`
+- `ic_valid_ratio`: `0.9230769230769231`
+- `ic_valid_ratio_full`: `0.96875`
+- `ic_valid_ratio_is`: `1.0`
+- `ic_valid_ratio_oos`: `0.9230769230769231`
 - `instability_flags`: `[]`
-- `lag_sensitivity_ic_decay_lag_1`: `0.30520800512280616`
+- `is_end`: `2024-05-03`
+- `is_start`: `2024-01-01`
+- `lag_sensitivity_ic_decay_lag_1`: `0.0987376642163248`
 - `lag_sensitivity_lags`: `[0, 1, 2, 3]`
-- `lag_sensitivity_long_short_ir_lag_0`: `0.1640554861329143`
-- `lag_sensitivity_long_short_ir_lag_1`: `0.0004306623896462768`
-- `lag_sensitivity_long_short_ir_lag_2`: `-0.008457107003550929`
-- `lag_sensitivity_long_short_ir_lag_3`: `0.04545528733918107`
-- `lag_sensitivity_mean_ic_lag_0`: `0.09730055402987936`
-- `lag_sensitivity_mean_ic_lag_1`: `0.029696907992803296`
-- `lag_sensitivity_mean_ic_lag_2`: `0.025398927422089834`
-- `lag_sensitivity_mean_ic_lag_3`: `0.022725736149364763`
+- `lag_sensitivity_long_short_ir_lag_0`: `0.19637844148848294`
+- `lag_sensitivity_long_short_ir_lag_1`: `0.0892436774936275`
+- `lag_sensitivity_long_short_ir_lag_2`: `0.0505178605929629`
+- `lag_sensitivity_long_short_ir_lag_3`: `0.14862860757057358`
+- `lag_sensitivity_mean_ic_lag_0`: `0.07683985112133151`
+- `lag_sensitivity_mean_ic_lag_1`: `0.007586987418450419`
+- `lag_sensitivity_mean_ic_lag_2`: `-0.010558785783422934`
+- `lag_sensitivity_mean_ic_lag_3`: `0.016982044925554537`
 - `level12_transition_confirmation_note`: `No clear confirmation or degradation can be established yet.`
 - `level12_transition_interpretation`: `Transition cannot be concluded because portfolio-level evaluation is absent.`
 - `level12_transition_label`: `Inconclusive transition`
-- `level12_transition_reasons`: `['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: factor verdict is not yet strong', 'fragility: blocked by unstable rolling evidence']`
-- `level12_transition_summary`: `{'confirmation_vs_degradation_note': 'No clear confirmation or degradation can be established yet.', 'key_transition_reasons': ['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: factor verdict is not yet strong', 'fragility: blocked by unstable rolling evidence'], 'level1_status': 'Promising but fragile', 'level2_status': 'Not evaluated (not promoted)', 'transition_interpretation': 'Transition cannot be concluded because portfolio-level evaluation is absent.', 'transition_label': 'Inconclusive transition'}`
-- `long_short_hit_rate`: `0.6`
-- `long_short_ir`: `0.1640554861329143`
-- `long_short_return_per_turnover`: `0.004493701554599319`
-- `ls_calmar_ratio`: `0.1933395676049497`
-- `ls_cvar_5`: `-0.022082987490138872`
-- `ls_max_consecutive_loss_days`: `3`
-- `ls_max_drawdown`: `0.03362138278908777`
-- `ls_max_drawdown_duration`: `3`
-- `ls_var_5`: `-0.018720849204737343`
+- `level12_transition_reasons`: `['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by sharp IC decay under 1-day execution lag', 'fragility: blocked by unstable rolling evidence']`
+- `level12_transition_summary`: `{'confirmation_vs_degradation_note': 'No clear confirmation or degradation can be established yet.', 'key_transition_reasons': ['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by sharp IC decay under 1-day execution lag', 'fragility: blocked by unstable rolling evidence'], 'level1_status': 'Promising but fragile', 'level2_status': 'Not evaluated (not promoted)', 'transition_interpretation': 'Transition cannot be concluded because portfolio-level evaluation is absent.', 'transition_label': 'Inconclusive transition'}`
+- `long_short_hit_rate`: `0.5666666666666667`
+- `long_short_hit_rate_full`: `0.5806451612903226`
+- `long_short_hit_rate_is`: `0.5888888888888889`
+- `long_short_hit_rate_oos`: `0.5666666666666667`
+- `long_short_ir`: `0.19637844148848294`
+- `long_short_ir_full`: `0.21193560388506275`
+- `long_short_ir_is`: `0.1919071113960219`
+- `long_short_ir_oos`: `0.19637844148848294`
+- `long_short_ir_oos_decay_ratio`: `1.023299449717806`
+- `long_short_return_per_turnover`: `0.005758488002668589`
+- `long_short_return_per_turnover_full`: `0.006206207815923382`
+- `long_short_return_per_turnover_is`: `0.005538213183747668`
+- `long_short_return_per_turnover_oos`: `0.005758488002668589`
+- `ls_calmar_ratio`: `0.01909812735956034`
+- `ls_calmar_ratio_full`: `0.08584917063079915`
+- `ls_calmar_ratio_is`: `0.2354570597209603`
+- `ls_calmar_ratio_oos`: `0.01909812735956034`
+- `ls_cvar_5`: `-0.04862079806655534`
+- `ls_cvar_5_full`: `-0.041255270422569906`
+- `ls_cvar_5_is`: `-0.033889742778584475`
+- `ls_cvar_5_oos`: `-0.04862079806655534`
+- `ls_max_consecutive_loss_days`: `4`
+- `ls_max_consecutive_loss_days_full`: `4`
+- `ls_max_consecutive_loss_days_is`: `2`
+- `ls_max_consecutive_loss_days_oos`: `4`
+- `ls_max_drawdown`: `0.07972114864601898`
+- `ls_max_drawdown_duration`: `4`
+- `ls_max_drawdown_duration_full`: `4`
+- `ls_max_drawdown_duration_is`: `1`
+- `ls_max_drawdown_duration_oos`: `4`
+- `ls_max_drawdown_full`: `0.07972114864601898`
+- `ls_max_drawdown_is`: `0.033889742778584364`
+- `ls_max_drawdown_oos`: `0.07972114864601898`
+- `ls_var_5`: `-0.032851958407304566`
+- `ls_var_5_full`: `-0.030025188836016736`
+- `ls_var_5_is`: `-0.02732000107621932`
+- `ls_var_5_oos`: `-0.032851958407304566`
 - `marginal_flags`: `[]`
-- `market_cap_vs_equal_weight_return_delta`: `-0.0004325394609887693`
-- `market_cap_weighted_mean_long_short_return`: `0.0033790823933588674`
-- `max_drawdown`: `0.03362138278908777`
-- `mean_cost_adjusted_long_short_return`: `0.0028993383304897957`
-- `mean_eval_assets_per_date`: `11.964705882352941`
-- `mean_ic`: `0.09730055402987936`
-- `mean_ic_ci_lower`: `0.03730192658612926`
-- `mean_ic_ci_upper`: `0.15729918147362945`
-- `mean_long_short_return`: `0.0038116218543476368`
-- `mean_long_short_return_ci_lower`: `-0.0011275902726123857`
-- `mean_long_short_return_ci_upper`: `0.00875083398130766`
-- `mean_long_short_turnover`: `0.8482142857142857`
-- `mean_mutual_information`: `0.23099717560721394`
-- `mean_rank_ic`: `0.07692307692307693`
-- `mean_rank_ic_ci_lower`: `0.016845816558106165`
-- `mean_rank_ic_ci_upper`: `0.1370003372880477`
-- `mean_traded_adv`: `84004440.3298619`
-- `min_eval_assets_per_date`: `11.0`
+- `market_cap_vs_equal_weight_return_delta`: `-0.00019983279993483066`
+- `market_cap_weighted_mean_long_short_return`: `0.004655841405705208`
+- `max_asset_coverage`: `1.0`
+- `max_drawdown`: `0.07972114864601898`
+- `max_drawdown_full`: `0.07972114864601898`
+- `max_drawdown_is`: `0.033889742778584364`
+- `max_drawdown_oos`: `0.07972114864601898`
+- `max_drawdown_oos_decay_ratio`: `2.352368065077096`
+- `mean_asset_coverage`: `1.0`
+- `mean_cost_adjusted_long_short_return`: `0.0037847852715654482`
+- `mean_cost_adjusted_long_short_return_full`: `0.004548438953162322`
+- `mean_cost_adjusted_long_short_return_is`: `0.0040800400527835215`
+- `mean_cost_adjusted_long_short_return_oos`: `0.0037847852715654482`
+- `mean_cost_adjusted_long_short_return_oos_decay_ratio`: `0.927634342457829`
+- `mean_eval_assets_per_date`: `12.0`
+- `mean_eval_assets_per_date_full`: `11.980645161290322`
+- `mean_eval_assets_per_date_is`: `11.966666666666667`
+- `mean_eval_assets_per_date_oos`: `12.0`
+- `mean_ic`: `0.07683985112133151`
+- `mean_ic_ci_lower`: `0.0011324501001651749`
+- `mean_ic_ci_lower_full`: `0.01866141895354638`
+- `mean_ic_ci_lower_is`: `-0.006348247234097777`
+- `mean_ic_ci_lower_oos`: `0.0011324501001651749`
+- `mean_ic_ci_upper`: `0.15254725214249787`
+- `mean_ic_ci_upper_full`: `0.115942324882356`
+- `mean_ic_ci_upper_is`: `0.12247858494911665`
+- `mean_ic_ci_upper_oos`: `0.15254725214249787`
+- `mean_ic_full`: `0.06730187191795119`
+- `mean_ic_is`: `0.05806516885750943`
+- `mean_ic_oos`: `0.07683985112133151`
+- `mean_ic_oos_decay_ratio`: `1.323338115314789`
+- `mean_long_short_return`: `0.004855674205640039`
+- `mean_long_short_return_ci_lower`: `-0.0014007789414287658`
+- `mean_long_short_return_ci_lower_full`: `0.001352597287959537`
+- `mean_long_short_return_ci_lower_is`: `-0.000359661361175977`
+- `mean_long_short_return_ci_lower_oos`: `-0.0014007789414287658`
+- `mean_long_short_return_ci_upper`: `0.011112127352708844`
+- `mean_long_short_return_ci_upper_full`: `0.009165715958508012`
+- `mean_long_short_return_ci_upper_is`: `0.009755955639219773`
+- `mean_long_short_return_ci_upper_oos`: `0.011112127352708844`
+- `mean_long_short_return_full`: `0.0052591566232337746`
+- `mean_long_short_return_is`: `0.004698147139021898`
+- `mean_long_short_return_oos`: `0.004855674205640039`
+- `mean_long_short_return_oos_decay_ratio`: `1.0335296153902358`
+- `mean_long_short_turnover`: `0.8432203389830508`
+- `mean_long_short_turnover_full`: `0.8474025974025974`
+- `mean_long_short_turnover_is`: `0.848314606741573`
+- `mean_long_short_turnover_oos`: `0.8432203389830508`
+- `mean_mutual_information`: `0.23690643120849905`
+- `mean_mutual_information_full`: `0.23661109836738692`
+- `mean_mutual_information_is`: `0.23584881154110734`
+- `mean_mutual_information_oos`: `0.23690643120849905`
+- `mean_rank_ic`: `0.08822843822843823`
+- `mean_rank_ic_ci_lower`: `0.009537656114223803`
+- `mean_rank_ic_ci_lower_full`: `0.01622116528231296`
+- `mean_rank_ic_ci_lower_is`: `-0.016516445815432913`
+- `mean_rank_ic_ci_lower_oos`: `0.009537656114223803`
+- `mean_rank_ic_ci_upper`: `0.16691922034265266`
+- `mean_rank_ic_ci_upper_full`: `0.11396606684040303`
+- `mean_rank_ic_ci_upper_is`: `0.11065785995684704`
+- `mean_rank_ic_ci_upper_oos`: `0.16691922034265266`
+- `mean_rank_ic_full`: `0.065093616061358`
+- `mean_rank_ic_is`: `0.04707070707070706`
+- `mean_rank_ic_oos`: `0.08822843822843823`
+- `mean_rank_ic_oos_decay_ratio`: `1.8743809838230443`
+- `mean_traded_adv`: `119128057.53038041`
+- `median_asset_coverage`: `1.0`
+- `metric_scope`: `oos`
+- `min_asset_coverage`: `1.0`
+- `min_eval_assets_per_date`: `12.0`
+- `min_eval_assets_per_date_full`: `11.0`
+- `min_eval_assets_per_date_is`: `11.0`
+- `min_eval_assets_per_date_oos`: `12.0`
 - `missingness_mean`: `0.0`
-- `mutual_information_ir`: `1.6943697396097224`
+- `mutual_information_ir`: `1.7514325871856538`
+- `mutual_information_ir_full`: `1.67263224509014`
+- `mutual_information_ir_is`: `1.5980664091091141`
+- `mutual_information_ir_oos`: `1.7514325871856538`
 - `mutual_information_positive_rate`: `1.0`
-- `mutual_information_valid_ratio`: `0.9444444444444444`
-- `n_dates_used`: `85`
+- `mutual_information_positive_rate_full`: `1.0`
+- `mutual_information_positive_rate_is`: `1.0`
+- `mutual_information_positive_rate_oos`: `1.0`
+- `mutual_information_valid_ratio`: `0.9230769230769231`
+- `mutual_information_valid_ratio_full`: `0.96875`
+- `mutual_information_valid_ratio_is`: `1.0`
+- `mutual_information_valid_ratio_oos`: `0.9230769230769231`
+- `n_coverage_dates`: `160`
+- `n_dates_used`: `60`
+- `n_dates_used_full`: `155`
+- `n_dates_used_is`: `90`
+- `n_dates_used_oos`: `60`
 - `n_quantiles`: `5`
+- `n_valid_coverage_dates`: `155`
 - `neutralization_comparison`: `{'delta': {}, 'interpretation_flags': [], 'interpretation_reasons': [], 'neutralized': {}, 'raw': {}}`
 - `neutralization_comparison_flags`: `[]`
 - `neutralization_comparison_reasons`: `[]`
@@ -167,12 +309,15 @@
 - `next_open_mean_ic_delta`: `None`
 - `next_open_mean_long_short_return`: `None`
 - `next_open_mean_long_short_return_delta`: `None`
-- `param_sensitivity_long_short_ir_max`: `0.278022401141339`
-- `param_sensitivity_long_short_ir_min`: `0.2295040531739048`
-- `param_sensitivity_long_short_ir_range`: `0.04851834796743423`
-- `param_sensitivity_long_short_ir_std`: `0.03430765285974129`
-- `param_sensitivity_mean_ic_max`: `0.09730055402987936`
-- `param_sensitivity_mean_ic_min`: `0.09730055402987936`
+- `oos_end`: `2024-08-09`
+- `oos_start`: `2024-05-13`
+- `overall_sample_coverage`: `0.9687010954616588`
+- `param_sensitivity_long_short_ir_max`: `0.23968661925241366`
+- `param_sensitivity_long_short_ir_min`: `0.1152978321368096`
+- `param_sensitivity_long_short_ir_range`: `0.12438878711560407`
+- `param_sensitivity_long_short_ir_std`: `0.08795615487301349`
+- `param_sensitivity_mean_ic_max`: `0.06730187191795119`
+- `param_sensitivity_mean_ic_min`: `0.06730187191795119`
 - `param_sensitivity_mean_ic_range`: `0.0`
 - `param_sensitivity_mean_ic_std`: `0.0`
 - `param_sensitivity_n_quantiles_grid`: `[3, 10]`
@@ -192,49 +337,108 @@
 - `portfolio_validation_benchmark_tracking_error`: `None`
 - `portfolio_validation_concentration_turnover_note`: `Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.`
 - `portfolio_validation_cost_sensitivity_note`: `Cost sensitivity is inconclusive because portfolio validation did not complete.`
-- `portfolio_validation_fragility_reasons`: `['blocked by unstable rolling evidence']`
-- `portfolio_validation_major_risks`: `['blocked by unstable rolling evidence']`
+- `portfolio_validation_fragility_reasons`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
+- `portfolio_validation_major_risks`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
 - `portfolio_validation_recommendation`: `Not evaluated (not promoted)`
 - `portfolio_validation_remains_credible`: `None`
 - `portfolio_validation_robustness_label`: `Inconclusive portfolio evidence`
 - `portfolio_validation_scenario_sensitivity_notes`: `['Sensitivity diagnostics are inconclusive because portfolio validation did not complete.']`
 - `portfolio_validation_status`: `skipped_not_promoted`
 - `portfolio_validation_support_reasons`: `[]`
-- `promotion_blockers`: `['blocked by unstable rolling evidence']`
+- `primary_metric_scope`: `oos`
+- `promotion_blockers`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
 - `promotion_decision`: `Blocked from Level 2`
-- `promotion_reasons`: `['blocked by unstable rolling evidence', 'factor verdict is not yet strong', 'factor performance is regime-dependent', 'neutralization evidence is unavailable', 'IC decays materially under 1-day execution lag', 'uncertainty remains supportive']`
-- `random_baseline_mean_ic_mean`: `0.0006624434389140277`
-- `random_baseline_mean_ic_p95`: `0.05108227067050596`
-- `random_baseline_mean_ic_p99`: `0.058646153846153834`
-- `random_baseline_mean_ic_std`: `0.03111064340088855`
+- `promotion_reasons`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag', 'factor verdict is not yet strong', 'neutralization evidence is unavailable', 'uncertainty remains supportive', 'robust across subperiods']`
+- `random_baseline_mean_ic_mean`: `0.0009922851342206165`
+- `random_baseline_mean_ic_p95`: `0.034118655538010384`
+- `random_baseline_mean_ic_p99`: `0.051700338371306095`
+- `random_baseline_mean_ic_std`: `0.021400786480771265`
 - `random_baseline_n_permutations`: `50`
-- `random_baseline_observed_z_score`: `2.4512714990003976`
+- `random_baseline_observed_mean_rank_ic`: `0.065093616061358`
+- `random_baseline_observed_z_score`: `2.995279214842539`
 - `random_baseline_p_value`: `0.0196078431372549`
-- `rank_ic_ir`: `0.27219814176419727`
-- `rank_ic_positive_rate`: `0.6588235294117647`
-- `rank_ic_valid_ratio`: `0.9444444444444444`
+- `rank_ic_ir`: `0.28369860197339564`
+- `rank_ic_ir_full`: `0.20967976541159616`
+- `rank_ic_ir_is`: `0.15293545464929126`
+- `rank_ic_ir_oos`: `0.28369860197339564`
+- `rank_ic_ir_oos_decay_ratio`: `1.8550217974240701`
+- `rank_ic_positive_rate`: `0.6666666666666666`
+- `rank_ic_positive_rate_full`: `0.6193548387096774`
+- `rank_ic_positive_rate_is`: `0.5777777777777777`
+- `rank_ic_positive_rate_oos`: `0.6666666666666666`
+- `rank_ic_valid_ratio`: `0.9230769230769231`
+- `rank_ic_valid_ratio_full`: `0.96875`
+- `rank_ic_valid_ratio_is`: `1.0`
+- `rank_ic_valid_ratio_oos`: `0.9230769230769231`
 - `rebalance_frequency`: `W`
 - `rebalance_step_dates`: `5`
-- `regime_flags`: `['regime_bull_negative_ls', 'regime_conditional_weakness']`
+- `regime_flags`: `[]`
+- `report_metric_scope`: `full_sample_with_oos_parentheses`
+- `report_split_phase_column`: `split_phase`
+- `report_timeseries_scope`: `full_path_split_by_phase`
 - `research_evaluation_profile`: `default_research`
-- `research_evaluation_snapshot`: `{'campaign_triage': {'ic_decay_block_rebalance_ratio': 2.0, 'ic_decay_warn_rebalance_ratio': 1.0, 'min_coverage_mean_fail': 0.5, 'min_rolling_positive_share_stable': 0.6, 'min_subperiod_positive_share_fail': 0.5}, 'factor_verdict': {'ic_decay_block_rebalance_ratio': 2.0, 'ic_decay_warn_rebalance_ratio': 1.0, 'min_eval_dates_basic': 20, 'min_rolling_positive_share_regime_warning': 0.5, 'min_subperiod_share_fail': 0.5, 'min_valid_ratio_fail': 0.6}, 'level2_portfolio_validation': {'default_weighting_method': 'rank', 'holding_period_grid': [1, 3, 5], 'max_benchmark_relative_drawdown_warn': 0.0, 'max_benchmark_tracking_error_warn': 0.05, 'max_mean_turnover_warn': 0.8, 'max_single_name_weight_warn': 0.2, 'min_benchmark_excess_return_warn': 0.0, 'min_benchmark_information_ratio_warn': 0.0, 'min_cost_adjusted_return_warn': 0.0, 'min_effective_names_warn': 8.0, 'review_cost_rate': 0.001, 'robustness_fragile_min_severe_signal_count': 2, 'robustness_needs_refinement_implies_sensitive': True, 'robustness_sensitive_min_material_signal_count': 1, 'robustness_sensitive_min_severe_signal_count': 1, 'sensitivity_material_spread_ratio_warn': 0.75, 'sensitivity_sign_flip_pivot_return': 0.0, 'sensitivity_stable_spread_ratio_max': 0.25, 'transaction_cost_grid': [0.0, 0.0005, 0.001, 0.002]}, 'level2_promotion': {'min_coverage_mean_block': 0.5, 'min_rolling_positive_share_promote': 0.6, 'min_subperiod_positive_share_block': 0.5, 'min_valid_ratio_block': 0.6}, 'neutralization_comparison': {'exposure_corr_reduction_threshold': 0.2, 'material_max_retention': 0.35, 'preserve_min_retention': 0.75}, 'profile_intent': 'Balanced Level 1/2 baseline for routine research, triage, promotion, and portfolio-validation checks.', 'profile_name': 'default_research', 'rolling_stability': {'rolling_regime_min_positive_share': 0.6, 'rolling_regime_sign_flip_threshold': 0.45, 'rolling_window_size': 20}, 'single_factor_diagnostics': {'compute_capacity_estimation': True, 'compute_conditional_ic': True, 'compute_factor_autocorrelation': True, 'compute_ic_decay': True, 'run_baseline_comparison': True, 'run_execution_price_sensitivity': True, 'run_lag_sensitivity': True, 'run_marginal_contribution': True, 'run_neutralization_raw_comparison': True, 'run_param_sensitivity': True, 'run_random_baseline': True, 'run_tradability_checks': True}, 'uncertainty': {'block_bootstrap_block_length': 5, 'bootstrap_confidence_level': None, 'bootstrap_random_seed': 7, 'bootstrap_resamples': 400, 'confidence_level': 0.95, 'method': 'normal', 'normal_small_sample_threshold': 30, 'normal_small_sample_use_t': True, 'relative_half_width_warn': 1.0}}`
-- `rolling_ic_min_mean`: `-0.06348490151809218`
-- `rolling_ic_positive_share`: `0.7727272727272727`
+- `research_evaluation_snapshot`: `{'campaign_triage': {'ic_decay_block_rebalance_ratio': 2.0, 'ic_decay_warn_rebalance_ratio': 1.0, 'min_coverage_mean_fail': 0.5, 'min_rolling_positive_share_stable': 0.6, 'min_subperiod_positive_share_fail': 0.5}, 'factor_verdict': {'ic_decay_block_rebalance_ratio': 2.0, 'ic_decay_warn_rebalance_ratio': 1.0, 'min_eval_dates_basic': 20, 'min_rolling_positive_share_regime_warning': 0.5, 'min_subperiod_share_fail': 0.5, 'min_valid_ratio_fail': 0.6}, 'level2_portfolio_validation': {'default_weighting_method': 'rank', 'holding_period_grid': [1, 3, 5], 'max_benchmark_relative_drawdown_warn': 0.0, 'max_benchmark_tracking_error_warn': 0.05, 'max_mean_turnover_warn': 0.8, 'max_single_name_weight_warn': 0.2, 'min_benchmark_excess_return_warn': 0.0, 'min_benchmark_information_ratio_warn': 0.0, 'min_cost_adjusted_return_warn': 0.0, 'min_effective_names_warn': 8.0, 'review_cost_rate': 0.001, 'robustness_fragile_min_severe_signal_count': 2, 'robustness_needs_refinement_implies_sensitive': True, 'robustness_sensitive_min_material_signal_count': 1, 'robustness_sensitive_min_severe_signal_count': 1, 'sensitivity_material_spread_ratio_warn': 0.75, 'sensitivity_sign_flip_pivot_return': 0.0, 'sensitivity_stable_spread_ratio_max': 0.25, 'transaction_cost_grid': [0.0, 0.0005, 0.001, 0.002]}, 'level2_promotion': {'min_coverage_mean_block': 0.5, 'min_rolling_positive_share_promote': 0.6, 'min_subperiod_positive_share_block': 0.5, 'min_valid_ratio_block': 0.6}, 'model_factor_overrides': {'min_retrain_every_n_dates': None}, 'neutralization_comparison': {'exposure_corr_reduction_threshold': 0.2, 'material_max_retention': 0.35, 'preserve_min_retention': 0.75}, 'profile_intent': 'Balanced Level 1/2 baseline for routine research, triage, promotion, and portfolio-validation checks.', 'profile_name': 'default_research', 'rolling_stability': {'rolling_regime_min_positive_share': 0.6, 'rolling_regime_sign_flip_threshold': 0.45, 'rolling_window_size': 20}, 'single_factor_diagnostics': {'compute_capacity_estimation': True, 'compute_conditional_ic': True, 'compute_factor_autocorrelation': True, 'compute_ic_decay': True, 'diagnostic_max_dates': None, 'diagnostic_sample_mode': 'latest', 'run_baseline_comparison': True, 'run_execution_price_sensitivity': True, 'run_lag_sensitivity': True, 'run_marginal_contribution': True, 'run_neutralization_raw_comparison': True, 'run_param_sensitivity': True, 'run_random_baseline': True, 'run_tradability_checks': True}, 'uncertainty': {'block_bootstrap_block_length': 5, 'bootstrap_confidence_level': None, 'bootstrap_random_seed': 7, 'bootstrap_resamples': 400, 'confidence_level': 0.95, 'method': 'normal', 'normal_small_sample_threshold': 30, 'normal_small_sample_use_t': True, 'relative_half_width_warn': 1.0}}`
+- `rolling_ic_min_mean`: `-0.03260620568455356`
+- `rolling_ic_min_mean_full`: `-0.06835831318881588`
+- `rolling_ic_min_mean_is`: `-0.06835831318881588`
+- `rolling_ic_min_mean_oos`: `-0.03260620568455356`
+- `rolling_ic_positive_share`: `0.9512195121951219`
+- `rolling_ic_positive_share_full`: `0.8529411764705882`
+- `rolling_ic_positive_share_is`: `0.7464788732394366`
+- `rolling_ic_positive_share_oos`: `0.9512195121951219`
 - `rolling_instability_flags`: `[]`
-- `rolling_long_short_min_mean`: `-0.010312292735265516`
-- `rolling_long_short_positive_share`: `0.7272727272727273`
-- `rolling_rank_ic_min_mean`: `-0.04090909090909091`
-- `rolling_rank_ic_positive_share`: `0.8787878787878788`
+- `rolling_long_short_min_mean`: `-0.003105630716140792`
+- `rolling_long_short_min_mean_full`: `-0.003105630716140792`
+- `rolling_long_short_min_mean_is`: `-0.0019436068217610764`
+- `rolling_long_short_min_mean_oos`: `-0.003105630716140792`
+- `rolling_long_short_positive_share`: `0.8048780487804879`
+- `rolling_long_short_positive_share_full`: `0.875`
+- `rolling_long_short_positive_share_is`: `0.9014084507042254`
+- `rolling_long_short_positive_share_oos`: `0.8048780487804879`
+- `rolling_rank_ic_min_mean`: `-0.030069930069930063`
+- `rolling_rank_ic_min_mean_full`: `-0.07097902097902098`
+- `rolling_rank_ic_min_mean_is`: `-0.07097902097902098`
+- `rolling_rank_ic_min_mean_oos`: `-0.030069930069930063`
+- `rolling_rank_ic_positive_share`: `0.9512195121951219`
+- `rolling_rank_ic_positive_share_full`: `0.8014705882352942`
+- `rolling_rank_ic_positive_share_is`: `0.647887323943662`
+- `rolling_rank_ic_positive_share_oos`: `0.9512195121951219`
 - `rolling_window_size`: `20`
+- `sample_coverage`: `0.9687010954616588`
 - `single_factor_diagnostics_mode`: `full`
 - `single_factor_skipped_diagnostics`: `[]`
 - `spanning_is_spanned`: `None`
 - `spanning_r_squared_increment`: `None`
-- `split_description`: `full_sample`
-- `subperiod_ic_min_mean`: `0.027185753350642432`
+- `split_contract`: `{'embargo_days': 5, 'is_end': '2024-05-03', 'is_start': '2024-01-01', 'min_is_dates': 60, 'min_oos_dates': 60, 'n_dates': 160, 'n_is_dates': 90, 'n_oos_dates': 65, 'oos_end': '2024-08-09', 'oos_start': '2024-05-13', 'policy': 'auto_holdout_v1', 'rebalance_step': 5, 'source': 'single_factor_pipeline', 'target_horizon': 5}`
+- `split_description`: `train<=2024-05-03 / test>=2024-05-13`
+- `split_embargo_days`: `5`
+- `split_min_is_dates`: `60`
+- `split_min_oos_dates`: `60`
+- `split_n_dates`: `160`
+- `split_n_is_dates`: `90`
+- `split_n_oos_dates`: `65`
+- `split_policy`: `auto_holdout_v1`
+- `split_rebalance_step`: `5`
+- `split_semantics`: `factor_time_series_holdout`
+- `split_semantics_label`: `Alpha-Lab: IS/OOS = 因子时序样本内/外`
+- `split_source`: `single_factor_pipeline`
+- `split_target_horizon`: `5`
+- `subperiod_ic_min_mean`: `0.01233337789648736`
+- `subperiod_ic_min_mean_full`: `0.020978776273248186`
+- `subperiod_ic_min_mean_is`: `-0.006177553587317808`
+- `subperiod_ic_min_mean_oos`: `0.01233337789648736`
 - `subperiod_ic_positive_share`: `1.0`
-- `subperiod_long_short_min_mean`: `-0.0023788837932478984`
-- `subperiod_long_short_positive_share`: `0.6666666666666666`
+- `subperiod_ic_positive_share_full`: `1.0`
+- `subperiod_ic_positive_share_is`: `0.6666666666666666`
+- `subperiod_ic_positive_share_oos`: `1.0`
+- `subperiod_long_short_min_mean`: `0.0005651772012083278`
+- `subperiod_long_short_min_mean_full`: `0.004490877145716456`
+- `subperiod_long_short_min_mean_is`: `-0.0009005109808366478`
+- `subperiod_long_short_min_mean_oos`: `0.0005651772012083278`
+- `subperiod_long_short_positive_share`: `1.0`
+- `subperiod_long_short_positive_share_full`: `1.0`
+- `subperiod_long_short_positive_share_is`: `0.6666666666666666`
+- `subperiod_long_short_positive_share_oos`: `1.0`
 - `target_horizon`: `5`
 - `target_kind`: `forward_return`
 - `tradability_filter_applied`: `False`
@@ -244,7 +448,7 @@
 - `tradability_limit_down_rows`: `0`
 - `tradability_limit_up_rows`: `0`
 - `tradability_long_short_return_delta`: `None`
-- `tradability_total_rows`: `1077`
+- `tradability_total_rows`: `1917`
 - `tradability_untradable_rate`: `0.0`
 - `tradability_untradable_rows`: `0`
 - `transaction_cost_one_way_rate`: `0.001`
@@ -266,29 +470,30 @@
 - Reason: IC and RankIC signs are consistently positive
 - Reason: signal weakens materially in some periods
 - Reason: rebalance cadence may be too slow for IC decay
-- Reason: factor performance is regime-dependent
 - Reason: confidence interval overlaps zero: long-short
+- Reason: apparent edge is weak relative to estimation noise
 
 ## Campaign Triage
 - Triage: `Fragile / monitor`
 - Priority: 4
-- Ranking metrics (ICIR / L-S / rolling+ min): 0.344757 / 0.003812 / 0.727273
+- Ranking metrics (ICIR / L-S / rolling+ min): 0.256815 / 0.004856 / 0.804878
 - Support/Risk count: 7 / 4
 - Reason: fragile across rolling windows
 - Reason: rebalance cadence is slower than IC decay
 - Reason: single-case verdict indicates fragility
-- Reason: factor performance is regime-dependent
+- Reason: IC decays sharply after 1-day execution lag
 - Reason: confidence intervals remain supportive
 
 ## Level 2 Promotion Gate
 - Decision: `Blocked from Level 2`
 - Reason: blocked by unstable rolling evidence
+- Reason: blocked by sharp IC decay under 1-day execution lag
 - Reason: factor verdict is not yet strong
-- Reason: factor performance is regime-dependent
 - Reason: neutralization evidence is unavailable
-- Reason: IC decays materially under 1-day execution lag
 - Reason: uncertainty remains supportive
+- Reason: robust across subperiods
 - Blocker: blocked by unstable rolling evidence
+- Blocker: blocked by sharp IC decay under 1-day execution lag
 
 ## Level 1 to Level 2 Transition
 - Transition label: `Inconclusive transition`
@@ -300,7 +505,7 @@
 - Transition reason: promotion decision: Blocked from Level 2
 - Transition reason: portfolio recommendation: Not evaluated (not promoted)
 - Transition reason: promotion reason: blocked by unstable rolling evidence
-- Transition reason: promotion reason: factor verdict is not yet strong
+- Transition reason: promotion reason: blocked by sharp IC decay under 1-day execution lag
 - Transition reason: fragility: blocked by unstable rolling evidence
 
 ## Level 2 Portfolio Validation
@@ -311,10 +516,12 @@
 - Portfolio robustness taxonomy: `Inconclusive portfolio evidence`
 - Scenario sensitivity: Sensitivity diagnostics are inconclusive because portfolio validation did not complete.
 - Robustness fragility: blocked by unstable rolling evidence
+- Robustness fragility: blocked by sharp IC decay under 1-day execution lag
 - Benchmark-relative support note: Benchmark-relative support is unavailable in current case evidence.
 - Cost sensitivity note: Cost sensitivity is inconclusive because portfolio validation did not complete.
 - Concentration/turnover note: Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.
 - Risk: blocked by unstable rolling evidence
+- Risk: blocked by sharp IC decay under 1-day execution lag
 - Caveat: Portfolio validation skipped because promotion gate was not passed.
 - Benchmark-relative evaluation status: not_available
 - Benchmark-relative assessment: N/A
@@ -323,15 +530,15 @@
 
 ## Uncertainty
 - Method / CI level / bootstrap resamples / block length: normal / 0.950000 / N/A / N/A
-- Mean IC 95% CI: [0.037302, 0.157299]
-- Mean Rank IC 95% CI: [0.016846, 0.137000]
-- Mean Long-Short Return 95% CI: [-0.001128, 0.008751]
+- Mean IC 95% CI: [0.001132, 0.152547]
+- Mean Rank IC 95% CI: [0.009538, 0.166919]
+- Mean Long-Short Return 95% CI: [-0.001401, 0.011112]
 - Uncertainty Flags: long_short_ci_overlaps_zero, long_short_ci_wide
 
 ## Rolling Stability
 - Rolling window size: 20
-- Rolling positive share (IC / RankIC / long-short): 0.772727 / 0.878788 / 0.727273
-- Worst rolling mean (IC / RankIC / long-short): -0.063485 / -0.040909 / -0.010312
+- Rolling positive share (IC / RankIC / long-short): 0.951220 / 0.951220 / 0.804878
+- Worst rolling mean (IC / RankIC / long-short): -0.032606 / -0.030070 / -0.003106
 - Rolling Stability Flags: none
 
 ## Artifacts

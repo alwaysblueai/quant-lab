@@ -4,7 +4,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alpha_lab.quantile import long_short_return, quantile_returns
+from alpha_lab.quantile import (
+    _assign_quantile,
+    _assign_quantiles_by_date,
+    long_short_return,
+    quantile_assignments,
+    quantile_returns,
+)
 
 
 def _canonical(
@@ -27,6 +33,64 @@ def _canonical(
 # ---------------------------------------------------------------------------
 # quantile assignment
 # ---------------------------------------------------------------------------
+
+
+def _reference_assign_quantiles_by_date(
+    df: pd.DataFrame,
+    *,
+    value_col: str,
+    n_quantiles: int,
+) -> pd.Series:
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    dates = pd.to_datetime(df["date"], errors="coerce")
+    values = pd.to_numeric(df[value_col], errors="coerce")
+    valid = values.to_numpy(dtype=float)
+    valid_mask = np.isfinite(valid) & dates.notna().to_numpy()
+    if not valid_mask.any():
+        return out
+    working = pd.DataFrame(
+        {
+            "date": dates.loc[valid_mask],
+            value_col: values.loc[valid_mask],
+        },
+        index=df.index[valid_mask],
+    )
+    for _, group in working.groupby("date", sort=False):
+        out.loc[group.index] = _assign_quantile(group[value_col], n_quantiles)
+    return out
+
+
+def test_assign_quantiles_by_date_matches_reference_on_mixed_random_panel():
+    rng = np.random.default_rng(20260428)
+    n_dates = 300
+    assets_per_date = rng.integers(1, 18, size=n_dates)
+    dates: list[pd.Timestamp] = []
+    values: list[float] = []
+    base_dates = pd.date_range("2024-01-02", periods=n_dates, freq="B")
+    value_pool = np.array([-2.0, -1.0, -1.0, 0.0, 0.5, 0.5, 1.5, 3.0])
+    for date, width in zip(base_dates, assets_per_date, strict=True):
+        dates.extend([date] * int(width))
+        sampled = rng.choice(value_pool, size=int(width), replace=True).astype(float)
+        if width >= 3 and rng.random() < 0.35:
+            sampled[rng.integers(0, int(width))] = np.nan
+        if width >= 4 and rng.random() < 0.10:
+            sampled[rng.integers(0, int(width))] = np.inf
+        values.extend(sampled.tolist())
+    df = pd.DataFrame({"date": dates, "value": values})
+    shuffled = df.sample(frac=1.0, random_state=7)
+
+    expected = _reference_assign_quantiles_by_date(
+        shuffled,
+        value_col="value",
+        n_quantiles=5,
+    )
+    actual = _assign_quantiles_by_date(
+        shuffled,
+        value_col="value",
+        n_quantiles=5,
+    )
+
+    pd.testing.assert_series_equal(actual, expected, check_exact=True)
 
 
 def test_quantile_assignment_covers_all_buckets():
@@ -180,6 +244,36 @@ def test_nan_label_row_excluded():
     assert qr["mean_return"].notna().all()
 
 
+def test_assignments_and_returns_keep_separate_tail_universes():
+    """Assignments include factor-only tail rows; returns bucket only labeled rows."""
+    factors = _canonical(
+        dates=["2024-01-02"] * 4,
+        assets=["A", "B", "C", "D"],
+        factor_name="f",
+        values=[1.0, 2.0, 3.0, 4.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02"] * 4,
+        assets=["A", "B", "C", "D"],
+        factor_name="fwd",
+        values=[0.1, np.nan, 0.3, 0.4],
+    )
+
+    assignments = quantile_assignments(factors, n_quantiles=4)
+    returns = quantile_returns(factors, labels, n_quantiles=4)
+
+    assert assignments[["asset", "quantile"]].sort_values("asset").to_dict("records") == [
+        {"asset": "A", "quantile": 1},
+        {"asset": "B", "quantile": 2},
+        {"asset": "C", "quantile": 3},
+        {"asset": "D", "quantile": 4},
+    ]
+    assert set(returns["quantile"].tolist()) == {1, 2, 3}
+    assert float(returns.loc[returns["quantile"] == 2, "mean_return"].iloc[0]) == pytest.approx(
+        0.3
+    )
+
+
 # ---------------------------------------------------------------------------
 # small cross-section
 # ---------------------------------------------------------------------------
@@ -317,6 +411,37 @@ def test_quantile_returns_merged_pairs_matches_default():
         merged_pairs=merged_pairs,
     )
     pd.testing.assert_frame_equal(default, merged)
+
+
+def test_quantile_returns_rejects_duplicate_merged_pairs():
+    factors = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="f",
+        values=[1.0, 2.0],
+    )
+    labels = _canonical(
+        dates=["2024-01-02", "2024-01-02"],
+        assets=["A", "B"],
+        factor_name="fwd",
+        values=[0.1, 0.2],
+    )
+    merged_pairs = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-02"]),
+            "asset": ["A", "A", "B"],
+            "value_factor": [1.0, 1.0, 2.0],
+            "value_label": [0.1, 0.1, 0.2],
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        quantile_returns(
+            factors,
+            labels,
+            n_quantiles=2,
+            merged_pairs=merged_pairs,
+        )
 
 
 # ---------------------------------------------------------------------------

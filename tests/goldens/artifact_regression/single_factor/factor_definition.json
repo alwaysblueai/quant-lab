@@ -1,0 +1,43 @@
+{
+  "artifact_type": "alpha_lab_factor_definition",
+  "case_name": "demo_bp_single_factor",
+  "factor_name": "bp",
+  "fallback_derived_fields": [],
+  "package_type": "single_factor",
+  "schema_version": "1.0.0",
+  "source_artifacts": {
+    "factor_definition_yaml_path": "<OUTPUT_ROOT>/demo_bp_single_factor/factor_definition.yaml",
+    "run_manifest_path": "<OUTPUT_ROOT>/demo_bp_single_factor/run_manifest.json"
+  },
+  "spec": {
+    "capacity": {
+      "adv_lookback": 20,
+      "enabled": true,
+      "participation_rate": 0.05
+    },
+    "direction": "long",
+    "factor_name": "bp",
+    "n_quantiles": 5,
+    "name": "demo_bp_single_factor",
+    "neutralization": {
+      "enabled": false,
+      "exposures_path": "<TMP_ROOT>/inputs/exposures.csv"
+    },
+    "paths": {
+      "factor_path": "<TMP_ROOT>/inputs/bp.csv",
+      "prices_path": "<TMP_ROOT>/inputs/prices.csv"
+    },
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "name": "demo_universe",
+      "path": "<TMP_ROOT>/inputs/universe.csv"
+    }
+  }
+}

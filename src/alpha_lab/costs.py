@@ -119,10 +119,33 @@ def cost_adjusted_long_short(
     if long_short_df.empty or long_short_turnover_df.empty:
         return pd.DataFrame(columns=list(_COST_ADJUSTED_COLUMNS))
 
+    required_ls = {"date", "factor", "long_short_return"}
+    missing_ls = required_ls - set(long_short_df.columns)
+    if missing_ls:
+        raise AlphaLabDataError(f"long_short_df is missing required columns: {sorted(missing_ls)}")
+    required_turnover = {"date", "factor", "long_short_turnover"}
+    missing_turnover = required_turnover - set(long_short_turnover_df.columns)
+    if missing_turnover:
+        raise AlphaLabDataError(
+            "long_short_turnover_df is missing required columns: "
+            f"{sorted(missing_turnover)}"
+        )
+    if long_short_df.duplicated(subset=["date", "factor"]).any():
+        raise AlphaLabDataError(
+            "long_short_df contains duplicate (date, factor) rows; "
+            "long-short returns must be one-to-one by date and factor"
+        )
+    if long_short_turnover_df.duplicated(subset=["date", "factor"]).any():
+        raise AlphaLabDataError(
+            "long_short_turnover_df contains duplicate (date, factor) rows; "
+            "turnover rows must be one-to-one by date and factor"
+        )
+
     merged = long_short_df.merge(
         long_short_turnover_df.rename(columns={"long_short_turnover": "turnover"}),
         on=["date", "factor"],
         how="inner",
+        validate="one_to_one",
     )
     if merged.empty:
         return pd.DataFrame(columns=list(_COST_ADJUSTED_COLUMNS))

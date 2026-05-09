@@ -320,6 +320,10 @@ def test_single_factor_pipeline_exploratory_profile_skips_heavy_diagnostics(
     assert result.evaluation_result.factor_autocorrelation.empty
     assert result.evaluation_result.conditional_ic_by_magnitude.empty
     assert result.evaluation_result.conditional_ic_by_cross_section_size.empty
-    assert result.evaluation_result.random_baseline_null.empty
+    assert "random_baseline" not in skipped
+    assert not result.evaluation_result.random_baseline_null.empty
+    assert int(metrics["random_baseline_n_permutations"]) == len(
+        result.evaluation_result.random_baseline_null
+    )
     assert any(message == "运行核心回测" for message, _ in progress_events)
     assert any(message == "汇总结论与分层判定" for message, _ in progress_events)

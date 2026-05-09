@@ -8,14 +8,16 @@
     "Portfolio validation skipped because promotion gate was not passed."
   ],
   "major_risks": [
-    "blocked by unstable rolling evidence"
+    "blocked by unstable rolling evidence",
+    "blocked by sharp IC decay under 1-day execution lag"
   ],
   "portfolio_robustness_summary": {
     "benchmark_relative_support_note": "Benchmark-relative support is unavailable in current case evidence.",
     "concentration_turnover_risk_note": "Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.",
     "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
     "fragility_reasons": [
-      "blocked by unstable rolling evidence"
+      "blocked by unstable rolling evidence",
+      "blocked by sharp IC decay under 1-day execution lag"
     ],
     "scenario_sensitivity_notes": [
       "Sensitivity diagnostics are inconclusive because portfolio validation did not complete."
