@@ -22,11 +22,24 @@ import {
   getContextFromQuery,
   num,
 } from "./data";
+import {
+  aggregateGroupMeans,
+  buildSplitSeries,
+  formatMetricWithOos,
+  formatSplitStat,
+  hasSplitBoundary,
+  parseFlags,
+  parseSplitStart,
+  parseTimeseriesRows,
+  primaryMetricLabel,
+  splitIr,
+  splitMean,
+} from "./dashboardSeries";
 
 /* ------------------------------------------------------------------ *
  *  App shell: context + data load + compose generic sections.        *
- *  Sections are declarative — swap the builder functions to change   *
- *  which metrics get surfaced without touching layout code.          *
+ *  Sections are declarative; swap the builder functions to change      *
+ *  which metrics get surfaced without touching layout code.           *
  * ------------------------------------------------------------------ */
 
 export function App() {
@@ -36,6 +49,8 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [ic, setIc] = useState<Record<string, string>[] | null>(null);
   const [groupReturns, setGroupReturns] = useState<Record<string, string>[] | null>(null);
+  const [turnover, setTurnover] = useState<Record<string, string>[] | null>(null);
+  const [coverage, setCoverage] = useState<Record<string, string>[] | null>(null);
 
   useEffect(() => {
     if (!ctx.project || !ctx.runId) return;
@@ -44,12 +59,19 @@ export function App() {
       try {
         const r = await fetchRun(ctx.project!, ctx.runId!);
         setRun(r);
-        const [icRows, grRows] = await Promise.all([
-          fetchArtifactCsv(ctx.project!, ctx.runId!, "rank_ic_timeseries"),
+        const [icRows, grRows, turnoverRows, coverageRows] = await Promise.all([
+          fetchArtifactWithFallback(ctx.project!, ctx.runId!, [
+            "ic_timeseries",
+            "rank_ic_timeseries",
+          ]),
           fetchArtifactCsv(ctx.project!, ctx.runId!, "group_returns"),
+          fetchArtifactCsv(ctx.project!, ctx.runId!, "turnover"),
+          fetchArtifactCsv(ctx.project!, ctx.runId!, "coverage"),
         ]);
         setIc(icRows);
         setGroupReturns(grRows);
+        setTurnover(turnoverRows);
+        setCoverage(coverageRows);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -64,14 +86,49 @@ export function App() {
   if (!run) return <EmptyState message="Run not found." tone="warn" />;
 
   const s = (run.summary ?? {}) as Record<string, unknown>;
+  const splitStart = parseSplitStart(s.split_contract, s.oos_start, s.split_description, s.split_desc);
 
-  /* ------- Summary strip — tone based on primary metrics -------- */
+  const parsedIcRowsForChart = parseTimeseriesRows(ic, ["rank_ic", "ic"]);
+  const parsedIcRowsForIr = parseTimeseriesRows(ic, ["ic"]);
+  const parsedTurnoverRows = parseTimeseriesRows(turnover, ["turnover", "mean_turnover", "value"]);
+  const parsedCoverageRows = parseTimeseriesRows(coverage, ["coverage", "mean_coverage", "value"]);
+
+  const icChartData = buildSplitSeries(parsedIcRowsForChart, splitStart);
+  const icMetricLabel = primaryMetricLabel(parsedIcRowsForChart);
+  const meanIcSummaryValue = icMetricLabel === "IC" ? s.mean_ic : s.mean_rank_ic;
+  const chartSeries = hasSplitBoundary(parsedIcRowsForChart, splitStart)
+    ? [
+        { key: "rank_ic_is", label: `${icMetricLabel} (IS)` },
+        { key: "rank_ic_oos", label: `${icMetricLabel} (OOS)` },
+      ]
+    : [{ key: "rank_ic", label: icMetricLabel }];
+
+  const oosRankIc = splitMean(parsedIcRowsForChart, splitStart);
+  const oosIcIr = splitIr(parsedIcRowsForIr, splitStart);
+  const oosTurnover = splitMean(parsedTurnoverRows, splitStart);
+  const oosCoverage = splitMean(parsedCoverageRows, splitStart);
+
+  /* ------- Summary strip -------- */
   const summary: MetricItem[] = [
-    { label: "Mean RankIC", value: fmt(s.mean_rank_ic, 4), tone: toneByThreshold(num(s.mean_rank_ic), 0.03, 0.015) },
-    { label: "ICIR", value: fmt(s.ic_ir, 2), tone: toneByThreshold(num(s.ic_ir), 1.0, 0.5) },
+    {
+      label: `Mean ${icMetricLabel === "Metric" ? "RankIC" : icMetricLabel}`,
+      value: formatMetricWithOos(fmt(meanIcSummaryValue, 4), formatSplitStat(oosRankIc.split, 4)),
+      tone: toneByThreshold(num(meanIcSummaryValue), 0.03, 0.015),
+    },
+    {
+      label: "ICIR",
+      value: formatMetricWithOos(fmt(s.ic_ir, 2), formatSplitStat(oosIcIr.split, 2)),
+      tone: toneByThreshold(num(s.ic_ir), 1.0, 0.5),
+    },
     { label: "DSR p-value", value: fmt(s.dsr_pvalue, 3), tone: toneByReverse(num(s.dsr_pvalue), 0.05, 0.1) },
-    { label: "Turnover", value: fmtPct(s.mean_long_short_turnover, 1) },
-    { label: "Coverage", value: fmtPct(s.coverage_mean, 1) },
+    {
+      label: "Turnover",
+      value: formatMetricWithOos(fmtPct(s.mean_long_short_turnover, 1), formatSplitStat(oosTurnover.split, 1, true)),
+    },
+    {
+      label: "Coverage",
+      value: formatMetricWithOos(fmtPct(s.coverage_mean, 1), formatSplitStat(oosCoverage.split, 1, true)),
+    },
     { label: "N Dates", value: String(s.n_dates_used ?? "—") },
   ];
 
@@ -91,12 +148,6 @@ export function App() {
     { label: "Mean MI", value: fmt(s.mean_mutual_information, 4) },
     { label: "IC Half-life", value: s.ic_half_life_horizon ? `${s.ic_half_life_horizon}` : "—", unit: "periods" },
   ];
-
-  /* ------- Section 03 : Primary time series -------- */
-  const icChartData = (ic ?? []).map((row) => ({
-    date: String(row.date ?? "").slice(0, 10),
-    rank_ic: Number(row.rank_ic),
-  })).filter((r) => Number.isFinite(r.rank_ic));
 
   /* ------- Section 04 : Group returns monotonicity -------- */
   const groupAgg = aggregateGroupMeans(groupReturns ?? []);
@@ -121,6 +172,7 @@ export function App() {
           { label: "Project", value: run.project_slug ?? ctx.project! },
           { label: "Status", value: run.status ?? "—" },
           { label: "Updated", value: (run.updated_at ?? run.created_at ?? "").slice(0, 10) || "—" },
+          { label: "Split", value: String(s.split_description ?? "—") },
         ]}
       />
 
@@ -130,18 +182,18 @@ export function App() {
         id="timeseries"
         kicker="Section 01"
         heading="Primary Time Series"
-        note="Rank information coefficient over the evaluation window. Values and series labels are driven by the upstream artifact; swap the series mapping to surface different primary metrics."
+        note="Rank information coefficient over the evaluation window. If split is available, we separate IS and OOS series."
       >
         {icChartData.length > 0 ? (
           <ChartPanel
-            title="RankIC — daily"
-            subtitle={`n = ${icChartData.length} observations · source: rank_ic_timeseries.csv`}
-            footnote="Replace the artifact binding in data.ts to point at any long-form (date, value) CSV."
+            title={`${icMetricLabel} — daily`}
+            subtitle={`n = ${icChartData.length} observations · source: ic_timeseries.csv${splitStart ? ` · split >= ${splitStart}` : ""}`}
+            footnote="If OOS split is present, blue and green paths show IS and OOS separately."
           >
             <LineSeriesChart
               data={icChartData}
               xKey="date"
-              series={[{ key: "rank_ic", label: "RankIC" }]}
+              series={chartSeries}
               yFormat={(v) => v.toFixed(3)}
             />
           </ChartPanel>
@@ -228,6 +280,20 @@ export function App() {
 
 /* ------------------------------------------------------------------ */
 
+async function fetchArtifactWithFallback(
+  project: string,
+  runId: string,
+  keys: string[],
+): Promise<Record<string, string>[] | null> {
+  for (const key of keys) {
+    const rows = await fetchArtifactCsv(project, runId, key);
+    if (rows !== null) {
+      return rows;
+    }
+  }
+  return null;
+}
+
 interface ContextRow extends Record<string, unknown> {
   field: string;
   value: string;
@@ -250,33 +316,6 @@ function buildContextRows(run: RunPayload, s: Record<string, unknown>): ContextR
     { field: "Mean Turnover", value: fmtPct(s.mean_long_short_turnover, 2) },
   ];
   return out;
-}
-
-function aggregateGroupMeans(rows: Record<string, string>[]): { group: string; mean: number }[] {
-  const sums = new Map<number, { s: number; n: number }>();
-  for (const r of rows) {
-    const g = Number(r.group);
-    const v = Number(r.group_return);
-    if (!Number.isFinite(g) || !Number.isFinite(v)) continue;
-    const cur = sums.get(g) ?? { s: 0, n: 0 };
-    cur.s += v; cur.n += 1;
-    sums.set(g, cur);
-  }
-  return Array.from(sums.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([g, { s, n }]) => ({ group: `Q${g}`, mean: s / n }));
-}
-
-function parseFlags(v: unknown): string[] | null {
-  if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
-  if (typeof v === "string" && v.trim()) {
-    try {
-      const parsed = JSON.parse(v);
-      if (Array.isArray(parsed)) return parsed.map(String);
-    } catch { /* pass */ }
-    return v.split(/[|;,]/).map((x) => x.trim()).filter(Boolean);
-  }
-  return null;
 }
 
 function toneByThreshold(v: number | null, good: number, warn: number): Tone {

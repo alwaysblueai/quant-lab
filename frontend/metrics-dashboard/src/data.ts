@@ -98,6 +98,11 @@ function splitCsvLine(line: string): string[] {
 /* ---------- Formatting helpers ---------- */
 
 export const num = (v: unknown): number | null => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string") {
+    const raw = v.trim();
+    if (!raw || /^nan$/i.test(raw) || /^null$/i.test(raw)) return null;
+  }
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
