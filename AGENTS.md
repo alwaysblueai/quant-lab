@@ -22,6 +22,9 @@
   - no label-feature leakage
   - explicit temporal alignment and split discipline
   - PIT/as-of and cross-timeframe correctness
+- Keep Tier 1/Tier 2 research boundaries aligned with `docs/research_playbook.md`.
+  New diagnostics start in Tier 2 unless they compare a batch of factors and affect
+  the continue/stop verdict.
 - Prefer minimal, high-confidence edits over broad redesign.
 - Keep code and documentation aligned in the same change.
 - When adding new features, prioritize:
@@ -51,7 +54,87 @@
 - Experimental-only tests:
   - `uv run --no-sync --frozen pytest -m experimental_level3 tests/experimental_level3`
 
-## 6) Pre-Finish Review Checklist
+### LLM rerank for research_bridge
+- `alpha-lab explore-idea` and `alpha-lab model-idea` automatically use Claude
+  `claude-sonnet-4-6` to rerank coarse candidates for idea relevance when
+  `ANTHROPIC_API_KEY` is present.
+- The score is recorded as `score_components.llm_relevance`; missing keys or SDK
+  failures silently fall back to deterministic hash-TFIDF ranking.
+- Diagnostics are recorded under `retrieval_diagnostics.llm_rerank`.
+
+### V2 mechanism recall for research_bridge
+- V2 recall is opt-in: set `ALPHA_LAB_RESEARCH_BRIDGE_V2=1` and
+  `ANTHROPIC_API_KEY` to enable query expansion, mechanism-tier retrieval, and
+  categorize/compress synthesis.
+- Build the offline sidecar before first use:
+  `python -m alpha_lab.research_bridge.mechanism_index build --vault <vault>`.
+- Sidecar files live under
+  `.research_bridge_cache/mechanism_index/<vault_hash>/`; if the flag is unset
+  or the API key is missing, the explorer falls back completely to v1 behavior.
+
+## 6) Codex GUI Stage 3 Draft Factor Guardrails
+- When the user provides Stage2 output, `factor_json_payload`, or asks to run a
+  backend draft factor, treat the task as a Stage 3 backend draft-factor run.
+- Follow:
+  - `docs/templates/stage3_backend_draft_factor_prompt.md`
+  - `docs/templates/codex_gui_stage3_execution_envelope.md`
+  - `docs/backend_draft_factor_workflow.md`
+- Only `factor_json_payload` and explicit local paths/commands from the user are
+  machine facts. If prose conflicts with `factor_json_payload`, use
+  `factor_json_payload` and record the conflict in `research_log.md`.
+- Allowed writes are limited to:
+  - `custom_factors/research/<factor_name>/factor.json`
+  - `custom_factors/research/<factor_name>/research_log.md`
+  - the matching `configs/real_cases/single_factor/<factor_name>_vN.yaml`
+- Do not create one-off scripts, notebooks, scattered `.py` files, promoted
+  factors, or frontend registrations during Stage 3 draft runs.
+- Before running a case, validate the draft with:
+  - `uv run --no-sync --frozen alpha-lab validate-draft-factor custom_factors/research/<factor_name>/factor.json`
+- Run experiments only through:
+  - `uv run --no-sync --frozen alpha-lab real-case single-factor run <case.yaml> ...`
+- After the run, inspect `run_manifest.json` and `factor_definition.json`; the
+  run is not acceptable unless `custom_factor_source.code_sha256`,
+  `custom_factor_source.factor_json_sha256`, and source path are present.
+- If validation, required-column availability, leakage checks, or artifact audit
+  fields fail, stop and report the failure instead of rewriting the factor
+  outside the contract.
+
+## 6.5) Codex GUI Model-Lab Stage 3 Draft Model Guardrails (v1: spec variants)
+- When the user provides Stage2 output, `model_candidate_payload`, or asks to run a
+  backend draft model, treat the task as a Stage 3 backend draft-model run.
+- Follow:
+  - `docs/templates/model_lab_stage3_backend_draft_prompt.md`
+  - `docs/templates/codex_gui_model_stage3_execution_envelope.md`
+  - `docs/backend_draft_model_workflow.md`
+- Only `model_candidate_payload` (and its embedded `case_spec_payload`) and explicit
+  local paths/commands from the user are machine facts. If prose conflicts with
+  `case_spec_payload`, use `case_spec_payload` and record the conflict in
+  `model_candidates/research/<candidate_name>/research_log.md`.
+- Allowed writes are limited to:
+  - `model_candidates/research/<candidate_name>/model_candidate.json`
+  - `model_candidates/research/<candidate_name>/research_log.md`
+  - the matching `configs/real_cases/model_factor/<candidate_name>_vN.yaml`
+- Do not create one-off scripts, notebooks, scattered `.py` files, promoted
+  candidates, frontend registrations, custom feature builders, or custom
+  estimator code during Stage 3 draft-model runs. v1 only supports spec-variant
+  candidates.
+- Before running a case, validate the candidate with:
+  - `uv run --no-sync --frozen alpha-lab validate-draft-model model_candidates/research/<candidate_name>/model_candidate.json`
+- Run experiments only through:
+  - `uv run --no-sync --frozen alpha-lab real-case model-factor run <case.yaml> --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json ...`
+- If the Web Model Lab is available, the `/model-lab` Draft Candidates panel may
+  be used as the orchestrator, but it must still perform the same save ->
+  validate -> materialize-spec -> standard run sequence and preserve artifact
+  hash auditing.
+- After the run, inspect `run_manifest.json`, `model_definition.json`, and
+  `feature_manifest.json`; the run is not acceptable unless
+  `draft_model_source.candidate_json_sha256`, `case_spec_sha256`,
+  `feature_contract_sha256`, and source path are all present.
+- If validation, feature-column availability, PIT contract checks, or artifact
+  audit fields fail, stop and report the failure instead of rewriting the
+  candidate outside the contract.
+
+## 7) Pre-Finish Review Checklist
 - Scope: change remains Level 1/2 by default.
 - API/CLI/docs: no Level 3 semantics leaked into core/default paths.
 - Integrity: temporal/leakage guarantees preserved or strengthened.
@@ -59,7 +142,7 @@
 - Docs: README/docs match actual behavior.
 - Diff quality: minimal, coherent, and reversible.
 
-## 7) Card Language Policy
+## 8) Card Language Policy
 - Generated cards, summaries, and human-facing research docs should be Chinese-first.
 - The main body, section titles, and explanatory text should use Chinese by default.
 - Preserve English only where it is necessary for professional terminology, proper nouns, established technical abbreviations, formulas, code symbols, file paths, or quoted source titles.

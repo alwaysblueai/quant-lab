@@ -77,6 +77,34 @@ canonical long-form schema:
 This keeps merge and validation rules consistent while still preventing
 accidental leakage from mixing features and targets in the same reusable table.
 
+### Group Returns vs. Group NAV
+
+Two artifacts coexist for quantile portfolio analysis. They have different
+semantics — pick the one that matches your question:
+
+| File | Schema | One row = | Compoundable? |
+|------|--------|-----------|---------------|
+| `group_returns.csv` | `date, factor, group, group_return` | the **H-day forward return** of the bucket formed at `date` (where `H = target.horizon`) | **No.** Daily-grid rows overlap by `H-1` days; naïve `cumprod(1+x)` over consecutive rows multiplies each return ~H times. |
+| `group_nav.csv` | `date, group, period_return, nav, sample_step, rebalance_step, label_horizon` | a non-overlapping NAV checkpoint (`sample_step = max(rebalance_step, label_horizon)`) | **Yes.** This is the canonical NAV path; `nav` is already the running cumprod within each group. |
+
+Rules:
+
+- Diagnostics that need every available observation (IC, RankIC, distributional
+  plots, conditional analyses) read `group_returns.csv`.
+- Anything that compounds returns (NAV curves, Sharpe/Sortino/Calmar, rolling
+  drawdown, monthly aggregation) reads `group_nav.csv` — or, when only
+  `group_returns.csv` is available, samples it at
+  `max(rebalance_step, label_horizon)` first. The Python helper
+  `alpha_lab.real_cases.artifact_enrichment.build_group_nav_table` produces the
+  canonical sampled frame.
+- `backtest_result.json → source_artifacts.group_nav_path` points consumers at
+  the canonical file; `summary.label_horizon` and `summary.nav_rebalance_step`
+  expose the sampling parameters for fallback consumers.
+- Never `cumprod(1 + group_return)` over consecutive rows of
+  `group_returns.csv` when `target.horizon > 1`. The artificial Q5 NAV of
+  ~10⁷–10¹¹ × seen on 10-year daily panels with `H=5` is the canonical
+  symptom of this mistake.
+
 ## Time Alignment Rules
 
 - Factor values at time `t` may only use information available at or before `t`.

@@ -452,7 +452,7 @@ def _write_campaign_case_specs(root_dir: Path) -> tuple[CampaignExampleCaseSpec,
 def _write_case_stable_promoted(case_root: Path) -> CampaignExampleCaseSpec:
     case_name = "case_stable_promoted"
     rng = np.random.default_rng(505)
-    n_days = 90
+    n_days = 200
     n_assets = 14
     dates = pd.date_range("2023-01-03", periods=n_days, freq="B")
     assets = [f"A{i:03d}" for i in range(n_assets)]
@@ -553,7 +553,7 @@ def _write_case_stable_promoted(case_root: Path) -> CampaignExampleCaseSpec:
 def _write_case_short_window_sensitive(case_root: Path) -> CampaignExampleCaseSpec:
     case_name = "case_short_window_sensitive"
     rng = np.random.default_rng(77)
-    n_days = 30
+    n_days = 200
     n_assets = 20
     dates = pd.date_range("2025-01-02", periods=n_days, freq="B")
     assets = [f"A{i:03d}" for i in range(n_assets)]
@@ -620,7 +620,7 @@ def _write_case_short_window_sensitive(case_root: Path) -> CampaignExampleCaseSp
     return CampaignExampleCaseSpec(
         case_name=case_name,
         case_description=(
-            "Short evaluation window case that changes Level 1 verdict and "
+            "Noisy stability-sensitive case that changes Level 1 verdict and "
             "promotion behavior across profiles."
         ),
         spec_path=spec_path,
@@ -630,7 +630,7 @@ def _write_case_short_window_sensitive(case_root: Path) -> CampaignExampleCaseSp
 def _write_case_triage_sensitive(case_root: Path) -> CampaignExampleCaseSpec:
     case_name = "case_triage_sensitive"
     rng = np.random.default_rng(1357)
-    n_days = 110
+    n_days = 200
     n_assets = 16
     dates = pd.date_range("2024-01-02", periods=n_days, freq="B")
     assets = [f"A{i:03d}" for i in range(n_assets)]
@@ -661,8 +661,8 @@ def _write_case_triage_sensitive(case_root: Path) -> CampaignExampleCaseSpec:
         asset_latent = latent[asset]
         factor_noise = rng.normal(0.0, 0.45, size=n_days)
         for t, date in enumerate(dates):
-            shift = -0.30 * asset_latent[t] if t >= int(n_days * 0.66) else 0.0
-            value = 0.5 * asset_latent[t] + shift + factor_noise[t]
+            shift = -1.40 * asset_latent[t] if t >= int(n_days * 0.84) else 0.0
+            value = 1.0 * asset_latent[t] + shift + factor_noise[t]
             if rng.random() < 0.10:
                 value = float("nan")
             rows_factor.append(

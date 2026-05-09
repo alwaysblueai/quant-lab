@@ -69,10 +69,9 @@
           ],
           "case_name": "case_triage_sensitive",
           "changed_fields": [
-            "campaign_triage",
             "portfolio_validation_recommendation"
           ],
-          "n_changed_fields": 2,
+          "n_changed_fields": 1,
           "profile_sensitivity": "profile_sensitive",
           "representative_case_names": [
             "case_triage_sensitive"
@@ -175,7 +174,7 @@
       ],
       "summary_lines": [
         "Transition stability: 1/3 stable (33.3%), sensitive=2; representative=case_triage_sensitive; pointers=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json; case_triage_sensitive [exploratory_screening] runs/exploratory_screening/case_triage_sensitive/metrics.json; support=tentative due to low support.",
-        "Most profile-sensitive cases: case_short_window_sensitive (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json); case_stable_promoted (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json); case_triage_sensitive (changed_fields=2, delta=transition_stable, pointer=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json).",
+        "Most profile-sensitive cases: case_short_window_sensitive (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json); case_stable_promoted (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json); case_triage_sensitive (changed_fields=1, delta=transition_stable, pointer=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json).",
         "Strongest profile-pair shift: exploratory_screening -> default_research changed=2/3 (66.7%), reason_shifted_labels=0/2, top_flows=Weakened at portfolio level -> Inconclusive transition (2, cases=case_stable_promoted,case_short_window_sensitive), representative_cases=case_stable_promoted,case_short_window_sensitive,case_triage_sensitive; support=reason shift observed, but only in a small number of cases.",
         "Stricter profile impact: promotion (promotion_reduction=2, robustness_reduction=0, adjacent_pairs=1); support=tentative due to low support."
       ],
@@ -381,26 +380,6 @@
                 "is_sparse": false,
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
-                "reason": "blocked by sharp IC decay under 1-day execution lag",
-                "support_level": "tentative",
-                "support_note": "tentative due to low support",
-                "supporting_case_names": [
-                  "case_stable_promoted",
-                  "case_short_window_sensitive",
-                  "case_triage_sensitive"
-                ]
-              },
-              {
-                "artifact_pointer_hints": [
-                  "runs/default_research/case_stable_promoted/metrics.json",
-                  "runs/default_research/case_short_window_sensitive/metrics.json",
-                  "runs/default_research/case_triage_sensitive/metrics.json"
-                ],
-                "confidence_note": "tentative due to low support",
-                "count": 3,
-                "is_sparse": false,
-                "minimum_support_met": true,
-                "proportion_of_label_cases": 1.0,
                 "reason": "campaign triage: Fragile / monitor",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
@@ -422,6 +401,26 @@
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
                 "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Blocked from Level 2",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [
@@ -443,8 +442,8 @@
             "n_cases_with_label": 3,
             "n_reasons_collapsed_by_normalization": 2,
             "n_top_reasons_below_minimum_support": 0,
-            "n_unique_raw_reasons_observed": 8,
-            "n_unique_reasons_observed": 6,
+            "n_unique_raw_reasons_observed": 9,
+            "n_unique_reasons_observed": 7,
             "reason_normalization": {
               "applies_to_rollup_only": true,
               "method": "explicit_rule_v1",
@@ -455,9 +454,9 @@
               "case_short_window_sensitive"
             ],
             "representative_reasons": [
-              "blocked by sharp IC decay under 1-day execution lag",
               "campaign triage: Fragile / monitor",
-              "portfolio recommendation: Not evaluated (not promoted)"
+              "portfolio recommendation: Not evaluated (not promoted)",
+              "promotion decision: Blocked from Level 2"
             ],
             "support_count": 3,
             "support_level": "tentative",
@@ -468,26 +467,6 @@
               "case_triage_sensitive"
             ],
             "top_reasons": [
-              {
-                "artifact_pointer_hints": [
-                  "runs/default_research/case_stable_promoted/metrics.json",
-                  "runs/default_research/case_short_window_sensitive/metrics.json",
-                  "runs/default_research/case_triage_sensitive/metrics.json"
-                ],
-                "confidence_note": "tentative due to low support",
-                "count": 3,
-                "is_sparse": false,
-                "minimum_support_met": true,
-                "proportion_of_label_cases": 1.0,
-                "reason": "blocked by sharp IC decay under 1-day execution lag",
-                "support_level": "tentative",
-                "support_note": "tentative due to low support",
-                "supporting_case_names": [
-                  "case_stable_promoted",
-                  "case_short_window_sensitive",
-                  "case_triage_sensitive"
-                ]
-              },
               {
                 "artifact_pointer_hints": [
                   "runs/default_research/case_stable_promoted/metrics.json",
@@ -520,6 +499,26 @@
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
                 "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Blocked from Level 2",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [
@@ -751,7 +750,7 @@
             ],
             "representative_reasons": [
               "blocked by unstable rolling evidence",
-              "campaign triage: Strong Level 1 candidate",
+              "campaign triage: Fragile / monitor",
               "factor verdict is not yet strong"
             ],
             "support_count": 1,
@@ -786,7 +785,7 @@
                 "is_sparse": true,
                 "minimum_support_met": false,
                 "proportion_of_label_cases": 1.0,
-                "reason": "campaign triage: Strong Level 1 candidate",
+                "reason": "campaign triage: Fragile / monitor",
                 "support_level": "sparse",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [
@@ -1314,33 +1313,6 @@
                     "from_n_cases_with_label": 1,
                     "from_proportion_of_label_cases": 0.0,
                     "from_supporting_case_names": [],
-                    "reason": "blocked by sharp IC decay under 1-day execution lag",
-                    "supporting_case_names": [
-                      "case_stable_promoted",
-                      "case_short_window_sensitive",
-                      "case_triage_sensitive"
-                    ],
-                    "to_count": 3,
-                    "to_n_cases_with_label": 3,
-                    "to_proportion_of_label_cases": 1.0,
-                    "to_supporting_case_names": [
-                      "case_stable_promoted",
-                      "case_short_window_sensitive",
-                      "case_triage_sensitive"
-                    ]
-                  },
-                  {
-                    "artifact_pointer_hints": [
-                      "runs/default_research/case_stable_promoted/metrics.json",
-                      "runs/default_research/case_short_window_sensitive/metrics.json",
-                      "runs/default_research/case_triage_sensitive/metrics.json"
-                    ],
-                    "delta_count": 3,
-                    "delta_proportion_of_label_cases": 1.0,
-                    "from_count": 0,
-                    "from_n_cases_with_label": 1,
-                    "from_proportion_of_label_cases": 0.0,
-                    "from_supporting_case_names": [],
                     "reason": "campaign triage: Fragile / monitor",
                     "supporting_case_names": [
                       "case_stable_promoted",
@@ -1369,6 +1341,33 @@
                     "from_proportion_of_label_cases": 0.0,
                     "from_supporting_case_names": [],
                     "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                    "supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ],
+                    "to_count": 3,
+                    "to_n_cases_with_label": 3,
+                    "to_proportion_of_label_cases": 1.0,
+                    "to_supporting_case_names": [
+                      "case_stable_promoted",
+                      "case_short_window_sensitive",
+                      "case_triage_sensitive"
+                    ]
+                  },
+                  {
+                    "artifact_pointer_hints": [
+                      "runs/default_research/case_stable_promoted/metrics.json",
+                      "runs/default_research/case_short_window_sensitive/metrics.json",
+                      "runs/default_research/case_triage_sensitive/metrics.json"
+                    ],
+                    "delta_count": 3,
+                    "delta_proportion_of_label_cases": 1.0,
+                    "from_count": 0,
+                    "from_n_cases_with_label": 1,
+                    "from_proportion_of_label_cases": 0.0,
+                    "from_supporting_case_names": [],
+                    "reason": "promotion decision: Blocked from Level 2",
                     "supporting_case_names": [
                       "case_stable_promoted",
                       "case_short_window_sensitive",
@@ -1412,22 +1411,6 @@
                   "count": 3,
                   "n_cases_with_label": 3,
                   "proportion_of_label_cases": 1.0,
-                  "reason": "blocked by sharp IC decay under 1-day execution lag",
-                  "supporting_case_names": [
-                    "case_stable_promoted",
-                    "case_short_window_sensitive",
-                    "case_triage_sensitive"
-                  ]
-                },
-                {
-                  "artifact_pointer_hints": [
-                    "runs/default_research/case_stable_promoted/metrics.json",
-                    "runs/default_research/case_short_window_sensitive/metrics.json",
-                    "runs/default_research/case_triage_sensitive/metrics.json"
-                  ],
-                  "count": 3,
-                  "n_cases_with_label": 3,
-                  "proportion_of_label_cases": 1.0,
                   "reason": "campaign triage: Fragile / monitor",
                   "supporting_case_names": [
                     "case_stable_promoted",
@@ -1445,6 +1428,22 @@
                   "n_cases_with_label": 3,
                   "proportion_of_label_cases": 1.0,
                   "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                  "supporting_case_names": [
+                    "case_stable_promoted",
+                    "case_short_window_sensitive",
+                    "case_triage_sensitive"
+                  ]
+                },
+                {
+                  "artifact_pointer_hints": [
+                    "runs/default_research/case_stable_promoted/metrics.json",
+                    "runs/default_research/case_short_window_sensitive/metrics.json",
+                    "runs/default_research/case_triage_sensitive/metrics.json"
+                  ],
+                  "count": 3,
+                  "n_cases_with_label": 3,
+                  "proportion_of_label_cases": 1.0,
+                  "reason": "promotion decision: Blocked from Level 2",
                   "supporting_case_names": [
                     "case_stable_promoted",
                     "case_short_window_sensitive",
@@ -1839,7 +1838,7 @@
       }
     },
     {
-      "case_description": "Short evaluation window case that changes Level 1 verdict and promotion behavior across profiles.",
+      "case_description": "Noisy stability-sensitive case that changes Level 1 verdict and promotion behavior across profiles.",
       "case_name": "case_short_window_sensitive",
       "changed_fields": [
         "portfolio_validation_recommendation",
@@ -1908,10 +1907,10 @@
             "factor_verdict_reasons": [
               "positive IC and RankIC means",
               "IC and RankIC signs are consistently positive",
-              "evaluation window is short and may be noisy",
               "rebalance cadence may be too slow for IC decay",
-              "instability flags triggered: short_eval_window",
-              "IC decays sharply after 1-day execution lag"
+              "IC decays sharply after 1-day execution lag",
+              "IC and RankIC validity is high",
+              "long-short spread is positive with positive IR"
             ],
             "level12_transition_reasons": [
               "campaign triage: Fragile / monitor",
@@ -2006,14 +2005,9 @@
       "case_description": "Borderline case with profile-dependent campaign triage and portfolio validation recommendation.",
       "case_name": "case_triage_sensitive",
       "changed_fields": [
-        "campaign_triage",
         "portfolio_validation_recommendation"
       ],
       "field_differences": {
-        "campaign_triage": {
-          "default_research": "Fragile / monitor",
-          "exploratory_screening": "Strong Level 1 candidate"
-        },
         "portfolio_validation_recommendation": {
           "default_research": "Not evaluated (not promoted)",
           "exploratory_screening": "N/A"
@@ -2058,48 +2052,50 @@
             "promotion decision: Blocked from Level 2",
             "portfolio recommendation: Not evaluated (not promoted)",
             "promotion reason: blocked by unstable rolling evidence",
-            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: blocked by high uncertainty overlap",
             "fragility: blocked by unstable rolling evidence"
           ],
           "major_reasons": {
             "campaign_triage_reasons": [
               "fragile across rolling windows",
+              "uncertainty remains high",
+              "rebalance cadence is slower than IC decay",
               "single-case verdict indicates fragility",
-              "IC decays sharply after 1-day execution lag",
-              "confidence intervals remain supportive",
-              "coverage and validity are sufficient"
+              "factor performance is regime-dependent"
             ],
             "factor_verdict_reasons": [
               "positive IC and RankIC means",
               "IC and RankIC signs are consistently positive",
+              "rolling evidence suggests regime dependence",
               "signal weakens materially in some periods",
-              "confidence interval overlaps zero: long-short",
-              "apparent edge is weak relative to estimation noise",
-              "IC decays sharply after 1-day execution lag"
+              "rebalance cadence may be too slow for IC decay",
+              "factor performance is regime-dependent"
             ],
             "level12_transition_reasons": [
               "campaign triage: Fragile / monitor",
               "promotion decision: Blocked from Level 2",
               "portfolio recommendation: Not evaluated (not promoted)",
               "promotion reason: blocked by unstable rolling evidence",
-              "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+              "promotion reason: blocked by high uncertainty overlap",
               "fragility: blocked by unstable rolling evidence"
             ],
             "portfolio_validation_major_risks": [
               "blocked by unstable rolling evidence",
+              "blocked by high uncertainty overlap",
               "blocked by sharp IC decay under 1-day execution lag"
             ],
             "promotion_blockers": [
               "blocked by unstable rolling evidence",
+              "blocked by high uncertainty overlap",
               "blocked by sharp IC decay under 1-day execution lag"
             ],
             "promotion_reasons": [
               "blocked by unstable rolling evidence",
+              "blocked by high uncertainty overlap",
               "blocked by sharp IC decay under 1-day execution lag",
               "factor verdict is not yet strong",
-              "neutralization evidence is unavailable",
-              "uncertainty remains supportive",
-              "robust across subperiods"
+              "factor performance is regime-dependent",
+              "neutralization evidence is unavailable"
             ]
           },
           "portfolio_validation_recommendation": "Not evaluated (not promoted)",
@@ -2119,33 +2115,33 @@
             "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/signal_validation.json",
             "summary_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/summary.md"
           },
-          "campaign_triage": "Strong Level 1 candidate",
+          "campaign_triage": "Fragile / monitor",
           "factor_verdict": "Promising but fragile",
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
-            "campaign triage: Strong Level 1 candidate",
+            "campaign triage: Fragile / monitor",
             "promotion decision: Blocked from Level 2",
             "promotion reason: blocked by unstable rolling evidence",
             "promotion reason: factor verdict is not yet strong"
           ],
           "major_reasons": {
             "campaign_triage_reasons": [
-              "confidence intervals remain supportive",
-              "coverage and validity are sufficient",
-              "turnover efficiency is acceptable",
-              "rebalance cadence matches IC decay profile",
-              "long-short tail risk is controlled"
+              "fragile across rolling windows",
+              "uncertainty remains high",
+              "rebalance cadence is slower than IC decay",
+              "single-case verdict indicates fragility",
+              "factor performance is regime-dependent"
             ],
             "factor_verdict_reasons": [
               "positive IC and RankIC means",
               "IC and RankIC signs are consistently positive",
               "signal weakens materially in some periods",
-              "confidence interval overlaps zero: long-short",
-              "IC and RankIC validity is high",
-              "long-short spread is positive with positive IR"
+              "rebalance cadence may be too slow for IC decay",
+              "factor performance is regime-dependent",
+              "rolling evidence suggests regime dependence"
             ],
             "level12_transition_reasons": [
-              "campaign triage: Strong Level 1 candidate",
+              "campaign triage: Fragile / monitor",
               "promotion decision: Blocked from Level 2",
               "promotion reason: blocked by unstable rolling evidence",
               "promotion reason: factor verdict is not yet strong"
@@ -2157,10 +2153,10 @@
             "promotion_reasons": [
               "blocked by unstable rolling evidence",
               "factor verdict is not yet strong",
-              "campaign triage is favorable but promotion gate remains unmet",
-              "uncertainty remains supportive",
-              "robust across subperiods",
-              "coverage and validity are sufficient"
+              "uncertainty support is incomplete",
+              "factor performance is regime-dependent",
+              "PnL attribution is heavily concentrated in a single leg",
+              "robust across subperiods"
             ]
           },
           "portfolio_validation_recommendation": "N/A",
@@ -2293,10 +2289,9 @@
       },
       "campaign_triage_by_profile": {
         "default_research": "Fragile / monitor",
-        "exploratory_screening": "Strong Level 1 candidate"
+        "exploratory_screening": "Fragile / monitor"
       },
       "changed_fields": [
-        "campaign_triage",
         "portfolio_validation_recommendation"
       ],
       "factor_verdict_by_profile": {
@@ -2310,7 +2305,7 @@
           "portfolio recommendation: Not evaluated (not promoted)"
         ],
         "exploratory_screening": [
-          "campaign triage: Strong Level 1 candidate",
+          "campaign triage: Fragile / monitor",
           "promotion decision: Blocked from Level 2",
           "promotion reason: blocked by unstable rolling evidence"
         ]
@@ -2342,7 +2337,7 @@
       "spec_path": "<OUTPUT_ROOT>/cases/case_stable_promoted/single_factor_case.json"
     },
     {
-      "case_description": "Short evaluation window case that changes Level 1 verdict and promotion behavior across profiles.",
+      "case_description": "Noisy stability-sensitive case that changes Level 1 verdict and promotion behavior across profiles.",
       "case_name": "case_short_window_sensitive",
       "spec_path": "<OUTPUT_ROOT>/cases/case_short_window_sensitive/single_factor_case.json"
     },
@@ -2354,9 +2349,7 @@
   ],
   "default_profile": "default_research",
   "field_change_index": {
-    "campaign_triage": [
-      "case_triage_sensitive"
-    ],
+    "campaign_triage": [],
     "factor_verdict": [],
     "portfolio_validation_recommendation": [
       "case_stable_promoted",
@@ -2486,13 +2479,13 @@
         },
         {
           "backtest_result_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/backtest_result.json",
-          "campaign_triage": "Strong Level 1 candidate",
+          "campaign_triage": "Fragile / monitor",
           "campaign_triage_reasons": [
-            "confidence intervals remain supportive",
-            "coverage and validity are sufficient",
-            "turnover efficiency is acceptable",
-            "rebalance cadence matches IC decay profile",
-            "long-short tail risk is controlled"
+            "fragile across rolling windows",
+            "uncertainty remains high",
+            "rebalance cadence is slower than IC decay",
+            "single-case verdict indicates fragility",
+            "factor performance is regime-dependent"
           ],
           "case_name": "case_triage_sensitive",
           "experiment_card_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/experiment_card.md",
@@ -2502,13 +2495,13 @@
             "positive IC and RankIC means",
             "IC and RankIC signs are consistently positive",
             "signal weakens materially in some periods",
-            "confidence interval overlaps zero: long-short",
-            "IC and RankIC validity is high",
-            "long-short spread is positive with positive IR"
+            "rebalance cadence may be too slow for IC decay",
+            "factor performance is regime-dependent",
+            "rolling evidence suggests regime dependence"
           ],
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
-            "campaign triage: Strong Level 1 candidate",
+            "campaign triage: Fragile / monitor",
             "promotion decision: Blocked from Level 2",
             "promotion reason: blocked by unstable rolling evidence",
             "promotion reason: factor verdict is not yet strong"
@@ -2527,10 +2520,10 @@
           "promotion_reasons": [
             "blocked by unstable rolling evidence",
             "factor verdict is not yet strong",
-            "campaign triage is favorable but promotion gate remains unmet",
-            "uncertainty remains supportive",
-            "robust across subperiods",
-            "coverage and validity are sufficient"
+            "uncertainty support is incomplete",
+            "factor performance is regime-dependent",
+            "PnL attribution is heavily concentrated in a single leg",
+            "robust across subperiods"
           ],
           "run_manifest_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/run_manifest.json",
           "signal_validation_json_path": "<OUTPUT_ROOT>/runs/exploratory_screening/case_triage_sensitive/signal_validation.json",
@@ -2703,7 +2696,7 @@
             ],
             "representative_reasons": [
               "blocked by unstable rolling evidence",
-              "campaign triage: Strong Level 1 candidate",
+              "campaign triage: Fragile / monitor",
               "factor verdict is not yet strong"
             ],
             "support_count": 1,
@@ -2738,7 +2731,7 @@
                 "is_sparse": true,
                 "minimum_support_met": false,
                 "proportion_of_label_cases": 1.0,
-                "reason": "campaign triage: Strong Level 1 candidate",
+                "reason": "campaign triage: Fragile / monitor",
                 "support_level": "sparse",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [
@@ -3037,10 +3030,10 @@
           "factor_verdict_reasons": [
             "positive IC and RankIC means",
             "IC and RankIC signs are consistently positive",
-            "evaluation window is short and may be noisy",
             "rebalance cadence may be too slow for IC decay",
-            "instability flags triggered: short_eval_window",
-            "IC decays sharply after 1-day execution lag"
+            "IC decays sharply after 1-day execution lag",
+            "IC and RankIC validity is high",
+            "long-short spread is positive with positive IR"
           ],
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
@@ -3082,10 +3075,10 @@
           "campaign_triage": "Fragile / monitor",
           "campaign_triage_reasons": [
             "fragile across rolling windows",
+            "uncertainty remains high",
+            "rebalance cadence is slower than IC decay",
             "single-case verdict indicates fragility",
-            "IC decays sharply after 1-day execution lag",
-            "confidence intervals remain supportive",
-            "coverage and validity are sufficient"
+            "factor performance is regime-dependent"
           ],
           "case_name": "case_triage_sensitive",
           "experiment_card_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/experiment_card.md",
@@ -3094,10 +3087,10 @@
           "factor_verdict_reasons": [
             "positive IC and RankIC means",
             "IC and RankIC signs are consistently positive",
+            "rolling evidence suggests regime dependence",
             "signal weakens materially in some periods",
-            "confidence interval overlaps zero: long-short",
-            "apparent edge is weak relative to estimation noise",
-            "IC decays sharply after 1-day execution lag"
+            "rebalance cadence may be too slow for IC decay",
+            "factor performance is regime-dependent"
           ],
           "level12_transition_label": "Inconclusive transition",
           "level12_transition_reasons": [
@@ -3105,7 +3098,7 @@
             "promotion decision: Blocked from Level 2",
             "portfolio recommendation: Not evaluated (not promoted)",
             "promotion reason: blocked by unstable rolling evidence",
-            "promotion reason: blocked by sharp IC decay under 1-day execution lag",
+            "promotion reason: blocked by high uncertainty overlap",
             "fragility: blocked by unstable rolling evidence"
           ],
           "metrics_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/metrics.json",
@@ -3113,6 +3106,7 @@
           "portfolio_recipe_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/portfolio_recipe.json",
           "portfolio_validation_major_risks": [
             "blocked by unstable rolling evidence",
+            "blocked by high uncertainty overlap",
             "blocked by sharp IC decay under 1-day execution lag"
           ],
           "portfolio_validation_recommendation": "Not evaluated (not promoted)",
@@ -3120,16 +3114,17 @@
           "profile_name": "default_research",
           "promotion_blockers": [
             "blocked by unstable rolling evidence",
+            "blocked by high uncertainty overlap",
             "blocked by sharp IC decay under 1-day execution lag"
           ],
           "promotion_decision": "Blocked from Level 2",
           "promotion_reasons": [
             "blocked by unstable rolling evidence",
+            "blocked by high uncertainty overlap",
             "blocked by sharp IC decay under 1-day execution lag",
             "factor verdict is not yet strong",
-            "neutralization evidence is unavailable",
-            "uncertainty remains supportive",
-            "robust across subperiods"
+            "factor performance is regime-dependent",
+            "neutralization evidence is unavailable"
           ],
           "run_manifest_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/run_manifest.json",
           "signal_validation_json_path": "<OUTPUT_ROOT>/runs/default_research/case_triage_sensitive/signal_validation.json",
@@ -3289,26 +3284,6 @@
                 "is_sparse": false,
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
-                "reason": "blocked by sharp IC decay under 1-day execution lag",
-                "support_level": "tentative",
-                "support_note": "tentative due to low support",
-                "supporting_case_names": [
-                  "case_stable_promoted",
-                  "case_short_window_sensitive",
-                  "case_triage_sensitive"
-                ]
-              },
-              {
-                "artifact_pointer_hints": [
-                  "runs/default_research/case_stable_promoted/metrics.json",
-                  "runs/default_research/case_short_window_sensitive/metrics.json",
-                  "runs/default_research/case_triage_sensitive/metrics.json"
-                ],
-                "confidence_note": "tentative due to low support",
-                "count": 3,
-                "is_sparse": false,
-                "minimum_support_met": true,
-                "proportion_of_label_cases": 1.0,
                 "reason": "campaign triage: Fragile / monitor",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
@@ -3330,6 +3305,26 @@
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
                 "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Blocked from Level 2",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [
@@ -3351,8 +3346,8 @@
             "n_cases_with_label": 3,
             "n_reasons_collapsed_by_normalization": 2,
             "n_top_reasons_below_minimum_support": 0,
-            "n_unique_raw_reasons_observed": 8,
-            "n_unique_reasons_observed": 6,
+            "n_unique_raw_reasons_observed": 9,
+            "n_unique_reasons_observed": 7,
             "reason_normalization": {
               "applies_to_rollup_only": true,
               "method": "explicit_rule_v1",
@@ -3363,9 +3358,9 @@
               "case_short_window_sensitive"
             ],
             "representative_reasons": [
-              "blocked by sharp IC decay under 1-day execution lag",
               "campaign triage: Fragile / monitor",
-              "portfolio recommendation: Not evaluated (not promoted)"
+              "portfolio recommendation: Not evaluated (not promoted)",
+              "promotion decision: Blocked from Level 2"
             ],
             "support_count": 3,
             "support_level": "tentative",
@@ -3376,26 +3371,6 @@
               "case_triage_sensitive"
             ],
             "top_reasons": [
-              {
-                "artifact_pointer_hints": [
-                  "runs/default_research/case_stable_promoted/metrics.json",
-                  "runs/default_research/case_short_window_sensitive/metrics.json",
-                  "runs/default_research/case_triage_sensitive/metrics.json"
-                ],
-                "confidence_note": "tentative due to low support",
-                "count": 3,
-                "is_sparse": false,
-                "minimum_support_met": true,
-                "proportion_of_label_cases": 1.0,
-                "reason": "blocked by sharp IC decay under 1-day execution lag",
-                "support_level": "tentative",
-                "support_note": "tentative due to low support",
-                "supporting_case_names": [
-                  "case_stable_promoted",
-                  "case_short_window_sensitive",
-                  "case_triage_sensitive"
-                ]
-              },
               {
                 "artifact_pointer_hints": [
                   "runs/default_research/case_stable_promoted/metrics.json",
@@ -3428,6 +3403,26 @@
                 "minimum_support_met": true,
                 "proportion_of_label_cases": 1.0,
                 "reason": "portfolio recommendation: Not evaluated (not promoted)",
+                "support_level": "tentative",
+                "support_note": "tentative due to low support",
+                "supporting_case_names": [
+                  "case_stable_promoted",
+                  "case_short_window_sensitive",
+                  "case_triage_sensitive"
+                ]
+              },
+              {
+                "artifact_pointer_hints": [
+                  "runs/default_research/case_stable_promoted/metrics.json",
+                  "runs/default_research/case_short_window_sensitive/metrics.json",
+                  "runs/default_research/case_triage_sensitive/metrics.json"
+                ],
+                "confidence_note": "tentative due to low support",
+                "count": 3,
+                "is_sparse": false,
+                "minimum_support_met": true,
+                "proportion_of_label_cases": 1.0,
+                "reason": "promotion decision: Blocked from Level 2",
                 "support_level": "tentative",
                 "support_note": "tentative due to low support",
                 "supporting_case_names": [

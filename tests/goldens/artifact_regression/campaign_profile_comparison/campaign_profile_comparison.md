@@ -7,7 +7,7 @@
 ## Campaign Cases
 
 - `case_stable_promoted`: High-signal neutralized case engineered to remain stable and promoted across profiles.
-- `case_short_window_sensitive`: Short evaluation window case that changes Level 1 verdict and promotion behavior across profiles.
+- `case_short_window_sensitive`: Noisy stability-sensitive case that changes Level 1 verdict and promotion behavior across profiles.
 - `case_triage_sensitive`: Borderline case with profile-dependent campaign triage and portfolio validation recommendation.
 
 ## Per-Profile View
@@ -18,7 +18,7 @@
 |---:|---|---|---|---|---|---|---|
 | 1 | case_short_window_sensitive | success | Promising but fragile | Fragile / monitor | Promote to Level 2 | Weakened at portfolio level | N/A |
 | 2 | case_stable_promoted | success | Promising but fragile | Fragile / monitor | Promote to Level 2 | Weakened at portfolio level | N/A |
-| 3 | case_triage_sensitive | success | Promising but fragile | Strong Level 1 candidate | Blocked from Level 2 | Inconclusive transition | N/A |
+| 3 | case_triage_sensitive | success | Promising but fragile | Fragile / monitor | Blocked from Level 2 | Inconclusive transition | N/A |
 
 ### default_research
 
@@ -55,10 +55,10 @@
 - Sensitivity: `profile_sensitive`
 - L1->L2 transition delta: `transition_stable`
 - L1->L2 transition path: `exploratory_screening`=`Inconclusive transition` -> `default_research`=`Inconclusive transition`
-- Changed fields: `campaign_triage`, `portfolio_validation_recommendation`
+- Changed fields: `portfolio_validation_recommendation`
 - default_research: status=`success`, verdict=`Promising but fragile`, triage=`Fragile / monitor`, promotion=`Blocked from Level 2`, transition=`Inconclusive transition`, portfolio_validation=`Not evaluated (not promoted)`
-- default_research blockers: blocked by unstable rolling evidence, blocked by sharp IC decay under 1-day execution lag
-- exploratory_screening: status=`success`, verdict=`Promising but fragile`, triage=`Strong Level 1 candidate`, promotion=`Blocked from Level 2`, transition=`Inconclusive transition`, portfolio_validation=`N/A`
+- default_research blockers: blocked by unstable rolling evidence, blocked by high uncertainty overlap, blocked by sharp IC decay under 1-day execution lag
+- exploratory_screening: status=`success`, verdict=`Promising but fragile`, triage=`Fragile / monitor`, promotion=`Blocked from Level 2`, transition=`Inconclusive transition`, portfolio_validation=`N/A`
 - exploratory_screening blockers: blocked by unstable rolling evidence
 
 ## Case Evidence Index
@@ -93,13 +93,13 @@
 
 - Profiles observed: `exploratory_screening`, `default_research`
 - Sensitivity: `profile_sensitive`; profile_delta_label=`transition_stable`
-- Changed fields: `campaign_triage`, `portfolio_validation_recommendation`
+- Changed fields: `portfolio_validation_recommendation`
 - Factor verdict by profile: default_research=`Promising but fragile`; exploratory_screening=`Promising but fragile`
-- Campaign triage by profile: default_research=`Fragile / monitor`; exploratory_screening=`Strong Level 1 candidate`
+- Campaign triage by profile: default_research=`Fragile / monitor`; exploratory_screening=`Fragile / monitor`
 - Promotion decision by profile: default_research=`Blocked from Level 2`; exploratory_screening=`Blocked from Level 2`
 - Portfolio robustness by profile: default_research=`Not evaluated (not promoted)`; exploratory_screening=`N/A`
 - L1->L2 transition label by profile: default_research=`Inconclusive transition`; exploratory_screening=`Inconclusive transition`
-- Key reason hints by profile: default_research: campaign triage: Fragile / monitor | promotion decision: Blocked from Level 2 | portfolio recommendation: Not evaluated (not promoted); exploratory_screening: campaign triage: Strong Level 1 candidate | promotion decision: Blocked from Level 2 | promotion reason: blocked by unstable rolling evidence
+- Key reason hints by profile: default_research: campaign triage: Fragile / monitor | promotion decision: Blocked from Level 2 | portfolio recommendation: Not evaluated (not promoted); exploratory_screening: campaign triage: Fragile / monitor | promotion decision: Blocked from Level 2 | promotion reason: blocked by unstable rolling evidence
 - Artifact hints by profile: default_research: runs/default_research/case_triage_sensitive/metrics.json | runs/default_research/case_triage_sensitive/summary.md; exploratory_screening: runs/exploratory_screening/case_triage_sensitive/metrics.json | runs/exploratory_screening/case_triage_sensitive/summary.md
 
 ## Campaign-Level Interpretation
@@ -108,7 +108,7 @@
 ### Compact Comparison Summary
 
 - Transition stability: 1/3 stable (33.3%), sensitive=2; representative=case_triage_sensitive; pointers=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json; case_triage_sensitive [exploratory_screening] runs/exploratory_screening/case_triage_sensitive/metrics.json; support=tentative due to low support.
-- Most profile-sensitive cases: case_short_window_sensitive (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json); case_stable_promoted (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json); case_triage_sensitive (changed_fields=2, delta=transition_stable, pointer=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json).
+- Most profile-sensitive cases: case_short_window_sensitive (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_short_window_sensitive [default_research] runs/default_research/case_short_window_sensitive/metrics.json); case_stable_promoted (changed_fields=2, delta=transition_weakened_under_stricter_profile, pointer=case_stable_promoted [default_research] runs/default_research/case_stable_promoted/metrics.json); case_triage_sensitive (changed_fields=1, delta=transition_stable, pointer=case_triage_sensitive [default_research] runs/default_research/case_triage_sensitive/metrics.json).
 - Strongest profile-pair shift: exploratory_screening -> default_research changed=2/3 (66.7%), reason_shifted_labels=0/2, top_flows=Weakened at portfolio level -> Inconclusive transition (2, cases=case_stable_promoted,case_short_window_sensitive), representative_cases=case_stable_promoted,case_short_window_sensitive,case_triage_sensitive; support=reason shift observed, but only in a small number of cases.
 - Stricter profile impact: promotion (promotion_reduction=2, robustness_reduction=0, adjacent_pairs=1); support=tentative due to low support.
 
@@ -127,7 +127,7 @@
 - default_research (n=3): Confirmed=0, Weakened=0, Fragile=0, Improved=0, Inconclusive=3; interpretation=Most common transition outcome is `Inconclusive transition` (3/3 cases).; support=tentative due to low support
 - default_research representative cases: Inconclusive transition: case_stable_promoted, case_short_window_sensitive
 - default_research artifact hints: Inconclusive transition: runs/default_research/case_stable_promoted/metrics.json
-- default_research dominant transition reasons: Inconclusive transition: `blocked by sharp IC decay under 1-day execution lag` (3, 100.0%; cases=case_stable_promoted,case_short_window_sensitive)
+- default_research dominant transition reasons: Inconclusive transition: `campaign triage: Fragile / monitor` (3, 100.0%; cases=case_stable_promoted,case_short_window_sensitive)
 - L1->L2 transition profile-delta matrix (adjacent profiles):
 - exploratory_screening -> default_research: observed=3, stable=1, changed=2, missing=0; support=tentative due to low support
 - exploratory_screening -> default_research representative cases: case_stable_promoted, case_short_window_sensitive, case_triage_sensitive
@@ -138,7 +138,7 @@
 - exploratory_screening -> default_research representative cases: case_stable_promoted, case_short_window_sensitive, case_triage_sensitive
 - exploratory_screening -> default_research artifact hints: runs/exploratory_screening/case_stable_promoted/metrics.json; runs/exploratory_screening/case_short_window_sensitive/metrics.json
 - exploratory_screening -> default_research [Weakened at portfolio level]: reason shift observed, but only in a small number of cases; exploratory_screening dominant=`campaign triage: Fragile / monitor` 2/2; cases=case_stable_promoted,case_short_window_sensitive; `promotion decision: Promote to Level 2` 2/2; cases=case_stable_promoted,case_short_window_sensitive; default_research dominant=none; shifts=removed: `campaign triage: Fragile / monitor` 2/2 -> 0/0 (-100.0pp); cases=case_stable_promoted,case_short_window_sensitive; support=reason shift observed, but only in a small number of cases
-- exploratory_screening -> default_research [Inconclusive transition]: reason shift observed, but only in a small number of cases; exploratory_screening dominant=none; default_research dominant=`blocked by sharp IC decay under 1-day execution lag` 3/3; cases=case_stable_promoted,case_short_window_sensitive; `campaign triage: Fragile / monitor` 3/3; cases=case_stable_promoted,case_short_window_sensitive; shifts=added: `blocked by sharp IC decay under 1-day execution lag` 0/1 -> 3/3 (+100.0pp); cases=case_stable_promoted,case_short_window_sensitive; support=reason shift observed, but only in a small number of cases
+- exploratory_screening -> default_research [Inconclusive transition]: reason shift observed, but only in a small number of cases; exploratory_screening dominant=none; default_research dominant=`campaign triage: Fragile / monitor` 3/3; cases=case_stable_promoted,case_short_window_sensitive; `portfolio recommendation: Not evaluated (not promoted)` 3/3; cases=case_stable_promoted,case_short_window_sensitive; shifts=added: `campaign triage: Fragile / monitor` 0/1 -> 3/3 (+100.0pp); cases=case_stable_promoted,case_short_window_sensitive; support=reason shift observed, but only in a small number of cases
 
 ## Artifacts
 

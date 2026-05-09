@@ -303,7 +303,7 @@ def _write_example_single_factor_case(root_dir: Path, *, case_name: str) -> Path
 def _synthetic_case_tables(
     *,
     n_assets: int = 12,
-    n_days: int = 90,
+    n_days: int = 200,
     seed: int = 20260326,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     rng = np.random.default_rng(seed)

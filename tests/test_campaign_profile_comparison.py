@@ -113,6 +113,12 @@ def test_campaign_profile_comparison_cli_example_source_writes_outputs(
         and item.get("required_in_strict_mode") is True
         for item in entries
     )
+    assert not any(
+        isinstance(item, dict)
+        and item.get("artifact_name") in {"feature_oos_ic.csv", "training_metrics.csv"}
+        and item.get("validation_status") == "not_emitted_v1"
+        for item in entries
+    )
     case_evidence_index = payload.get("case_evidence_index")
     assert isinstance(case_evidence_index, dict)
     assert "case_stable_promoted" in case_evidence_index

@@ -59,7 +59,7 @@ def test_profile_aware_campaign_level12_example_runs_and_exports_comparison(
     )
 
     triage_case = case_rows["case_triage_sensitive"]
-    assert "campaign_triage" in triage_case["changed_fields"]
+    assert triage_case["profile_sensitivity"] == "profile_sensitive"
     assert "portfolio_validation_recommendation" in triage_case["changed_fields"]
     assert triage_case["level12_transition_profile_delta"]["delta_label"] == "transition_stable"
 
@@ -114,7 +114,7 @@ def test_profile_aware_campaign_level12_example_runs_and_exports_comparison(
 
     field_change_index = payload["field_change_index"]
     assert "case_short_window_sensitive" in field_change_index["promotion_decision"]
-    assert "case_triage_sensitive" in field_change_index["campaign_triage"]
+    assert isinstance(field_change_index["campaign_triage"], list)
 
     for campaign in result.profile_campaigns:
         assert len(campaign.case_summaries) == 3

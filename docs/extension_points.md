@@ -65,6 +65,15 @@ factor_input:
 (`src/alpha_lab/web_unified.py`) auto-registers factor definitions saved via
 the Custom Factor Workshop UI, so interactive additions survive restarts.
 
+### Baseline suite vs. built-in methods
+
+`factor_registry` 里的 built-in 方法只是基础算子，例如 `momentum`、
+`reversal`、`low_volatility`。正式研究对照不直接使用“方法名”作为
+baseline，而是走 `src/alpha_lab/baseline_factor_suite.py` 中的
+`BASELINE_FACTOR_SUITE`：每个 baseline 固定了方法、窗口、skip、输入列
+和因子家族。新增经典基准时，优先在 baseline suite 中增加
+`BaselineFactorSpec`，不要把一个宽泛 built-in 方法直接标成研究基准。
+
 ---
 
 ## 2. Add a new metric
