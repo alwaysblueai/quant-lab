@@ -1,0 +1,150 @@
+{
+  "base_case_spec_path": "model_candidates/research/turnover_technical_ridge_20/model_candidate.json",
+  "candidate_name": "turnover_technical_ridge_20_smoke",
+  "case_spec_payload": {
+    "direction": "long",
+    "factor_name": "turnover_technical_ridge_20_smoke",
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp"
+    },
+    "feature_columns": [
+      "turnover_rate_f",
+      "turnover_rate",
+      "atr_bfq",
+      "dv_ttm",
+      "topdays",
+      "updays",
+      "downdays",
+      "lowdays",
+      "total_mv",
+      "circ_mv",
+      "pe_ttm",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "trix_bfq",
+      "obv_bfq",
+      "emv_bfq",
+      "rsi_bfq_24",
+      "wr_bfq",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq"
+    ],
+    "feature_importance": {
+      "enabled": true,
+      "method": "auto",
+      "mode": "every_fit",
+      "save_ledger": true
+    },
+    "feature_preprocess": {
+      "cross_sectional_transform": "winsorize_zscore",
+      "missing_policy": "median_impute",
+      "scale_features": "auto"
+    },
+    "features_path": "/home/yukun_zhao/quant/projects/alpha-lab/data/processed/model_lab_drafts/turnover_technical_ridge_20_smoke/features.parquet",
+    "model": {
+      "family": "ridge",
+      "params": {
+        "alpha": 5.0
+      }
+    },
+    "model_selection": {
+      "enabled": false
+    },
+    "n_quantiles": 5,
+    "name": "turnover_technical_ridge_20_smoke",
+    "neutralization": {
+      "enabled": false
+    },
+    "output": {
+      "root_dir": "/home/yukun_zhao/quant/projects/alpha-lab/outputs/real_cases"
+    },
+    "prices_path": "/home/yukun_zhao/quant/projects/alpha-lab/data/processed/model_lab_drafts/turnover_technical_ridge_20_smoke/prices.parquet",
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return",
+      "max_abs_forward_return": 1.0,
+      "price_column": "close_qfq"
+    },
+    "training": {
+      "min_score_assets": 300,
+      "min_train_dates": 40,
+      "min_train_rows": 12000,
+      "retrain_every_n_dates": 20,
+      "train_window_n_dates": 80,
+      "window_type": "rolling"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "name": "default"
+    }
+  },
+  "contract_version": "stage2_model_candidate_v1",
+  "data_contract": {
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp",
+      "safety_lag_days": null
+    },
+    "feature_optional_columns": [],
+    "feature_required_columns": [
+      "turnover_rate_f",
+      "turnover_rate",
+      "atr_bfq",
+      "dv_ttm",
+      "topdays",
+      "updays",
+      "downdays",
+      "lowdays",
+      "total_mv",
+      "circ_mv",
+      "pe_ttm",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "trix_bfq",
+      "obv_bfq",
+      "emv_bfq",
+      "rsi_bfq_24",
+      "wr_bfq",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq"
+    ],
+    "prices_required_columns": [
+      "date",
+      "asset",
+      "close",
+      "close_qfq"
+    ]
+  },
+  "expected_horizon": "t_plus_1_or_later",
+  "human_summary": "同源数据抽样 smoke round：用已有 safe_bfq 特征与价格数据抽取 2024+ 的 600 个资产，快速完成第一轮 ridge model factor 开发闭环。",
+  "implementation_status": "draft_for_stage3",
+  "implementation_type": "spec_variant",
+  "risk_controls": {
+    "feature_availability_pit": "保留 known_at required_timestamp，验证与 artifact 审计不降级。",
+    "feature_instability": "smoke 只用于流程与初步信号体检，不能替代全量研究结论。",
+    "label_leakage": "label 仍由标准 model-factor pipeline 生成，不进入 feature。",
+    "overfit_complexity": "ridge + alpha=5.0；不启用模型选择，不引入自定义 estimator。",
+    "split_regime_fragility": "样本从 2024 年开始，先看近期 regime 内的快速诊断。",
+    "turnover_cost": "保留周频和 one_way_rate=0.001，观察 cost-aware 初筛。"
+  },
+  "run_controls": {
+    "evaluation_profile": "exploratory_screening",
+    "screening_retrain_every_n_dates": 20,
+    "vault_export_mode": "skip"
+  },
+  "source_mechanisms": [
+    "liquidity_state",
+    "technical_exhaustion",
+    "valuation_size_control"
+  ],
+  "stage3_validation_focus": [
+    "smoke 数据是否保持 date / asset / known_at / close / close_qfq 合同",
+    "artifact 是否写入 draft_model_source 三类 hash",
+    "ridge 合成是否被规模估值或流动性字段单点主导",
+    "如果 smoke 可运行，再决定是否转回全量 safe_bfq 数据"
+  ]
+}

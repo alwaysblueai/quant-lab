@@ -1,0 +1,3 @@
+- 2026-05-09T00:00:00Z created/imported first Stage3 draft candidate from existing safe_bfq 20-feature resources.
+- 2026-05-09T00:00:00Z validated candidate_json_sha256=1f5c6c386bf661bd9b4ba3c61e04a571cc64c99c5cf3d0610af686e311d9c3b5 case_spec_sha256=658b8b59c12b62f90adf32b3260b6fd3c76adee69258133fb3c2543f1ea2103b feature_contract_sha256=c108cf8bf6cb42402d989209d58bb74d2eca8f6c45e0f960137ed9cb6599e9c1
+- 2026-05-09T00:00:00Z materialized case=turnover_technical_ridge_20_v1.yaml

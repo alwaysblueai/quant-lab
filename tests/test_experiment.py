@@ -372,6 +372,28 @@ def test_summary_coverage_ratios_in_unit_interval():
             assert 0.0 <= value <= 1.0
 
 
+def test_summary_coverage_counts_all_missing_factor_dates_as_zero_coverage():
+    prices = _make_prices(n_assets=3, n_days=4)
+    zero_coverage_date = pd.Timestamp(sorted(pd.to_datetime(prices["date"].unique()))[1])
+
+    def factor_fn(frame: pd.DataFrame) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        for date in sorted(pd.to_datetime(frame["date"].unique())):
+            for asset in sorted(frame["asset"].unique()):
+                value = float("nan") if date == zero_coverage_date else 1.0
+                rows.append({"date": date, "asset": asset, "factor": "f", "value": value})
+        return pd.DataFrame(rows)
+
+    result = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=2)
+
+    # Horizon=1 leaves the final date without a valid label, so coverage is
+    # evaluated on the first three dates: full, zero, full.
+    assert result.summary.mean_eval_assets_per_date == pytest.approx(2.0)
+    assert result.summary.min_eval_assets_per_date == pytest.approx(0.0)
+    assert result.summary.eval_coverage_ratio_mean == pytest.approx(2.0 / 3.0)
+    assert result.summary.eval_coverage_ratio_min == pytest.approx(0.0)
+
+
 def test_summary_instability_flags_are_strings():
     result = run_factor_experiment(_make_prices(), _momentum_fn)
     assert isinstance(result.summary.instability_flags, tuple)

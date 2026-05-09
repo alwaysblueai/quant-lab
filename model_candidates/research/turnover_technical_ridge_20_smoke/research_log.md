@@ -1,0 +1,7 @@
+- 2026-05-09T00:00:00Z created/imported smoke candidate using sampled existing safe_bfq feature and price data.
+- 2026-05-09T00:00:00Z validated candidate_json_sha256=4613b7628fd5abfeace9ae2c158e491f25734782303f696fe3d90d19b6e5624a case_spec_sha256=2a963a6b98e1b3ac0a75a55aebb9614c7291757ae8520ceaa20972bd118c7c4b feature_contract_sha256=c108cf8bf6cb42402d989209d58bb74d2eca8f6c45e0f960137ed9cb6599e9c1
+- 2026-05-09T00:00:00Z materialized case=turnover_technical_ridge_20_smoke_v1.yaml
+- 2026-05-09T00:00:00Z failed run preflight prices_missing_close; regenerated smoke prices with both close and close_qfq.
+- 2026-05-09T00:00:00Z revalidated candidate_json_sha256=b5ea3033cb41bdbbb6638e03ce823a04660256d1b44e492d65a1f2adae863eb9 case_spec_sha256=2a963a6b98e1b3ac0a75a55aebb9614c7291757ae8520ceaa20972bd118c7c4b feature_contract_sha256=c108cf8bf6cb42402d989209d58bb74d2eca8f6c45e0f960137ed9cb6599e9c1
+- 2026-05-09T00:00:00Z run_submitted case=turnover_technical_ridge_20_smoke_v1.yaml profile=exploratory_screening
+- 2026-05-09T00:00:00Z run_succeeded output=outputs/real_cases/turnover_technical_ridge_20_smoke verdict="Promising but fragile" campaign_triage="Strong Level 1 candidate"

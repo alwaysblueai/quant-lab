@@ -1,0 +1,150 @@
+{
+  "base_case_spec_path": "configs/real_cases/model_factor/stock_lasso_safe_bfq_20_lean.yaml",
+  "candidate_name": "turnover_technical_ridge_20",
+  "case_spec_payload": {
+    "direction": "long",
+    "factor_name": "turnover_technical_ridge_20",
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp"
+    },
+    "feature_columns": [
+      "turnover_rate_f",
+      "turnover_rate",
+      "atr_bfq",
+      "dv_ttm",
+      "topdays",
+      "updays",
+      "downdays",
+      "lowdays",
+      "total_mv",
+      "circ_mv",
+      "pe_ttm",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "trix_bfq",
+      "obv_bfq",
+      "emv_bfq",
+      "rsi_bfq_24",
+      "wr_bfq",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq"
+    ],
+    "feature_importance": {
+      "enabled": true,
+      "method": "auto",
+      "mode": "every_fit",
+      "save_ledger": true
+    },
+    "feature_preprocess": {
+      "cross_sectional_transform": "winsorize_zscore",
+      "missing_policy": "median_impute",
+      "scale_features": "auto"
+    },
+    "features_path": "/home/yukun_zhao/quant/projects/alpha-lab/data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet",
+    "model": {
+      "family": "ridge",
+      "params": {
+        "alpha": 5.0
+      }
+    },
+    "model_selection": {
+      "enabled": false
+    },
+    "n_quantiles": 5,
+    "name": "turnover_technical_ridge_20",
+    "neutralization": {
+      "enabled": false
+    },
+    "output": {
+      "root_dir": "/home/yukun_zhao/quant/projects/alpha-lab/outputs/real_cases"
+    },
+    "prices_path": "/home/yukun_zhao/quant/projects/alpha-lab/data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet",
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return",
+      "max_abs_forward_return": 1.0,
+      "price_column": "close_qfq"
+    },
+    "training": {
+      "min_score_assets": 2000,
+      "min_train_dates": 60,
+      "min_train_rows": 50000,
+      "retrain_every_n_dates": 40,
+      "train_window_n_dates": 120,
+      "window_type": "rolling"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "name": "default"
+    }
+  },
+  "contract_version": "stage2_model_candidate_v1",
+  "data_contract": {
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp",
+      "safety_lag_days": null
+    },
+    "feature_optional_columns": [],
+    "feature_required_columns": [
+      "turnover_rate_f",
+      "turnover_rate",
+      "atr_bfq",
+      "dv_ttm",
+      "topdays",
+      "updays",
+      "downdays",
+      "lowdays",
+      "total_mv",
+      "circ_mv",
+      "pe_ttm",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "trix_bfq",
+      "obv_bfq",
+      "emv_bfq",
+      "rsi_bfq_24",
+      "wr_bfq",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq"
+    ],
+    "prices_required_columns": [
+      "date",
+      "asset",
+      "close_qfq"
+    ]
+  },
+  "expected_horizon": "t_plus_1_or_later",
+  "human_summary": "第一轮 model-lab 草稿模型：用 20 个已有 safe_bfq 字段合成 5 日 horizon 的 ridge model factor，目标是建立可审计、可快速迭代的线性基线。",
+  "implementation_status": "draft_for_stage3",
+  "implementation_type": "spec_variant",
+  "risk_controls": {
+    "feature_availability_pit": "使用 features 表中的 known_at 作为 required_timestamp，validator 与 pipeline 负责 PIT 检查。",
+    "feature_instability": "第一轮保留 20 个已有瘦身特征，后续根据 feature_importance 与 feature_oos_ic 决定删减。",
+    "label_leakage": "仅使用 model-factor pipeline 构造 forward_return label，不在 feature 定义中引入未来收益。",
+    "overfit_complexity": "使用 ridge + alpha=5.0 做保守线性合成，不启用模型选择或非线性树模型。",
+    "split_regime_fragility": "使用标准 rolling 训练窗口，先看 exploratory screening，再决定是否扩大到 default_research。",
+    "turnover_cost": "周频 rebalance + one_way_rate=0.001，初筛重点查看 cost-aware long-short 指标。"
+  },
+  "run_controls": {
+    "evaluation_profile": "exploratory_screening",
+    "screening_retrain_every_n_dates": 40,
+    "vault_export_mode": "skip"
+  },
+  "source_mechanisms": [
+    "liquidity_state",
+    "technical_exhaustion",
+    "valuation_size_control"
+  ],
+  "stage3_validation_focus": [
+    "feature_columns 是否全部存在于 features_safe_bfq_35.parquet",
+    "known_at 是否满足 PIT required_timestamp",
+    "ridge 线性合成是否被估值/规模字段主导",
+    "rank IC、decay、turnover、cost-aware 初筛是否值得继续",
+    "feature_importance 与 feature_oos_ic 是否支持删减或切换到非线性模型"
+  ]
+}

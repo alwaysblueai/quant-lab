@@ -43,7 +43,7 @@ from alpha_lab.research_integrity.leakage_checks import (
     check_factor_label_value_clone_risk,
 )
 from alpha_lab.research_integrity.reporting import build_integrity_report
-from alpha_lab.splits import time_split
+from alpha_lab.splits import TimeSeriesSplitContract, time_split
 from alpha_lab.strategy import StrategySpec
 from alpha_lab.tail_risk import TailRiskSummary, compute_tail_risk
 from alpha_lab.turnover import long_short_turnover, quantile_turnover
@@ -451,6 +451,9 @@ class ExperimentResult:
     measurements include any I/O or integrity-check time inside the stage.
     """
 
+    split_contract: TimeSeriesSplitContract | None = None
+    """Auditable IS/OOS split contract when the run used a strict holdout."""
+
 
 def run_factor_experiment(
     prices: pd.DataFrame,
@@ -470,6 +473,7 @@ def run_factor_experiment(
     regime_analysis_config: RegimeAnalysisConfig = DEFAULT_REGIME_ANALYSIS_CONFIG,
     label_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
     precomputed_forward_labels: Mapping[int, pd.DataFrame] | None = None,
+    split_contract: TimeSeriesSplitContract | None = None,
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -545,6 +549,10 @@ def run_factor_experiment(
         reuses cached labels for both the main evaluation horizon (when
         ``label_fn`` is not provided) and the portfolio 1-period simulation
         labels, and only falls back to ``forward_return`` for missing horizons.
+    split_contract:
+        Optional strict IS/OOS contract.  When provided, ``is_end`` and
+        ``oos_start`` are used as the train/test boundary and cannot be
+        combined with ad hoc ``train_end`` / ``test_start`` arguments.
 
     Returns
     -------
@@ -630,6 +638,13 @@ def run_factor_experiment(
     # Require both or neither.  A lone train_end / test_start, or a val_start
     # without a complete split, silently evaluates on the full sample — that is
     # a dangerous misuse path and must be an explicit error.
+    if split_contract is not None:
+        if train_end is not None or test_start is not None or val_start is not None:
+            raise AlphaLabConfigError(
+                "split_contract cannot be combined with train_end/test_start/val_start."
+            )
+        train_end = split_contract.train_end
+        test_start = split_contract.test_start
     if (train_end is None) != (test_start is None):
         raise AlphaLabConfigError(
             "train_end and test_start must both be provided or both be omitted; "
@@ -724,11 +739,15 @@ def run_factor_experiment(
         n_eval_assets = int(eval_factor["asset"].nunique())
         # Count eval dates that have no valid (non-NaN) forward return label for
         # any asset.  These are excluded from IC and quantile-return computation.
-        dates_with_labels: set[object] = set(
-            eval_label.loc[eval_label["value"].notna(), "date"].unique()
+        eval_factor_date_index = pd.DatetimeIndex(
+            pd.to_datetime(eval_factor["date"].dropna().unique())
+        ).sort_values()
+        valid_label_date_index = pd.DatetimeIndex(
+            pd.to_datetime(eval_label.loc[eval_label["value"].notna(), "date"].dropna().unique())
+        ).sort_values()
+        n_label_nan_dates = int(
+            len(eval_factor_date_index.difference(valid_label_date_index))
         )
-        eval_factor_dates: set[object] = set(eval_factor["date"].unique())
-        n_label_nan_dates = len(eval_factor_dates - dates_with_labels)
 
         merged_eval = (
             eval_factor[["date", "asset", "value"]]
@@ -741,10 +760,16 @@ def run_factor_experiment(
             )
         )
         valid_eval = merged_eval.dropna(subset=["value_factor", "value_label"])
+        coverage_date_index = eval_factor_date_index.intersection(valid_label_date_index)
         if valid_eval.empty:
-            valid_assets_by_date = pd.Series(dtype=float)
+            valid_assets_by_date = pd.Series(0.0, index=coverage_date_index, dtype=float)
         else:
             valid_assets_by_date = valid_eval.groupby("date")["asset"].nunique()
+            valid_assets_by_date.index = pd.to_datetime(valid_assets_by_date.index)
+            valid_assets_by_date = valid_assets_by_date.reindex(
+                coverage_date_index,
+                fill_value=0.0,
+            )
         mean_eval_assets_per_date = (
             float(valid_assets_by_date.mean()) if len(valid_assets_by_date) > 0 else float("nan")
         )
@@ -913,6 +938,9 @@ def run_factor_experiment(
             "n_quantiles": n_quantiles,
             "train_end": str(train_end) if train_end is not None else None,
             "test_start": str(test_start) if test_start is not None else None,
+            "split_contract": (
+                split_contract.to_metadata() if split_contract is not None else None
+            ),
             "portfolio_path_enabled": bool(
                 holding_period is not None and rebalance_frequency is not None
             ),
@@ -949,6 +977,7 @@ def run_factor_experiment(
         integrity_checks=tuple(integrity_checks),
         integrity_report=integrity_report,
         stage_timings=dict(stage_timings),
+        split_contract=split_contract,
     )
 
 
