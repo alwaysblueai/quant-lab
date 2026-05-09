@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
 
+import alpha_lab.research_bridge.model_idea as model_idea_module
+import alpha_lab.research_bridge.service as research_bridge_service
+from alpha_lab.exceptions import AlphaLabIOError
+from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.web_unified import (
     _build_frontend_batch_parallel_config,
     _build_model_lab_batch_worker_count,
@@ -29,10 +34,38 @@ from alpha_lab.web_unified import (
     _UnifiedService,
 )
 from tests.model_factor_case_helpers import write_demo_model_factor_case
+from tests.single_factor_case_helpers import write_demo_single_factor_case
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _disable_llm_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_rerank_candidates(**_: object) -> RerankOutcome:
+        return RerankOutcome(
+            enabled=False,
+            model="claude-sonnet-4-6",
+            scores={},
+            reasons={},
+            tokens_input=0,
+            tokens_output=0,
+            cache_hit_input=0,
+            dropped_invalid_names=[],
+            fallback_reason="no_api_key",
+        )
+
+    monkeypatch.setattr(
+        research_bridge_service,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
+    monkeypatch.setattr(
+        model_idea_module,
+        "rerank_candidates",
+        fake_rerank_candidates,
+    )
 
 
 def _build_vault(tmp_path: Path) -> Path:
@@ -155,6 +188,93 @@ def _build_vault(tmp_path: Path) -> Path:
 
 def _make_service(tmp_path: Path, vault: Path) -> _UnifiedService:
     return _UnifiedService(vault_root=vault, workspace_root=tmp_path)
+
+
+def test_llm_settings_save_reload_and_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    initial = svc.llm_settings_status()
+    assert initial["anthropic_api_key_configured"] is False
+    assert initial["anthropic_api_key_source"] == "none"
+
+    saved = svc.save_llm_settings(
+        {
+            "anthropic_api_key": "sk-ant-test-local",
+            "anthropic_base_url": "https://anthropic-proxy.example/v1",
+            "research_bridge_v2_enabled": True,
+        }
+    )
+
+    assert saved["anthropic_api_key_configured"] is True
+    assert saved["anthropic_api_key_source"] == "saved"
+    assert saved["anthropic_base_url"] == "https://anthropic-proxy.example/v1"
+    assert saved["anthropic_base_url_source"] == "saved"
+    assert saved["research_bridge_v2_enabled"] is True
+    assert "anthropic_api_key" not in saved
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test-local"
+    assert os.environ["ANTHROPIC_BASE_URL"] == "https://anthropic-proxy.example/v1"
+    assert os.environ["ALPHA_LAB_RESEARCH_BRIDGE_V2"] == "1"
+
+    settings_path = tmp_path / ".research_bridge_cache" / "secret_settings.json"
+    raw = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert raw["anthropic_api_key"] == "sk-ant-test-local"
+    assert raw["anthropic_base_url"] == "https://anthropic-proxy.example/v1"
+    assert raw["research_bridge_v2_enabled"] is True
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+    reloaded = _make_service(tmp_path, vault)
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test-local"
+    assert os.environ["ANTHROPIC_BASE_URL"] == "https://anthropic-proxy.example/v1"
+    assert os.environ["ALPHA_LAB_RESEARCH_BRIDGE_V2"] == "1"
+    assert reloaded.llm_settings_status()["anthropic_api_key_source"] == "saved"
+
+    cleared = reloaded.save_llm_settings(
+        {
+            "clear_anthropic_api_key": True,
+            "clear_anthropic_base_url": True,
+            "research_bridge_v2_enabled": False,
+        }
+    )
+
+    assert cleared["anthropic_api_key_configured"] is False
+    assert cleared["anthropic_api_key_source"] == "none"
+    assert cleared["anthropic_base_url"] == ""
+    assert cleared["anthropic_base_url_source"] == "default"
+    assert cleared["research_bridge_v2_enabled"] is False
+    assert "ANTHROPIC_API_KEY" not in os.environ
+    assert "ANTHROPIC_BASE_URL" not in os.environ
+    assert "ALPHA_LAB_RESEARCH_BRIDGE_V2" not in os.environ
+    raw_after_clear = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "anthropic_api_key" not in raw_after_clear
+    assert "anthropic_base_url" not in raw_after_clear
+    assert raw_after_clear["research_bridge_v2_enabled"] is False
+
+
+def test_mechanism_index_status_reports_literal_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    status = svc.mechanism_index_status()
+
+    assert status["ok"] is True
+    assert status["ready"] is False
+    assert status["status"] == "not_built"
+    assert status["card_count"] == 0
+    assert status["research_bridge_v2_enabled"] is False
+    assert status["anthropic_api_key_configured"] is False
+    assert status["research_bridge_v2_active"] is False
 
 
 def _inject_succeeded_run_with_ic_timeseries(
@@ -328,6 +448,184 @@ def test_extract_metrics_summary_includes_scalar_diagnostics(tmp_path: Path) -> 
     assert summary["data_quality_integrity_warn_count"] == 2
     assert summary["data_quality_integrity_fail_count"] == 0
     assert summary["data_quality_hard_fail_count"] == 0
+    assert summary["split_status"] == "missing"
+
+
+def test_extract_metrics_summary_flattens_strict_split_contract(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    split_contract = {
+        "policy": "auto_holdout_v1",
+        "source": "single_factor_pipeline",
+        "is_start": "2020-01-01",
+        "is_end": "2023-12-29",
+        "oos_start": "2024-01-08",
+        "oos_end": "2024-12-31",
+        "embargo_days": 5,
+        "min_oos_dates": 60,
+        "min_is_dates": 60,
+        "n_dates": 1250,
+        "n_is_dates": 995,
+        "n_oos_dates": 250,
+        "target_horizon": 5,
+        "rebalance_step": 5,
+    }
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "factor_verdict": "promising",
+                    "split_contract": split_contract,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = _extract_metrics_summary(metrics_path)
+
+    assert summary["split_status"] == "strict"
+    assert summary["oos_start"] == "2024-01-08"
+    assert summary["embargo_days"] == 5
+
+
+def test_extract_metrics_summary_marks_legacy_full_sample(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(
+        json.dumps({"metrics": {"split_description": "full_sample"}}),
+        encoding="utf-8",
+    )
+
+    summary = _extract_metrics_summary(metrics_path)
+
+    assert summary["split_status"] == "full_sample"
+
+
+def test_extract_metrics_summary_marks_missing_when_split_fields_absent(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(
+        json.dumps({"metrics": {"factor_verdict": "watch"}}),
+        encoding="utf-8",
+    )
+
+    summary = _extract_metrics_summary(metrics_path)
+
+    assert summary["split_status"] == "missing"
+
+
+def test_frontend_split_date_uses_explicit_contract_fields_only() -> None:
+    unified_html = _index_html_raw()
+    model_html = _model_lab_html()
+
+    assert "function resolveRunSplitDate" in unified_html
+    assert "safeSummary.split_contract" in unified_html
+    assert "parseTestStartDate(summary.split_description)" not in unified_html
+    assert "parseTestStartDate(run && run.summary" not in unified_html
+
+    assert "function resolveOverviewSplitDate" in model_html
+    assert "summary.split_contract" in model_html
+    assert "inferOverviewSplitDateFromSnapshot" not in model_html
+
+
+def test_model_lab_numeric_helpers_preserve_missing_values_and_sample_ir() -> None:
+    html = _model_lab_html()
+
+    assert (
+        'if (!raw || ["nan", "null", "none", "n/a"].includes(raw.toLowerCase())) '
+        "return null;"
+    ) in html
+    assert (
+        'if (!raw || ["nan", "null", "none", "n/a"].includes(raw.toLowerCase())) '
+        'return "-";'
+    ) in html
+    assert "const value = toNum(rawValue);" in html
+    assert "const variance = values.reduce(" in html
+    assert ") / (values.length - 1);" in html
+
+
+def test_model_lab_coverage_chart_formats_percent_axis_and_summary_stats() -> None:
+    html = _model_lab_html()
+    unified_html = _index_html_raw()
+
+    assert "Coverage 时序" in html
+    assert 'valueFormat: "percent"' in html
+    assert "yClampMax: 1" in html
+    assert "showPointTooltips: true" in html
+    assert "coverage-summary-grid" in html
+    assert "asset_coverage_by_date" in html
+    assert "coverageTickDecimals" in html
+    assert "period:" in html
+    assert "valid_score_count" in html
+    assert "valid_forward_return_count" in html
+    assert "break_flag:" in html
+    assert "break_reason:" in html
+    assert "overall_sample_coverage" in html
+    assert "Coverage Break Days" in html
+    assert "coverage_eval_included" in html
+    assert "Warmup Break Days Excluded" in html
+    assert "Yearly Factor Stability Heatmap" in html
+    assert "Yearly Verdict" in html
+    assert "Signal: ${signalTag}" in html
+    assert "Signal direction is" in html
+    assert "Portfolio conversion is mixed" in html
+    assert "Portfolio Conversion: " in html
+    assert "OOS years show no clear deterioration" not in html
+    assert "low_sample:" in html
+    assert "Mean RankIC ↑" in html
+    assert "IC>0 ↑" in html
+    assert "Avg Asset Coverage ↑" in html
+    assert "Est. Cost-adj. L/S IR ↑" in html
+    assert "Max Drawdown ↓" in html
+    assert "absForColor" in html
+    assert "absDisplay" in html
+    assert "universe_count" in html
+    assert "scored_count" in html
+    assert "missing_score_count" in html
+    assert "filtered_count" in html
+    assert "feature_nan_row_count" in html
+    assert "asset_coverage_by_date" in unified_html
+    assert "overviewCoverageTickDecimals" in unified_html
+    assert "Sample Coverage" in unified_html
+    assert "Avg Asset Coverage" in unified_html
+    assert "Min Asset Coverage" in unified_html
+    assert "Coverage Break Days" in unified_html
+    assert "coverage_eval_included" in unified_html
+    assert "decisionOverviewCoveragePoints" in unified_html
+    assert "Coverage Break Events" in unified_html
+    assert "Worst Coverage Date" in unified_html
+    assert "Worst 5 Coverage Dates" in unified_html
+    assert "First Break Date" in unified_html
+    assert "Last Break Date" in unified_html
+    assert "OOS Break Days" in unified_html
+    assert "early break / warmup candidate" in unified_html
+    assert "nonBreakCoveragePoints" in unified_html
+    assert "coverageXDomainOptions" in unified_html
+    assert "xDomainMin" in unified_html
+    assert "Effective Dates" in unified_html
+    assert "Avg Valid Assets" in unified_html
+    assert "period:" in unified_html
+    assert "break_flag:" in unified_html
+    assert "break_reason:" in unified_html
+    assert "valid_forward_return_count" in unified_html
+    assert "Yearly Factor Stability Heatmap" in unified_html
+    assert "Yearly Verdict" in unified_html
+    assert "yearly-verdict-badges" in unified_html
+    assert "Signal: ${signalTag}" in unified_html
+    assert "Portfolio: ${portfolioTag}" in unified_html
+    assert "Cost: Raw only" in unified_html
+    assert "suggesting stable signal direction" in unified_html
+    assert "Portfolio conversion is mixed" in unified_html
+    assert "Portfolio Conversion: " in unified_html
+    assert "OOS years show no clear deterioration" not in unified_html
+    assert "low_sample:" in unified_html
+    assert "Mean RankIC ↑" in unified_html
+    assert "IC>0 ↑" in unified_html
+    assert "Avg Asset Coverage ↑" in unified_html
+    assert "Raw L/S IR by Year ↑" in unified_html
+    assert "Est. Cost-adj. L/S IR ↑" in unified_html
+    assert "Max Drawdown ↓" in unified_html
+    assert "artifact-fast-diagnostics-row" in unified_html
+    assert "artifact-fast-diagnostic-combo" in unified_html
+    assert "renderFastDiagnosticsCoverageRow" in unified_html
 
 
 def test_model_lab_spec_service_round_trip(tmp_path: Path) -> None:
@@ -385,6 +683,65 @@ def test_model_lab_submit_run_enqueues_model_factor_task(tmp_path: Path) -> None
     assert record["workflow"] == "model_factor"
     assert record["project_slug"] == "__model_lab__"
     assert record["case_name"] == "demo_web_model_lab_run_model_factor"
+
+
+def test_model_lab_submit_run_preflight_rejects_invalid_split_before_enqueue(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    specs_dir = tmp_path / "configs" / "real_cases" / "model_factor"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    spec_path = write_demo_model_factor_case(
+        specs_dir,
+        factor_name="web_model_lab_short_split",
+        n_days=120,
+    )
+    renamed = spec_path.with_name("web_model_lab_short_split.yaml")
+    spec_path.rename(renamed)
+
+    with pytest.raises(AlphaLabIOError, match="strict split 启动前检查失败"):
+        svc.submit_model_lab_run({"spec_name": "web_model_lab_short_split.yaml"})
+
+    assert svc.run_store.list_records(workflow="model_factor") == []
+
+
+def test_alpha_lab_submit_run_preflight_rejects_invalid_split_before_enqueue(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    project_dir = vault / "55_projects" / "split_project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    project_yaml = {
+        "slug": "split_project",
+        "title_zh": "Split Project",
+        "category": "factor",
+        "owner": "test",
+        "market": "ashare",
+        "frequency": "daily",
+        "chatgpt_project_name": "Split Project",
+        "alpha_lab_defaults": {"evaluation_profile": "default_research"},
+    }
+    (project_dir / "project.yaml").write_text(
+        yaml.safe_dump(project_yaml, sort_keys=False),
+        encoding="utf-8",
+    )
+    spec_path = write_demo_single_factor_case(
+        project_dir,
+        factor_name="web_alpha_short_split",
+        n_days=120,
+    )
+    spec_payload = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    (project_dir / "current_case.yaml").write_text(
+        yaml.safe_dump(spec_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AlphaLabIOError, match="strict split 启动前检查失败"):
+        svc.submit_run("split_project", {"case_name": spec_payload["name"]})
+
+    assert svc.run_store.list_records(project_slug="split_project") == []
 
 
 def test_model_lab_spec_duplicate_creates_version_chain(tmp_path: Path) -> None:
@@ -547,6 +904,10 @@ def test_model_lab_compare_runs_returns_metric_and_leakage_payload(tmp_path: Pat
     assert len(result["leakage"]["runs"]) == 2
     assert result["feature_stability"]["pair_count"] == 1
     assert result["feature_stability"]["mean_jaccard"] is not None
+    assert result["spec_diff"]["status"] == "ok"
+    assert result["spec_diff"]["left"] == "case_a.yaml"
+    assert result["spec_diff"]["right"] == "case_b.yaml"
+    assert result["spec_diff"]["has_difference"] is True
     assert result["ic_series"]
     assert result["turnover_series"]
     assert result["leakage"]["severity_by_run"] == {"mrun_a": "warn", "mrun_b": "pass"}
@@ -599,6 +960,7 @@ def test_model_lab_compare_runs_supports_eight_runs(tmp_path: Path) -> None:
     # N*(N-1)/2 pairs for Jaccard
     assert result["feature_stability"]["pair_count"] == 28
     assert len(result["leakage"]["runs"]) == 8
+    assert result["spec_diff"]["status"] == "requires_two_runs"
 
 
 def test_model_lab_compare_runs_rejects_more_than_eight(tmp_path: Path) -> None:
@@ -1026,6 +1388,13 @@ def test_model_lab_idea_explorer_service_round_trip(tmp_path: Path) -> None:
     assert payload["idea"] == first["idea"]
     assert "gpt_prompt" in payload
 
+    deleted = svc.delete_model_lab_idea_session(first_session_id)
+    assert deleted["archived"] is True
+    assert not any(
+        str(item.get("session_id")) == first_session_id
+        for item in svc.list_model_lab_idea_sessions(limit=10)
+    )
+
 
 def test_model_lab_idea_explorer_apply_patch_hint_service(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
@@ -1160,16 +1529,185 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
 
     assert "IC显著性" in html
     assert "Factor Snapshot" in html
-    assert "10 项核心指标" in html
+    assert "Quick Decision Metrics / 快速决策指标" in html
+    assert "Quick Verdict / 快速结论" in html
+    assert "quick-verdict-banner" in html
+    assert ".run-table th:nth-child(6)" in html
+    assert ".run-table .metrics-screening-kv" in html
+    assert "metrics-screening-kv-compact" in html
+    assert '<strong>${escHtml(label)}:</strong>' in html
+    assert 'scope === "full" || scope === "overall"' in html
+    assert "is-portfolio" in html
+    assert "Raw metrics only; no transaction cost assumption." in html
+    assert "5-day horizon stronger" in html
+    assert "signal decays by 5d" in html
+    assert "Coverage Summary" in html
+    assert "Coverage Details / 覆盖率细节" in html
+    assert "Main y-axis excludes break days; Min Coverage includes break days" in html
+    assert "warmup-only breaks" in html
+    assert "tearsheet-exec-summary" in html
+    assert "Executive Summary · Core Metrics" in html
+    assert "function renderAlphaLabOverviewFixturePayload(payload)" in html
+    assert "function loadAlphaLabOverviewFixture(fixtureId)" in html
+    assert "function alphaLabOverviewFixtureIdFromLocation()" in html
+    assert "/api/dev/alpha-lab/overview-fixtures/" in html
+    assert "/dev/alpha-lab/overview-fixture" in html
+    assert "/dev/alpha-lab1/overview-fixture" in html
+    assert "Verdict:" in html
+    assert "Diagnostic Warning" in html
+    assert "Trading / Data" in html
+    assert "IC@5 / IC@1" in html
+    assert "Monotonic Share" in html
+    assert "extractNamedRatioFromText" in html
+    assert "minmax(128px, 0.86fr) minmax(0, 1.14fr)" in html
+    assert "Est. Cost-adj. Long-Short IR" in html
+    assert "Raw L/S IR by Year ↑" in html
+    assert "Factor Autocorr" in html
+    assert "Core Decision Charts / 核心决策图" in html
+    assert "tearsheet-core-decision-grid" in html
+    assert "tearsheet-core-decision-item" in html
+    assert 'wrapCoreDecisionChart(yearlyStabilityChart, "is-wide")' in html
+    assert "观察信号稳定性与 OOS 衰减" in html
+    assert "观察组合收益与估算成本影响" in html
+    assert "观察跨年份稳定性" in html
+    assert "观察分组单调性" in html
+    assert "monotonic_share=" in html
+    assert "Spearman=" in html
+    assert "IS Q5-Q1=" in html
+    assert "OOS Q5-Q1=" in html
+    assert "OOS start" in html
+    assert "Advanced IC Diagnostics" in html
+    assert "Advanced IC Diagnostics / IC 高级诊断 · ${advancedIcSummaryTitle}" in html
+    assert "RankIC<0 ${fmtRatioAsPercent" in html
+    assert "Data Quality Diagnostics" in html
+    assert "Coverage Break Events" in html
+    assert "Main y-axis excludes break days from scaling; min coverage includes break days" in html
+    assert "Break Days Count" in html
+    assert "Worst Coverage Date" in html
+    assert "Worst 5 Coverage Dates" in html
+    assert "First Break Date" in html
+    assert "Last Break Date" in html
+    assert "OOS Break Days" in html
+    assert "early break / warmup candidate" in html
+    assert "nonBreakCoveragePoints" in html
+    assert "coverageXDomainOptions" in html
+    assert "Data Quality Diagnostics / 数据质量诊断 · ${dataQualityWarningCount} warnings" in html
+    assert "Trading Diagnostics" in html
+    assert "Trading Diagnostics / 交易诊断 · ${turnoverP95Title}, ${turnoverSpikeTitle}" in html
+    assert "Reproducibility Artifacts" in html
+    assert "Reproducibility Artifacts / 复现材料 · ${escHtml(artifactSummaryLabel)}" in html
+    assert "Asset Coverage Time Series / 每日资产覆盖率" in html
+    assert "Turnover Time Series / 换手率时序" in html
+    assert "加载数据库卡片统计中" in html
+    assert "总览加载失败" in html
+    assert (
+        'String((row && (row.group ?? row.quantile ?? row.bucket ?? row.group_id)) ?? "")'
+        in html
+    )
+    assert (
+        'String(row && (row.group ?? row.quantile ?? row.bucket ?? row.group_id) ?? "")'
+        not in html
+    )
+    assert "tearsheet-compact-diagnostics" in html
+    assert "tearsheet-diagnostic-summary-grid" in html
+    assert "Avg Turnover" in html
+    assert "P95 Turnover" in html
+    assert "OOS P95 Turnover" in html
+    assert "Turnover Spike Days" in html
+    assert "Worst 20D Return" in html
+    assert "computeWorstRollingReturn" in html
+    assert "computeCalmarRatio" in html
+    assert "RankIC median" in html
+    assert "RankIC p25 / p75" in html
+    assert "RankIC p5 / p95" in html
+    assert "RankIC < 0" in html
+    assert "Avg Q5 Holdings" in html
+    assert "Avg Q1 Holdings" in html
+    assert "Effective Breadth" in html
+    assert "Missing Diagnostics" in html
+    assert "<th>Module</th><th>Issue</th><th>Evidence</th><th>Impact</th><th>Action</th>" in html
+    assert "inspect group_returns.csv / quantile_returns.csv" in html
+    assert "Quantile Cumulative NAV" in html
+    assert "Quantile NAV hidden" in html
+    assert "<th>Notes</th>" in html
+    assert "展开查看分位组累计净值和 underwater 曲线等组合端细节" in html
+    assert "Permutation Null Distribution of RankIC（experimental，默认折叠）" in html
+    assert "n_permutations=" in html
+    assert "tearsheet-diagnostic-chart-flow" in html
+    assert "Promotion Review Summary" in html
+    assert "Hard Fails" in html
+    assert "Soft Warnings" in html
+    assert "Passed Checks" in html
+    assert "Warning Checks" in html
+    assert "Failed Checks" in html
+    assert "Warning Categories" in html
+    assert "Evidence / Reason" in html
+    assert "Soft warning evidence" in html
+    assert "Top warning reasons" in html
+    assert "Promotion is not blocked by hard rules, but soft warnings require review." in html
+    assert "Blocker Count" not in html
+    assert "buildPromotionDiagnosticModel" in html
+    assert "classifyPromotionBlocker" in html
+    assert "详细 promotion check 表（默认折叠）" in html
+    assert "tearsheet-cell-muted" in html
     assert "IC t-stat" in html
-    assert "Decay Retention (5/1)" in html
-    assert "收益率曲线" in html
-    assert "RankIC 时序" in html
+    assert "RankIC@5 / RankIC@1" in html
+    assert "Cumulative RankIC" in html
+    assert "Cumulative RankIC（默认折叠）" in html
+    assert "tearsheetBuildHistogramChart" in html
+    assert "IS RankIC" in html
+    assert "OOS RankIC" in html
+    assert "bin:" in html
+    assert "count:" in html
+    assert "mean" in html
+    assert "median" in html
+    assert "p5" in html
+    assert "p95" in html
+    assert "Rolling RankICIR / Rolling ICIR" in html
+    assert "yReferenceLines" in html
+    assert "IS mean" in html
+    assert "OOS mean" in html
+    assert "0 line, IS mean and OOS mean are shown as dashed references" in html
+    assert "function buildRollingInformationRatioPoints" in html
+    assert "buildRollingIrReferenceLines" in html
+    assert "tearsheet-ic-side-box" in html
+    assert "tearsheet-ic-distribution-box" in html
+    assert "Magnitude Q1~Q5 表示按因子强度分层后的 RankIC" in html
+    assert "small / large cross section 表示按每日横截面覆盖规模分组" in html
+    assert "Auto interpretation" in html
+    assert "RankIC peaks at lag" in html
+    assert "RankIC decays quickly; signal is short-lived." in html
+    assert "RankIC 时序（含累计）" not in html
     assert "Rolling IC" in html
     assert "IC Decay" in html
+    assert "artifact-fast-diagnostics-row" in html
+    assert "artifact-fast-diagnostic-combo" in html
+    assert "renderFastDiagnosticsCoverageRow" in html
     assert "function fmtDrawdownAsPercent" in html
     assert "function resolveMaxDrawdownForDisplay" in html
     assert "backtestSummary.max_drawdown" in html
+    assert "Raw vs Estimated Cost-adjusted Long-Short NAV" in html
+    assert "Raw Long-Short NAV" in html
+    assert "Estimated Cost-adjusted Long-Short NAV" in html
+    assert "No transaction cost assumption; cost-adjusted metrics are hidden." in html
+    assert "round-trip" in html
+    assert "estimated cost-adjusted return = raw L/S return - turnover * cost_rate" in html
+    assert (
+        "Estimated by raw L/S return - turnover × cost_rate; "
+        "not a full execution-level cost backtest"
+    ) in html
+    assert "not a full execution-level cost backtest" in html
+    assert "period:" in html
+    assert "raw long-short return" in html
+    assert "estimated cost-adjusted long-short return" in html
+    assert "estimated cost" in html
+    assert "Raw Long-Short" in html
+    assert "Estimated Cost-adjusted Long-Short" in html
+    assert "Estimated Cost-adjusted L/S IR by Cost Rate" in html
+    assert "Cost-aware" not in html
+    assert "diagnostic pending" not in html
+    assert "invalid return series" in html
+    assert "computeOverviewReturnStatsFromReturns" in html
     assert "const width = 1040;" in html
     assert "const height = 400;" in html
     assert 'stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"' in html
@@ -1181,6 +1719,8 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "metrics-screening-grid" in html
     assert "metrics-screening-grid-fast" in html
     assert "metrics-screening-card" in html
+    assert 'label: "Cost assumption"' not in html
+    assert "Raw metrics only; no transaction cost assumption." in html
     assert "artifact-group-quick" in html
     assert "metrics-run-header-label" in html
     assert "quantile_returns" in html
@@ -1188,7 +1728,6 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "renderRunOverviewSection" in html
     assert "renderOverviewLineChart" in html
     assert "renderDualAxisLineChart" in html
-    assert "累计 RankIC（右轴）" in html
     assert "compactYmd" in html
     assert "compactYm" in html
     assert "purged_kfold_summary" in html
@@ -1201,43 +1740,205 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "快速筛选模式 · 固定 9 项核心指标" not in html
 
 
-def test_index_html_includes_explore_response_recording_ui() -> None:
+def test_index_html_factor_workshop_baseline_tables_are_constrained() -> None:
     html = _index_html_raw()
 
-    assert 'id="exploreRecordPanel"' in html
-    assert 'id="exploreResponseText"' in html
-    assert 'id="btnRecordExploreResponse"' in html
-    assert 'id="exploreRecordStatus"' in html
-    assert "/api/vault/record-explore-response" in html
-    assert "renderExploreLintReport" in html
-    assert "setExploreRecordSession" in html
-    assert 'id="exploreSessionList"' in html
-    assert 'id="btnRefreshExploreSessions"' in html
-    assert "/api/vault/explore-sessions?limit=30" in html
-    assert "openExploreSession" in html
-    assert 'id="btnExploreApplyProject"' in html
-    assert 'id="btnExploreFillPreflight"' in html
+    assert "Research Baseline Suite / 研究基准因子套件" in html
+    assert "factor-workshop-table-wrap" in html
+    assert "factor-workshop-baseline-table" in html
+    assert "overflow-x: auto" in html
+    assert "table-layout: fixed" in html
+    assert "overflow-wrap: anywhere" in html
+
+
+def test_index_html_keeps_alpha_explorer_on_v1_draft_flow_only() -> None:
+    html = _index_html_raw()
+
     assert 'id="btnExploreGenerateFactorDraft"' in html
-    assert "applyExploreToProjectHypothesis" in html
-    assert "fillPreflightFromExplore" in html
+    assert 'id="exploreMechanismIndexStatus"' in html
+    assert "/api/settings/mechanism-index" in html
     assert "generateFactorDraftFromExplore" in html
+    assert 'id="exploreDraftAgentPanel"' in html
+    assert 'id="exploreDraftAgentPanelBody"' in html
+    assert "copyExploreDraftAgentPrompt" in html
+    assert "Markdown-only" in html
+    assert 'api("/api/vault/idea-draft", "POST"' in html
+    assert "minimal_artifacts: true" in html
+    assert "compactRetrievalCardsForPrompt" in html
+    assert "isCompletePromptBullet" in html
+    assert "compactCrossCardSynthesisForPrompt" in html
+    assert "vault_root" in html
+    assert "### Cross-card synthesis" in html
+    assert "stage1GenerationMaterialText" in html
+    assert "## 5. Markdown" in html
+    assert "/api/vault/idea-draft/final-ledger" not in html
+    assert "/api/vault/idea-draft/status" not in html
+    assert "saveExploreDraftFinalLedger" not in html
+    assert "data-role=\"idea-draft-final-ledger-input\"" not in html
+    assert "refreshIdeaDraftStatus" not in html
+    assert "ledger_v1.${model}.yaml" not in html
+
+    assert "Knowledge Writeback Queue" in html
+    assert 'id="kwStage2Body"' in html
+    assert 'id="btnCreateStage2NoteDraft"' in html
+    assert 'id="kwStage3Body"' in html
+    assert 'id="btnCreateValidationDraft"' in html
+    assert 'id="btnCreateFailureDraft"' in html
+    assert "/api/vault/writeback-drafts" in html
+    assert "experiment_note" in html
+    assert "validation_report" in html
+    assert "failure_observation" in html
+    assert "summarizeRun" in html
+    assert "EXECUTE_FORMAL_WRITEBACK" in html
+
+    assert 'id="exploreDraftFiles"' not in html
+    assert 'id="exploreDraftSharedPrompt"' not in html
+    assert 'id="exploreDraftModelLedgers"' not in html
+    assert 'id="exploreDraftReconcile"' not in html
+    assert 'id="exploreDraftFinalLedger"' not in html
+    assert 'id="btnExploreIdea"' not in html
+    assert 'id="btnCopyExplorePrompt"' not in html
+    assert 'id="exploreRecordPanel"' not in html
+    assert 'id="exploreResponseText"' not in html
+    assert 'id="btnRecordExploreResponse"' not in html
+    assert 'id="exploreSessionList"' not in html
+    assert 'id="exploreQuickSessions"' not in html
+    assert 'id="btnRefreshExploreSessions"' not in html
+    assert "/api/vault/explore-idea" not in html
+    assert "/api/vault/record-explore-response" not in html
+    assert "/api/vault/explore-sessions/" not in html
+    assert "openExploreSession" not in html
+    assert "deleteExploreSession" not in html
+    assert "renderExploreLintReport" not in html
+    assert "setExploreRecordSession" not in html
+    assert "copyExploreDraftReconcilePrompt" not in html
+    assert "retrieval_log.md" not in html
 
 
-def test_index_html_explore_prompt_survives_card_render_errors() -> None:
+def test_idea_draft_status_detects_filled_ledgers(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    draft = svc.create_idea_draft(
+        idea="高波动下跌日之后的流动性承接",
+        models=["claude", "codex"],
+        top_k=2,
+    )
+    status = svc.read_idea_draft_status(str(draft["manifest_path"]))
+
+    assert status["ok"] is True
+    assert status["reconcile_ready"] is False
+    assert status["ledgers_ready"] is False
+    ledger_status = cast(list[dict[str, Any]], status["ledger_status"])
+    by_model = {str(item["model"]): item for item in ledger_status}
+    assert by_model["claude"]["status"] == "pending_input"
+    assert by_model["codex"]["status"] == "pending_input"
+
+    filled_ledger = """mechanisms:
+  - id: liquidity_absorption_after_selloff
+    hypothesis: "下跌日的高波动若伴随承接，后续压力可能衰减。"
+    inspired_by:
+      - card: "30_factors/Factor - Momentum Base.md"
+        what_i_took: "把动量衰减改写为承接后的压力释放。"
+    fusion_of: []
+    novel_delta: "从单纯下跌延续转为下跌后吸收。"
+    signal_sketch: "down_day * intraday_range_z * close_to_low_recovery"
+    data_needs:
+      - close
+      - volume
+    concern: "需要确认不是短期反转的换壳。"
+"""
+    for ledger_path in cast(dict[str, str], draft["ledger_paths"]).values():
+        Path(ledger_path).write_text(filled_ledger, encoding="utf-8")
+
+    refreshed = svc.read_idea_draft_status(str(draft["manifest_path"]))
+    assert refreshed["reconcile_ready"] is True
+    assert refreshed["ledgers_ready"] is True
+    refreshed_status = cast(list[dict[str, Any]], refreshed["ledger_status"])
+    for item in refreshed_status:
+        assert item["filled"] is True
+        assert item["complete_mechanism_count"] == 1
+
+
+def test_idea_draft_minimal_artifacts_returns_markdown_prompts_only(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    draft = svc.create_idea_draft(
+        idea="overnight gap absorption",
+        models=["claude", "codex"],
+        top_k=2,
+        minimal_artifacts=True,
+    )
+
+    draft_dir = Path(str(draft["draft_dir"]))
+    assert sorted(path.name for path in draft_dir.iterdir()) == []
+    assert draft["minimal_artifacts"] is True
+    assert draft["support_files_written"] is False
+    assert draft["vault_root"] == str(vault)
+    assert draft["manifest_path"] == ""
+
+    artifacts = cast(dict[str, Any], draft["artifacts"])
+    dispatch_entries = cast(list[dict[str, Any]], artifacts["model_dispatch"])
+    assert len(dispatch_entries) == 2
+    assert all(not str(entry["path"]) for entry in dispatch_entries)
+    for entry in dispatch_entries:
+        content = str(entry["content"])
+        assert "Markdown" in content
+        assert "ledger_v1" not in content
+        assert "YAML schema" not in content
+        assert "YAML" in content
+        assert "write files" not in content
+
+    ledger_entries = cast(list[dict[str, Any]], artifacts["ledgers"])
+    assert {entry["status"] for entry in ledger_entries} == {"pending_input"}
+    assert {entry["filled"] for entry in ledger_entries} == {False}
+
+
+def test_index_html_exposes_claude_key_settings() -> None:
     html = _index_html_raw()
 
-    assert 'api("/api/vault/explore-idea", "POST"' in html
-    assert "{ timeoutMs: 60000 }" in html
-    assert "const promptBox = $(\"explorePromptBox\");" in html
+    dashboard_idx = html.index('id="view-dashboard"')
+    bridge_idx = html.index('id="view-bridge"')
+    key_idx = html.index('id="claudeApiKeyInput"')
+    url_idx = html.index('id="claudeApiUrlInput"')
+    assert dashboard_idx < key_idx < bridge_idx
+    assert dashboard_idx < url_idx < bridge_idx
+    assert 'id="claudeApiKeyInput"' in html
+    assert 'id="claudeApiUrlInput"' in html
+    assert 'id="researchBridgeV2Toggle"' in html
+    assert 'id="btnSaveClaudeKey"' in html
+    assert 'id="btnClearClaudeKey"' in html
+    assert "/api/settings/llm" in html
+    assert "loadLlmSettings" in html
+    assert "saveLlmSettings" in html
+    assert "loadMechanismIndexStatus" in html
+
+
+def test_index_html_v1_draft_opens_results_without_legacy_prompt_render() -> None:
+    html = _index_html_raw()
+
+    assert 'api("/api/vault/idea-draft", "POST"' in html
     assert 'resultsEl.style.display = "block"' in html
     assert 'rightPane.style.display = "block"' in html
-    assert "try {\n            // Render card list" in html
-    assert 'console.error("explore render", renderError);' in html
-    assert "Array.isArray(c.reasons)" in html
+    assert 'switchExploreRightTab("draft")' in html
+    assert "renderExploreDraftAgentPanel" in html
+    assert "copyExploreDraftAgentPrompt" in html
+    assert "const promptBox = $(\"explorePromptBox\");" not in html
+    assert "previewExploreCard" not in html
 
-    prompt_idx = html.index('const promptBox = $("explorePromptBox");')
-    render_idx = html.index("// Render card list", prompt_idx)
-    assert prompt_idx < render_idx
+
+def test_index_html_uses_automatic_explore_stage_defaults() -> None:
+    html = _index_html_raw()
+
+    assert 'name="exploreMode"' not in html
+    assert 'name="exploreStage"' not in html
+    assert 'id="exploreInjectDrift"' not in html
+    assert 'id="explorePersistSession"' not in html
+    assert "function autoExploreStage" in html
+    assert "function autoExploreMode" in html
+    assert "persist_session: true" in html
+    assert 'models: ["claude", "codex"]' in html
 
 
 def test_index_html_escapes_script_close_tag_in_print_template() -> None:
@@ -1245,12 +1946,105 @@ def test_index_html_escapes_script_close_tag_in_print_template() -> None:
     start = html.find("function buildMetricsPrintDocument")
     end = html.find("function exportMetricsReportPdf")
 
+    assert "function renderMetricsExportActions" in html
+    assert 'data-action="exportMetricsReportPdf"' in html
+    assert "renderMetricsExportActions(run)" in html
+    assert '$("metricsRunArtifacts").innerHTML = fastScreen' in html
     assert start >= 0
     assert end > start
 
     snippet = html[start:end]
     assert "<\\/script>" in snippet
     assert "</script>" not in snippet
+    assert "Alpha-Lab 单因子快速评价报告" in snippet
+    assert "Alpha-Lab 全面评价报告" in snippet
+    assert "break-inside: avoid" in snippet
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in snippet
+    assert "artifact-overview-charts" in snippet
+    assert "tearsheet-ic-layout" in snippet
+    assert "tearsheet-summary-grid" in snippet
+    assert "tearsheet-diagnostic-summary-grid" in snippet
+    assert "tearsheet-promotion-summary-grid" in snippet
+    assert "tearsheet-metric-row" in snippet
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr)) !important" in snippet
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr)) !important" in snippet
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr)) !important" in snippet
+    assert "@page { size: A4 landscape; margin: 10mm; }" in snippet
+    assert "报告尚未加载完成。" in html
+    assert "一键导出 PDF（原样）" in html
+    assert "下载后端 PDF（兜底）" not in html
+
+
+def test_model_lab_html_supports_original_pdf_export() -> None:
+    html = _model_lab_html()
+    start = html.find("function buildModelLabOverviewPrintDocument")
+    end = html.find("function exportModelLabOverviewPdf")
+
+    assert "btnExportModelLabOverviewPdf" in html
+    assert "一键导出 PDF（原样）" in html
+    assert 'data-action="export-model-lab-overview-pdf"' in html
+    assert "setModelLabOverviewExportVisible(runId, true)" in html
+    assert start >= 0
+    assert end > start
+
+    snippet = html[start:end]
+    assert "<\\/script>" in snippet
+    assert "</script>" not in snippet
+    assert "overview-primary-grid" in snippet
+    assert "overview-chart-grid" in snippet
+    assert "overview-grouped-metrics" in snippet
+    assert "coverage-summary-grid" in snippet
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr)) !important" in snippet
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr)) !important" in snippet
+    assert "@page { size: A4 landscape; margin: 10mm; }" in snippet
+
+
+def test_model_lab_html_omits_duplicate_claude_key_settings() -> None:
+    html = _model_lab_html()
+
+    assert 'id="claudeApiKeyInput"' not in html
+    assert 'id="claudeApiUrlInput"' not in html
+    assert 'id="researchBridgeV2Toggle"' not in html
+    assert 'id="btnSaveClaudeKey"' not in html
+    assert 'id="btnClearClaudeKey"' not in html
+    assert "/api/settings/llm" not in html
+
+
+def test_model_lab_html_uses_automatic_idea_explorer_defaults() -> None:
+    html = _model_lab_html()
+
+    assert 'name="explorerMode"' not in html
+    assert 'name="explorerStage"' not in html
+    assert 'id="explorerTopK"' not in html
+    assert 'id="explorerMemoryLimit"' not in html
+    assert 'id="explorerBindSelectedSpec"' not in html
+    assert 'id="explorerSpecName"' not in html
+    assert "function autoModelIdeaStage" in html
+    assert "function autoModelIdeaMode" in html
+    assert "const topK = 6;" in html
+    assert "const memoryLimit = 3;" in html
+    assert "save_session: true" in html
+    assert "inject_recent_drift: true" in html
+    assert "探索并生成双 Agent Prompt" in html
+    assert "Claude Code / Codex GUI" in html
+    assert 'id="explorerAgentPromptCards"' in html
+    assert 'data-action="copy-model-idea-agent-prompt"' in html
+    assert "function renderModelIdeaAgentPrompts" in html
+    assert 'id="explorerQuickSessions"' in html
+    assert 'id="explorerMechanismIndexStatus"' in html
+    assert "renderIdeaQuickSessions" in html
+    assert "/api/settings/mechanism-index" in html
+    assert "deleteIdeaSession" in html
+    assert "/api/model-lab/idea-explorer/sessions/" in html
+    assert "当前阶段：" in html
+    assert "完成双 agent 点评与网页版 GPT 汇总" in html
+    assert "这不会删除 spec、run 或知识库卡片" in html
+    assert 'id="explorerPrompt"' not in html
+    assert 'id="explorerResponse"' not in html
+    assert 'id="btnIdeaRecordResponse"' not in html
+    assert 'id="btnIdeaCopyPrompt"' not in html
+    assert 'id="btnIdeaApplyPatchHint"' not in html
+    assert "共享 Prompt / 回灌响应 / Patch Hint" not in html
 
 
 def test_model_lab_html_supports_natural_overview_expansion() -> None:
@@ -1259,9 +2053,57 @@ def test_model_lab_html_supports_natural_overview_expansion() -> None:
     assert "viewer-box--overview" in html
     assert 'viewer.classList.add("viewer-box--overview")' in html
     assert 'viewer.classList.remove("viewer-box--overview")' in html
+    assert "Executive Verdict" in html
+    assert "overview-grouped-metrics" in html
+    assert "Trading / Data" in html
+    assert "Promotion" in html
     assert "IC>0 占比" in html
     assert "Q5-Q1 / Group Monotonicity" in html
-    assert "Cost-aware Long-Short IR" in html
+    assert "Est. Cost-adj. Long-Short IR" in html
+    assert "Raw vs Estimated Cost-adjusted Long-Short NAV" in html
+    assert (
+        "Extreme NAV growth detected. Verify return unit, "
+        "non-overlap compounding, and forward-return alignment."
+    ) in html
+    assert "function toGroupReturnDecimal(value)" in html
+    assert "Quantile NAV hidden / 分位净值已隐藏" in html
+    assert (
+        "group_return appears cumulative or contains abnormal single-period returns"
+        in html
+    )
+    assert "已跳过单步" not in html
+    assert (
+        "Main y-axis focuses the normal 95%~100% coverage range when applicable; "
+        "break days are shown below"
+    ) in html
+    assert "Coverage Break Event Strip" in html
+    assert (
+        "RankIC increases with horizon; signal may be more effective at longer holding periods."
+    ) in html
+    assert "RankIC decays quickly; signal is short-lived." in html
+    assert (
+        "Default ${bps} bps estimated cost adjustment is available. "
+        "Full cost sensitivity curve was skipped because Level-2 portfolio validation "
+        "did not run / run was not promoted."
+    ) in html
+    assert "Optional Diagnostics / Missing Diagnostics" in html
+    assert "Required artifact" in html
+    assert "function renderRunOverviewPayload(payload, options = {})" in html
+    assert "function loadRunOverviewFixture(fixtureId)" in html
+    assert "function renderArtifactPayload(payload)" in html
+    assert "function viewArtifactFixture(fixtureId, key)" in html
+    assert "function loadDiagnosticsFixture(fixtureId)" in html
+    assert "function overviewFixtureIdFromLocation()" in html
+    assert "function artifactFixtureParamsFromLocation()" in html
+    assert "function diagnosticsFixtureIdFromLocation()" in html
+    assert "/api/dev/model-lab/overview-fixtures/" in html
+    assert "/api/dev/model-lab/artifact-fixtures/" in html
+    assert "/dev/model-lab/overview-fixture" in html
+    assert "/dev/model-lab/artifact-fixture" in html
+    assert "/dev/model-lab/diagnostics-fixture" in html
+    assert "round-trip" in html
+    assert "Cost-aware" not in html
+    assert "period:" in html
 
 
 def test_model_lab_html_renders_run_queue_progress_bar() -> None:
@@ -1293,6 +2135,7 @@ def test_model_lab_compare_timeseries_cards_are_extra_tall() -> None:
     assert 'id="compareTimeseriesGrid" class="chart-grid chart-grid-stacked"' not in html
     assert 'preserveAspectRatio="none"' in html
     assert "const height = 495;" in html
+    assert "function renderCompareSpecDiff(specDiff = null)" in html
 
 
 def test_model_lab_compare_leakage_summary_uses_six_column_rows() -> None:
@@ -1336,7 +2179,31 @@ def test_model_lab_html_samples_overview_nav_by_rebalance_frequency() -> None:
     )
     assert "sampleStep: overviewEffectiveStep" in html
     assert "按可用日期逐日取点" in html
-    assert "buildEquityAndDrawdownCards(backtest, groupRows)" in html
+    assert (
+        "buildEquityAndDrawdownCards(backtest, groupRows, { splitDate, turnoverRows, summary })"
+        in html
+    )
+    assert "function buildOverviewSplitCoverageNotice(options = {})" in html
+    assert "曲线 IS 段缺失" in html
+    assert "曲线仅含 OOS，IS 时序缺失" in html
+    assert "${buildOverviewSplitCoverageNotice({ splitDate, icRows, groupRows, backtest })}" in html
+    assert (
+        "split_phase: normalizeSplitPhase(row.split_phase || row.phase || row.sample_phase)"
+        in html
+    )
+    assert "split_phase: phaseByDate.get(date) || \"\"" in html
+    assert "function navRowsEquivalent(leftRows, rightRows, tolerance = 1e-9)" in html
+    assert "function backtestNavIsQuantileLongShort(backtest = null)" in html
+    assert "quantile_long_short_from_group_returns" in html
+    assert "const backtestNavRows = parseBacktestNavRows(backtest)" in html
+    assert "const navRows = backtestNavRows.length ? backtestNavRows : dailyNavRows" in html
+    assert "多空累计净值（Q5-Q1" in html
+    assert "backtest_result NAV=Q5-Q1 多空" in html
+    assert "function buildLongShortSpreadCard(rows, options = {})" in html
+    assert "includeGroups: false" in html
+    assert "includeSpread: false" in html
+    assert "suppressDuplicateBacktestNav: true" in html
+    assert "buildLongShortSpreadCard(groupRows, { ...OVERVIEW_TALL_CHART_OPTIONS" in html
     assert "let spreadNav = 1.0" in html
     assert "opts.cumulative ? spreadNav * (1 + spread) : spread" in html
 
@@ -1346,10 +2213,52 @@ def test_model_lab_training_log_charts_use_scored_rows_and_independent_axes() ->
 
     assert "function normalizeTrainingLogRows(rows)" in html
     assert "function isScoredTrainingRow(row)" in html
-    assert "状态带按连续区间绘制" in html
-    assert "fit_scored 全量显示" in html
-    assert "score/train 使用右侧蓝色轴且只计算 fit/reused 行" in html
-    assert "n_score_assets（右轴）" in html
+    assert "Training Health Summary / 训练健康摘要" in html
+    assert "Training Health:" in html
+    assert "Warmup Skipped" in html
+    assert "Post-fit Skipped" in html
+    assert "Expected warmup skips, not a training failure." in html
+    assert "训练状态时间线（默认按季度聚合）" in html
+    assert "切换到月度聚合 / Monthly view" in html
+    assert "dominant_status:" in html
+    assert "first_fit_date" in html
+    assert "模型版本时序" in html
+    assert "median fit interval" in html
+    assert "max fit gap" in html
+    assert "latest version" in html
+    assert "fit cadence appears regular" in html
+    assert "oos_rank_ic" in html
+    assert "悬停可见全部版本号" in html
+    assert ".training-fixed-svg-scroll" in html
+    assert ".chart-card svg.training-fixed-svg" in html
+    assert 'class="training-fixed-svg" width="${W}" height="${H}"' in html
+    assert "score/train（资产数 / 训练样本量，按百分比；只取 fit_scored、reused_scored 行）" in html
+    assert "n_score_assets（每日打分资产数，warmup 期 skipped 行不绘制）" in html
+    assert "No train_rows cliffs detected." in html
+    assert "No score_assets cliffs detected." in html
+    assert "score/train stable after warmup" in html
+    assert "latest marker" in html
+    assert "median" in html
+    assert "p95" in html
+    assert "universe filter change candidate" in html
+
+
+def test_model_lab_html_deemphasizes_low_frequency_panels() -> None:
+    html = _model_lab_html()
+
+    assert "source-drawer-backdrop" in html
+    assert 'id="btnOpenSourceDrawer"' in html
+    assert "批量操作 / 快速筛选" in html
+    assert "Structured Event List" in html
+    assert "默认收起；Stage Timeline 为主视图" in html
+    assert "Feature Importance Summary / 特征重要性摘要" in html
+    assert "Feature Importance Verdict:" in html
+    assert "Feature Group Importance / 特征组重要性" in html
+    assert "Feature Importance Over Time / 特征重要性随模型版本变化" in html
+    assert "cheap_ledger_only" in html
+    assert "Zero-importance Features" in html
+    assert "Recommended Follow-up Tests / 建议后续验证" in html
+    assert "Purged KFold per-fold IC" in html
 
 
 # ---------------------------------------------------------------------------
@@ -1507,7 +2416,12 @@ def test_explore_idea_start_mode_returns_kickoff_prompt(tmp_path: Path) -> None:
     assert "You are in the research kickoff stage." in result["gpt_prompt"]
     assert "Your goal is to expand the hypothesis space, not to converge." in result["gpt_prompt"]
     assert "不允许输出最终因子定义或收敛结论" in result["gpt_prompt"]
-    assert "Failure to differentiate is considered invalid reasoning." in result["gpt_prompt"]
+    assert "不要给 keep/kill 结论" in result["gpt_prompt"]
+    assert (
+        "inspired_by` / `fusion_of` / `cross_domain_jump` 都是可选溯源字段"
+        in result["gpt_prompt"]
+    )
+    assert "无来源不算缺口" in result["gpt_prompt"]
     assert len(result["related_cards"]) >= 1
     assert result["constraint_report"] == {}
 
@@ -1544,11 +2458,9 @@ def test_explore_idea_constrained_mode_returns_report(tmp_path: Path) -> None:
     assert result["mode"] == "constrained"
     assert "Graph 约束模式（硬约束）" in result["gpt_prompt"]
     assert "你只能使用以下数据节点与算子构造信号，不允许引入新变量。" in result["gpt_prompt"]
-    assert "只保留总评分最高的 1-2 个机制。" in result["gpt_prompt"]
-    assert (
-        "如果反对意见成立，请明确写出：修改假设，还是回到 Step 2 重新选择机制。"
-        in result["gpt_prompt"]
-    )
+    assert "少而精但不做 kill" in result["gpt_prompt"]
+    assert "候选只增不减" in result["gpt_prompt"]
+    assert "评分只用于后续排序参考，不产生 keep/kill" in result["gpt_prompt"]
     assert "- close" in result["gpt_prompt"]
     assert "- volume" in result["gpt_prompt"]
     cr = result["constraint_report"]
@@ -1600,6 +2512,13 @@ def test_record_explore_response_persists_lint_report(tmp_path: Path) -> None:
     assert loaded["response"]
     assert loaded["lint_report"]["has_errors"] is True
     assert isinstance(loaded.get("related_cards"), list)
+
+    deleted = svc.delete_explore_session(session_id)
+    assert deleted["archived"] is True
+    assert not any(
+        str(item.get("session_id")) == session_id
+        for item in svc.list_explore_sessions(limit=10)
+    )
 
 
 def test_explore_idea_unknown_mode_defaults_to_free(tmp_path: Path) -> None:
@@ -1685,6 +2604,57 @@ def test_list_cases_returns_cases(tmp_path: Path) -> None:
     assert cases[0]["spec_exists"] is True
 
 
+def test_create_case_passes_frontend_controls_and_builder_kwargs(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    svc.create_project(
+        {
+            "slug": "test-short-factor",
+            "title_zh": "空头因子测试项目",
+            "category": "factor_family",
+            "owner": "test",
+            "market": "ashare",
+            "frequency": "daily",
+            "chatgpt_project_name": "Test Short Factor",
+            "origin_cards": [],
+        }
+    )
+
+    svc.create_case(
+        "test-short-factor",
+        {
+            "case_name": "failed_cushion_short",
+            "factor_name": "failed_cushion_short",
+            "base_method": "downshock_failed_cushion_risk_v1",
+            "direction": "short",
+            "skip_recent": "1",
+            "target_horizon": "10",
+            "outside_event_policy": "zero",
+            "exclude_limit": "true",
+            "builder_kwargs_json": (
+                '{"shock_gate_mode":"cs_quantile","shock_q":0.7,'
+                '"outside_event_policy":"nan","neutralize_basic":true,'
+                '"invert":false}'
+            ),
+        },
+    )
+
+    spec_path = vault / "55_projects" / "test-short-factor" / "current_case.md"
+    spec_text = spec_path.read_text(encoding="utf-8")
+    spec = yaml.safe_load(spec_text.split("```yaml", 1)[1].split("```", 1)[0])
+    base = spec["factor_input"]["recipe"]["base"]
+    assert spec["direction"] == "short"
+    assert spec["target"]["horizon"] == 10
+    assert base["method"] == "downshock_failed_cushion_risk_v1"
+    assert base["skip_recent"] == 1
+    assert base["shock_gate_mode"] == "cs_quantile"
+    assert base["shock_q"] == pytest.approx(0.7)
+    assert base["outside_event_policy"] == "zero"
+    assert base["neutralize_basic"] is True
+    assert base["invert"] is False
+    assert base["exclude_limit"] is True
+
+
 def test_list_cases_empty_for_unknown_project(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
@@ -1713,6 +2683,86 @@ def test_get_project_truncates_large_documents_for_snapshot(tmp_path: Path) -> N
     assert len(documents["decision_log"]) < len(large_block.decode("utf-8"))
     assert len(documents["latest_run"]) < len(large_block.decode("utf-8"))
 
+
+
+def test_create_writeback_draft_requires_review_then_applies(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    slug, _ = _create_project_and_case(svc)
+
+    draft = svc.create_writeback_draft(
+        {
+            "source_stage": "stage2",
+            "card_type": "experiment_note",
+            "project_slug": slug,
+            "title": "Reviewed Synthesis",
+            "body": "User-reviewed synthesis body.",
+            "source_artifacts": ["artifacts/stage2.md"],
+        }
+    )
+
+    assert draft["status"] == "pending"
+    assert str(draft["target_path"]).startswith(
+        f"55_projects/{slug}/30_research_notes/Note - "
+    )
+    summaries = svc.list_drafts(slug)
+    summary = next(item for item in summaries if item["name"] == draft["draft_name"])
+    assert summary["source_stage"] == "stage2"
+    assert summary["card_type"] == "experiment_note"
+    assert summary["target_path"] == draft["target_path"]
+    assert summary["draft_type"] == "knowledge_writeback_draft"
+
+    with pytest.raises(ValueError, match="approved"):
+        svc.apply_draft(slug, str(draft["draft_name"]), {})
+
+    svc.patch_draft(
+        slug,
+        str(draft["draft_name"]),
+        {"review_status": "approved", "reviewed_by": "tester", "reviewed_at": "now"},
+    )
+    applied = svc.apply_draft(slug, str(draft["draft_name"]), {})
+
+    assert applied["success"] is True
+    target_paths = cast(list[str], applied["target_paths"])
+    assert len(target_paths) == 1
+    target_path = Path(target_paths[0])
+    assert target_path.exists()
+    content = target_path.read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(content.split("---", 2)[1])
+    assert frontmatter["type"] == "experiment_note"
+    assert frontmatter["project"] == slug
+    assert frontmatter["source_stage"] == "stage2"
+    assert frontmatter["source_artifacts"] == ["artifacts/stage2.md"]
+    assert "User-reviewed synthesis body." in content
+
+
+def test_create_writeback_draft_rejects_target_path_escape(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    slug, _ = _create_project_and_case(svc)
+    payload: dict[str, object] = {
+        "source_stage": "stage3",
+        "card_type": "failure_observation",
+        "project_slug": slug,
+        "title": "Bad Path",
+        "body": "Reviewed failure observation.",
+    }
+
+    with pytest.raises(PermissionError):
+        svc.create_writeback_draft({**payload, "target_path_hint": "../bad.md"})
+    with pytest.raises(PermissionError):
+        svc.create_writeback_draft(
+            {**payload, "target_path_hint": "55_projects/other-project/bad.md"}
+        )
+    with pytest.raises(PermissionError):
+        svc.create_writeback_draft({**payload, "target_path_hint": "C:/tmp/bad.md"})
+    with pytest.raises(ValueError):
+        svc.create_writeback_draft(
+            {
+                **payload,
+                "target_path_hint": f"55_projects/{slug}/45_failure_observations/bad.txt",
+            }
+        )
 
 # ---------------------------------------------------------------------------
 # CLI routing: web unified
@@ -1836,8 +2886,8 @@ def test_register_custom_factor(tmp_path: Path) -> None:
     from alpha_lab.factor_recipe import factor_registry
 
     assert "test_vol" in factor_registry
-    # Verify persistence
-    meta_path = tmp_path / "custom_factors" / "test_vol.json"
+    # Verify persistence (subdir layout: research/<name>/factor.json)
+    meta_path = tmp_path / "custom_factors" / "research" / "test_vol" / "factor.json"
     assert meta_path.exists()
     # Clean up registry
     factor_registry._builders.pop("test_vol", None)
@@ -1852,6 +2902,12 @@ def test_list_custom_factors_includes_builtins(tmp_path: Path) -> None:
     names = [f["name"] for f in result["factors"]]
     assert "momentum" in names
     assert "reversal" in names
+    assert "baseline_factor_suite" in result
+    baseline_names = [f["name"] for f in result["baseline_factor_suite"]]
+    assert "mom_20d" in baseline_names
+    assert "rev_5d" in baseline_names
+    assert "vcimom_20_5" in baseline_names
+    assert result["baseline_count"] >= 8
     assert result["total"] >= 5
 
 
@@ -1872,8 +2928,45 @@ def test_register_and_delete_custom_factor(tmp_path: Path) -> None:
 
     svc.delete_custom_factor("temp_factor")
     assert "temp_factor" not in factor_registry
-    meta_path = tmp_path / "custom_factors" / "temp_factor.json"
+    meta_path = tmp_path / "custom_factors" / "research" / "temp_factor" / "factor.json"
     assert not meta_path.exists()
+    # Empty parent dir should be cleaned up after delete.
+    assert not meta_path.parent.exists()
+
+
+def test_list_custom_factors_loads_research_subdir(tmp_path: Path) -> None:
+    factor_dir = tmp_path / "custom_factors" / "research" / "nested_factor"
+    factor_dir.mkdir(parents=True)
+    factor_dir.joinpath("factor.json").write_text(
+        json.dumps(
+            {
+                "name": "nested_factor",
+                "description": "nested research factor",
+                "code": _VALID_FACTOR_CODE,
+                "created_at": "2024-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    factor_dir.joinpath("research_log.md").write_text(
+        "# nested_factor research log\n", encoding="utf-8"
+    )
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    result = svc.list_custom_factors()
+
+    names = [f["name"] for f in result["factors"]]
+    assert "nested_factor" in names
+    code = svc.get_custom_factor_code("nested_factor")
+    assert code["description"] == "nested research factor"
+
+    # Sibling research_log.md must not be loaded as a factor and must survive.
+    assert factor_dir.joinpath("research_log.md").exists()
+
+    from alpha_lab.factor_recipe import factor_registry
+
+    factor_registry._builders.pop("nested_factor", None)
 
 
 def test_register_custom_factor_invalid_code(tmp_path: Path) -> None:
@@ -2172,6 +3265,61 @@ def test_model_factor_web_output_dir_is_scoped_by_run_id(
     assert cmd_a[cmd_a.index("--output-root-dir") + 1] == str(
         output_root.resolve() / "_web_runs" / "run-a"
     )
+    assert "--cache-root-dir" in cmd_a
+    assert cmd_a[cmd_a.index("--cache-root-dir") + 1] == str(
+        output_root.resolve() / "_model_factor_shared_cache"
+    )
+
+    cmd_b = _build_model_lab_subprocess_command(task=task_b, spec_path=spec_path.resolve())
+    assert cmd_a[cmd_a.index("--cache-root-dir") + 1] == cmd_b[
+        cmd_b.index("--cache-root-dir") + 1
+    ], "shared cache root must not depend on run_id"
+
+
+def test_model_lab_subprocess_command_includes_draft_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec_path = tmp_path / "case.yaml"
+    spec_path.write_text("name: draft_case\n", encoding="utf-8")
+    output_root = tmp_path / "outputs"
+    candidate_path = (
+        tmp_path
+        / "model_candidates"
+        / "research"
+        / "candidate_alpha"
+        / "model_candidate.json"
+    )
+    fake_spec = SimpleNamespace(
+        name="draft_case",
+        output=SimpleNamespace(root_dir=str(output_root)),
+    )
+    monkeypatch.setattr(
+        "alpha_lab.web_unified.load_model_factor_case_spec",
+        lambda _path: fake_spec,
+    )
+    task = _RunTask(
+        run_id="run-draft",
+        project_slug="proj",
+        case_name="draft_case",
+        round_id=None,
+        spec_path=str(spec_path),
+        evaluation_profile="exploratory_screening",
+        output_root_dir=None,
+        render_report=True,
+        workflow="model_factor",
+        draft_model_candidate_path=str(candidate_path),
+        draft_model_candidate_name="candidate_alpha",
+        draft_model_candidate_hash="abc123",
+        screening_retrain_every_n_dates=40,
+    )
+
+    cmd = _build_model_lab_subprocess_command(task=task, spec_path=spec_path.resolve())
+
+    assert "--draft-model-candidate" in cmd
+    assert cmd[cmd.index("--draft-model-candidate") + 1] == str(candidate_path)
+    assert "--screening-retrain-every-n-dates" in cmd
+    assert cmd[cmd.index("--screening-retrain-every-n-dates") + 1] == "40"
 
 
 def test_single_factor_web_output_root_is_scoped_by_run_id(tmp_path: Path) -> None:

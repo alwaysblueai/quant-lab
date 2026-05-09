@@ -12,8 +12,10 @@ import pytest
 
 from alpha_lab.web_unified import _UnifiedRequestHandler, _UnifiedService
 
-playwright_sync = pytest.importorskip("playwright.sync_api")
-sync_playwright = playwright_sync.sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError:  # pragma: no cover - optional local browser dependency
+    sync_playwright = None  # type: ignore[assignment]
 
 
 def _build_vault(tmp_path: Path) -> Path:
@@ -94,8 +96,14 @@ def _launch_chromium_or_skip(playwright_obj: object):
         pytest.skip(f"Playwright Chromium launch failed: {msg.splitlines()[0]}")
 
 
+def _sync_playwright_or_skip():
+    if sync_playwright is None:
+        pytest.skip("Playwright is not installed")
+    return sync_playwright()
+
+
 def test_bridge_idea_explorer_end_to_end(live_server: str) -> None:
-    with sync_playwright() as p:
+    with _sync_playwright_or_skip() as p:
         browser = _launch_chromium_or_skip(p)
         page = browser.new_page()
         page.goto(f"{live_server}/", wait_until="domcontentloaded")
@@ -111,9 +119,8 @@ def test_bridge_idea_explorer_end_to_end(live_server: str) -> None:
         page.click("#btnCreateProject")
         page.wait_for_timeout(400)
 
-        # Run constrained exploration.
+        # Run exploration with automatic stage/mode selection.
         page.fill("#exploreIdea", "短期反转 overreaction 均值回归")
-        page.check('input[name="exploreMode"][value="constrained"]')
         page.click("#btnExploreIdea")
 
         # Assertions on visible UI outputs.
@@ -123,7 +130,6 @@ def test_bridge_idea_explorer_end_to_end(live_server: str) -> None:
             "document.getElementById('explorePromptBox').textContent.trim().length > 0"
         )
         assert (page.locator("#explorePromptBox").text_content() or "").strip() != ""
-        assert page.locator("#exploreConstraintBox").is_visible()
 
         # Click a related card and verify card viewer is populated.
         page.click('#exploreCardList [data-action="selectCard"]')
@@ -136,3 +142,126 @@ def test_bridge_idea_explorer_end_to_end(live_server: str) -> None:
         assert "Short-term Reversal" in (page.locator("#cardContent").text_content() or "")
 
         browser.close()
+
+
+def test_model_lab_overview_fixture_screenshot_smoke(
+    live_server: str,
+    tmp_path: Path,
+) -> None:
+    with _sync_playwright_or_skip() as p:
+        browser = _launch_chromium_or_skip(p)
+        page = browser.new_page(viewport={"width": 1440, "height": 1100})
+        try:
+            page.goto(
+                f"{live_server}/dev/model-lab/overview-fixture?case=strong_skipped_extreme_nav",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_selector(".overview-executive-verdict", timeout=10000)
+            page.wait_for_selector(".overview-grouped-metrics", timeout=10000)
+            page.wait_for_selector(".coverage-break-strip", timeout=10000)
+            verdict_reason = page.locator(
+                ".overview-verdict-reason"
+            ).text_content() or ""
+            assert "Strong signal metrics" in verdict_reason
+            assert page.get_by_text("Extreme NAV growth detected").first.is_visible()
+            assert page.get_by_text(
+                "Default 10 bps estimated cost adjustment is available"
+            ).first.is_visible()
+
+            full_page = tmp_path / "model_lab_overview_fixture_full.png"
+            page.screenshot(path=str(full_page), full_page=True)
+            assert full_page.stat().st_size > 5000
+
+            coverage_strip = page.locator(".coverage-break-strip").first
+            coverage_strip.scroll_into_view_if_needed()
+            coverage_path = tmp_path / "model_lab_overview_fixture_coverage.png"
+            coverage_strip.screenshot(path=str(coverage_path))
+            assert coverage_path.stat().st_size > 1000
+
+            page.click("text=Optional Diagnostics / Missing Diagnostics")
+            page.get_by_text("Required artifact").first.wait_for(timeout=5000)
+            missing_path = tmp_path / "model_lab_overview_fixture_missing_diagnostics.png"
+            page.locator(".missing-diagnostics-panel").first.screenshot(path=str(missing_path))
+            assert missing_path.stat().st_size > 1000
+        finally:
+            browser.close()
+
+
+def test_alpha_lab_overview_fixture_modes_screenshot_smoke(
+    live_server: str,
+    tmp_path: Path,
+) -> None:
+    cases = [
+        ("quick_screening", "快速筛选模式", "Factor Snapshot", "Quick Decision Metrics"),
+        ("full_evaluation", "全面评价模式", "Executive Verdict", "Core Decision Charts"),
+    ]
+    with _sync_playwright_or_skip() as p:
+        browser = _launch_chromium_or_skip(p)
+        page = browser.new_page(viewport={"width": 1440, "height": 1100})
+        try:
+            for fixture_id, mode_text, primary_text, secondary_text in cases:
+                page.goto(
+                    f"{live_server}/dev/alpha-lab/overview-fixture?case={fixture_id}",
+                    wait_until="domcontentloaded",
+                )
+                page.wait_for_selector(".artifact-overview-shell", timeout=10000)
+                page.get_by_text(mode_text).first.wait_for(timeout=10000)
+                page.get_by_text(primary_text).first.wait_for(timeout=10000)
+                page.get_by_text(secondary_text).first.wait_for(timeout=10000)
+                path = tmp_path / f"alpha_lab_overview_fixture_{fixture_id}.png"
+                page.screenshot(path=str(path), full_page=True)
+                assert path.stat().st_size > 4000
+        finally:
+            browser.close()
+
+
+def test_model_lab_artifact_fixture_screenshot_smoke(
+    live_server: str,
+    tmp_path: Path,
+) -> None:
+    artifacts = [
+        ("metrics", "case_name"),
+        ("training_log", "Training Health Summary"),
+        ("feature_importance", "Feature Importance Summary"),
+        ("model_definition_json", "feature_columns"),
+        ("run_manifest", "run_timestamp_utc"),
+        ("summary", "实验摘要"),
+    ]
+    with _sync_playwright_or_skip() as p:
+        browser = _launch_chromium_or_skip(p)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        try:
+            for artifact, expected_text in artifacts:
+                page.goto(
+                    f"{live_server}/dev/model-lab/artifact-fixture"
+                    f"?case=strong_skipped_extreme_nav&artifact={artifact}",
+                    wait_until="domcontentloaded",
+                )
+                page.wait_for_selector("#viewer", timeout=10000)
+                page.get_by_text(expected_text).first.wait_for(timeout=10000)
+                path = tmp_path / f"model_lab_artifact_fixture_{artifact}.png"
+                page.screenshot(path=str(path), full_page=True)
+                assert path.stat().st_size > 3000
+        finally:
+            browser.close()
+
+
+def test_model_lab_diagnostics_fixture_screenshot_smoke(
+    live_server: str,
+    tmp_path: Path,
+) -> None:
+    with _sync_playwright_or_skip() as p:
+        browser = _launch_chromium_or_skip(p)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        try:
+            page.goto(
+                f"{live_server}/dev/model-lab/diagnostics-fixture?case=strong_skipped_extreme_nav",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_selector("#diagContent", timeout=10000)
+            page.get_by_text("Training Health").first.wait_for(timeout=10000)
+            path = tmp_path / "model_lab_diagnostics_fixture.png"
+            page.screenshot(path=str(path), full_page=True)
+            assert path.stat().st_size > 3000
+        finally:
+            browser.close()

@@ -13,6 +13,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Generator
+from datetime import date, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,6 +58,142 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _business_date_strings(start: str = "2024-01-02", n: int = 160) -> list[str]:
+    current = date.fromisoformat(start)
+    dates: list[str] = []
+    while len(dates) < n:
+        if current.weekday() < 5:
+            dates.append(current.isoformat())
+        current += timedelta(days=1)
+    return dates
+
+
+def _write_single_factor_fixture_inputs(base_dir: Path) -> dict[str, str]:
+    inputs_dir = base_dir / "inputs"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    dates = _business_date_strings()
+    assets = [f"A{i:03d}" for i in range(8)]
+
+    price_lines = ["date,asset,close"]
+    factor_lines = ["date,asset,factor,value"]
+    universe_lines = ["date,asset,in_universe"]
+    for asset_idx, asset in enumerate(assets):
+        price = 20.0 + asset_idx
+        for t, date_text in enumerate(dates):
+            ret = 0.001 + 0.0004 * (((t + asset_idx) % 7) - 3)
+            price = max(1.0, price * (1.0 + ret))
+            signal = 0.2 * asset_idx + 0.05 * ((t % 11) - 5)
+            price_lines.append(f"{date_text},{asset},{price:.6f}")
+            factor_lines.append(f"{date_text},{asset},mom_5d,{signal:.6f}")
+            universe_lines.append(f"{date_text},{asset},true")
+
+    prices_path = inputs_dir / "prices.csv"
+    factor_path = inputs_dir / "factor.csv"
+    universe_path = inputs_dir / "universe.csv"
+    prices_path.write_text("\n".join(price_lines) + "\n", encoding="utf-8")
+    factor_path.write_text("\n".join(factor_lines) + "\n", encoding="utf-8")
+    universe_path.write_text("\n".join(universe_lines) + "\n", encoding="utf-8")
+    return {
+        "prices_path": "./inputs/prices.csv",
+        "factor_path": "./inputs/factor.csv",
+        "universe_path": "./inputs/universe.csv",
+    }
+
+
+def _write_model_factor_fixture_inputs(base_dir: Path) -> None:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    dates = _business_date_strings()
+    assets = [f"{i:06d}.SZ" for i in range(1, 9)]
+    feature_lines = ["date,asset,feature_a"]
+    price_lines = ["date,asset,close"]
+    for asset_idx, asset in enumerate(assets):
+        price = 10.0 + asset_idx
+        for t, date_text in enumerate(dates):
+            feature = 0.1 * asset_idx + 0.03 * ((t % 13) - 6)
+            ret = 0.001 + 0.0003 * (((t + asset_idx) % 9) - 4)
+            price = max(1.0, price * (1.0 + ret))
+            feature_lines.append(f"{date_text},{asset},{feature:.6f}")
+            price_lines.append(f"{date_text},{asset},{price:.6f}")
+    (base_dir / "features.csv").write_text("\n".join(feature_lines) + "\n", encoding="utf-8")
+    (base_dir / "prices.csv").write_text("\n".join(price_lines) + "\n", encoding="utf-8")
+
+
+def _build_model_candidate_payload(
+    base_dir: Path,
+    *,
+    candidate_name: str = "http_model_candidate",
+    feature_columns: list[str] | None = None,
+) -> dict[str, object]:
+    _write_model_factor_fixture_inputs(base_dir)
+    columns = feature_columns or ["feature_a"]
+    return {
+        "contract_version": "stage2_model_candidate_v1",
+        "candidate_name": candidate_name,
+        "implementation_status": "draft_for_stage3",
+        "implementation_type": "spec_variant",
+        "source_mechanisms": ["http_test"],
+        "base_case_spec_path": "",
+        "expected_horizon": "t_plus_1_or_later",
+        "data_contract": {
+            "prices_required_columns": ["date", "asset", "close"],
+            "feature_required_columns": columns,
+            "feature_optional_columns": [],
+            "feature_availability": {
+                "mode": "safety_lag",
+                "column": None,
+                "safety_lag_days": 1,
+            },
+        },
+        "risk_controls": {
+            "feature_availability_pit": "safety lag",
+            "label_leakage": "validator",
+            "overfit_complexity": "simple ridge",
+            "turnover_cost": "screening",
+            "feature_instability": "review",
+            "split_regime_fragility": "review",
+        },
+        "run_controls": {
+            "evaluation_profile": "exploratory_screening",
+            "screening_retrain_every_n_dates": 40,
+            "vault_export_mode": "skip",
+        },
+        "case_spec_payload": {
+            "name": f"{candidate_name}_case",
+            "factor_name": candidate_name,
+            "features_path": str(base_dir / "features.csv"),
+            "feature_columns": columns,
+            "prices_path": str(base_dir / "prices.csv"),
+            "rebalance_frequency": "W",
+            "n_quantiles": 5,
+            "direction": "long",
+            "universe": {"name": "default"},
+            "target": {"kind": "forward_return", "horizon": 5},
+            "feature_availability": {
+                "mode": "safety_lag",
+                "safety_lag_days": 1,
+            },
+            "feature_preprocess": {
+                "missing_policy": "median_impute",
+                "scale_features": "auto",
+            },
+            "model": {"family": "ridge", "params": {"alpha": 1.0}},
+            "model_selection": {"enabled": False},
+            "training": {
+                "window_type": "rolling",
+                "train_window_n_dates": 60,
+                "min_train_dates": 40,
+                "min_train_rows": 200,
+                "retrain_every_n_dates": 5,
+                "min_score_assets": 5,
+            },
+            "neutralization": {"enabled": False},
+            "transaction_cost": {"one_way_rate": 0.001},
+            "output": {"root_dir": str(base_dir / "outputs")},
+        },
+        "stage3_validation_focus": ["feature columns", "PIT", "artifact audit"],
+    }
 
 
 @pytest.fixture()
@@ -215,8 +352,13 @@ def test_model_lab_page_returns_html(live_server: tuple[str, _UnifiedService]) -
     assert status == 200
     assert isinstance(body, str)
     assert "Model Lab" in body
-    assert "btnIdeaRecordResponse" in body
-    assert "explorerResponse" in body
+    assert 'id="btnIdeaRecordResponse"' not in body
+    assert 'id="explorerResponse"' not in body
+    assert 'id="explorerAgentPromptCards"' in body
+    assert "Draft Candidates" in body
+    assert "candidatePayloadInput" in body
+    assert "/api/model-lab/candidates" in body
+    assert "btnCandidateRun" in body
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +594,9 @@ def seeded_server(live_server: tuple[str, _UnifiedService]) -> tuple[str, _Unifi
             "origin_cards": [],
         }
     )
+    project_inputs = _write_single_factor_fixture_inputs(
+        svc.vault_root / "55_projects" / slug
+    )
     svc.create_case(
         slug,
         {
@@ -461,6 +606,7 @@ def seeded_server(live_server: tuple[str, _UnifiedService]) -> tuple[str, _Unifi
             "lookback": 5,
             "skip_recent": 0,
             "target_horizon": 5,
+            **project_inputs,
         },
     )
     return base_url, svc, slug
@@ -546,6 +692,10 @@ def _seed_succeeded_run(
         summary={
             "factor_name": "mom_5d",
             "mean_rank_ic": 0.03,
+            "mean_rank_ic_full": 0.031,
+            "rank_ic_ir_full": 0.42,
+            "long_short_ir_full": 0.7,
+            "max_drawdown_full": -0.12,
             "ic_t_stat": 2.2,
             "extra_metric": "should_not_appear_in_compact",
         },
@@ -868,14 +1018,89 @@ def test_unknown_route_returns_404(live_server: tuple[str, _UnifiedService]) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_route(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, _ = live_server
+def test_dashboard_route(live_server: tuple[str, _UnifiedService], tmp_path: Path) -> None:
+    base_url, svc = live_server
+    _seed_succeeded_run(
+        svc=svc,
+        tmp_path=tmp_path,
+        project_slug="dashboard-project",
+        run_id="dashboard-run",
+    )
     status, data = _get(base_url, "/api/dashboard")
     assert status == 200
     assert isinstance(data, dict)
     assert "project_count" in data
     assert "run_status_counts" in data
     assert "vault_card_count" in data
+    assert data["run_status_counts"]["succeeded"] == 1
+    assert isinstance(data["recent_runs"], list)
+    assert len(data["recent_runs"]) == 1
+    recent = data["recent_runs"][0]
+    assert recent["_compact"] is True
+    assert recent["summary"]["factor_name"] == "mom_5d"
+    assert "extra_metric" not in recent["summary"]
+    assert recent["artifact_paths"]["metrics"] is True
+
+
+# ---------------------------------------------------------------------------
+# GET/POST /api/settings/llm
+# ---------------------------------------------------------------------------
+
+
+def test_llm_settings_routes(
+    live_server: tuple[str, _UnifiedService],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url, _ = live_server
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ALPHA_LAB_RESEARCH_BRIDGE_V2", raising=False)
+
+    status, data = _get(base_url, "/api/settings/llm")
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["anthropic_api_key_configured"] is False
+    assert data["anthropic_api_key_source"] == "none"
+    assert data["anthropic_base_url"] == ""
+    assert data["anthropic_base_url_source"] == "default"
+
+    status, data = _post(
+        base_url,
+        "/api/settings/llm",
+        {
+            "anthropic_api_key": "sk-ant-http-test",
+            "anthropic_base_url": "https://anthropic-proxy.example/v1",
+            "research_bridge_v2_enabled": True,
+        },
+    )
+
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["anthropic_api_key_configured"] is True
+    assert data["anthropic_api_key_source"] == "saved"
+    assert data["anthropic_base_url"] == "https://anthropic-proxy.example/v1"
+    assert data["anthropic_base_url_source"] == "saved"
+    assert data["research_bridge_v2_enabled"] is True
+    assert "anthropic_api_key" not in data
+    settings_path = Path(str(data["settings_path"]))
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert saved["anthropic_api_key"] == "sk-ant-http-test"
+    assert saved["anthropic_base_url"] == "https://anthropic-proxy.example/v1"
+
+    status, data = _post(
+        base_url,
+        "/api/settings/llm",
+        {
+            "clear_anthropic_api_key": True,
+            "clear_anthropic_base_url": True,
+            "research_bridge_v2_enabled": False,
+        },
+    )
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["anthropic_api_key_configured"] is False
+    assert data["anthropic_base_url"] == ""
+    assert data["research_bridge_v2_enabled"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -984,6 +1209,10 @@ def test_list_runs_compact_route(
     assert compact is not None
     assert compact["_compact"] is True
     assert compact["summary"]["factor_name"] == "mom_5d"
+    assert compact["summary"]["mean_rank_ic_full"] == 0.031
+    assert compact["summary"]["rank_ic_ir_full"] == 0.42
+    assert compact["summary"]["long_short_ir_full"] == 0.7
+    assert compact["summary"]["max_drawdown_full"] == -0.12
     assert "extra_metric" not in compact["summary"]
     assert compact["artifact_paths"]["metrics"] is True
     assert len(compact["progress_events"]) == 2
@@ -1185,6 +1414,20 @@ def test_model_lab_idea_explorer_routes(live_server: tuple[str, _UnifiedService]
     session_id = str(explored["session"]["session_id"])
     assert session_id
     assert "gpt_prompt" in explored
+    assert [row["agent"] for row in explored["agent_prompts"]] == ["claude", "codex"]
+    codex_prompt = str(explored["agent_prompts"][1]["prompt"])
+    assert "safe_bfq" in codex_prompt or "feature_columns" in codex_prompt
+    assert "已有 model-factor specs" in codex_prompt
+    assert "已有 factor 数据" in codex_prompt
+    assert "http_model_lab_idea_case" in codex_prompt
+    recommendations = explored["constraint_report"]["recommendations"]
+    extras = recommendations["extras"]
+    assert any(
+        item["name"] == "http_model_lab_idea_case"
+        for item in extras["existing_model_specs"]
+    )
+    assert extras["factor_inventory"]["baseline_factors"]
+    assert extras["factor_inventory"]["builtin_methods"]
 
     status2, sessions = _get(base_url, "/api/model-lab/idea-explorer/sessions?limit=10")
     assert status2 == 200
@@ -1591,6 +1834,259 @@ def test_model_lab_run_overview_route_not_found(live_server: tuple[str, _Unified
     assert data.get("ok") is False
 
 
+def test_model_lab_dev_overview_fixture_route(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
+    base_url, _ = live_server
+
+    status, html = _get(
+        base_url,
+        "/dev/model-lab/overview-fixture?case=strong_skipped_extreme_nav",
+    )
+    assert status == 200
+    assert isinstance(html, str)
+    assert "overviewFixtureIdFromLocation" in html
+
+    status, listing = _get(base_url, "/api/dev/model-lab/overview-fixtures")
+    assert status == 200
+    assert isinstance(listing, dict)
+    assert listing["ok"] is True
+    assert any(item["id"] == "strong_skipped_extreme_nav" for item in listing["fixtures"])
+
+    status, data = _get(
+        base_url,
+        "/api/dev/model-lab/overview-fixtures/strong_skipped_extreme_nav",
+    )
+    assert status == 200
+    assert isinstance(data, dict)
+    assert data["ok"] is True
+    assert data["fixture_id"] == "strong_skipped_extreme_nav"
+    assert data["summary"]["portfolio_validation_status"] == "skipped_not_promoted"
+    snapshot = data["snapshot"]
+    assert snapshot["portfolioValidation"]["summary"]["validation_status"] == "skipped_not_promoted"
+    assert len(snapshot["coverageRows"]) >= 10
+    assert snapshot["industryRows"] == []
+    assert snapshot["sizeRows"] == []
+    assert snapshot["regimeRows"] == []
+
+
+def test_alpha_lab_dev_overview_fixture_routes(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
+    base_url, _ = live_server
+
+    status, html = _get(
+        base_url,
+        "/dev/alpha-lab/overview-fixture?case=quick_screening",
+    )
+    assert status == 200
+    assert isinstance(html, str)
+    assert "alphaLabOverviewFixtureIdFromLocation" in html
+
+    status, alias_html = _get(
+        base_url,
+        "/dev/alpha-lab1/overview-fixture?case=full_evaluation",
+    )
+    assert status == 200
+    assert isinstance(alias_html, str)
+    assert "loadAlphaLabOverviewFixture" in alias_html
+
+    status, listing = _get(base_url, "/api/dev/alpha-lab/overview-fixtures")
+    assert status == 200
+    assert isinstance(listing, dict)
+    assert listing["ok"] is True
+    fixture_ids = {item["id"] for item in listing["fixtures"]}
+    assert {"quick_screening", "full_evaluation"}.issubset(fixture_ids)
+
+    status, quick = _get(
+        base_url,
+        "/api/dev/alpha-lab/overview-fixtures/quick_screening",
+    )
+    assert status == 200
+    assert isinstance(quick, dict)
+    assert quick["ok"] is True
+    assert quick["fixture_id"] == "quick_screening"
+    assert quick["summary"]["research_evaluation_profile"] == "quick_screening"
+    assert len(quick["snapshot"]["coverageRows"]) >= 8
+
+    status, full = _get(
+        base_url,
+        "/api/dev/alpha-lab1/overview-fixtures/full_evaluation",
+    )
+    assert status == 200
+    assert isinstance(full, dict)
+    assert full["ok"] is True
+    assert full["fixture_id"] == "full_evaluation"
+    assert full["summary"]["research_evaluation_profile"] == "stricter_research"
+    assert full["snapshot"]["portfolioValidation"]["summary"]["validation_status"] == "completed"
+
+
+def test_model_lab_dev_artifact_fixture_routes(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
+    base_url, _ = live_server
+
+    status, html = _get(
+        base_url,
+        "/dev/model-lab/artifact-fixture?case=strong_skipped_extreme_nav&artifact=training_log",
+    )
+    assert status == 200
+    assert isinstance(html, str)
+    assert "artifactFixtureParamsFromLocation" in html
+
+    status, listing = _get(base_url, "/api/dev/model-lab/artifact-fixtures")
+    assert status == 200
+    assert isinstance(listing, dict)
+    assert listing["ok"] is True
+    assert any(item["id"] == "strong_skipped_extreme_nav" for item in listing["fixtures"])
+
+    status, metrics = _get(
+        base_url,
+        "/api/dev/model-lab/artifact-fixtures/strong_skipped_extreme_nav/artifact/metrics",
+    )
+    assert status == 200
+    assert isinstance(metrics, dict)
+    assert metrics["metrics"]["portfolio_validation_status"] == "skipped_not_promoted"
+
+    status, training_log = _get(
+        base_url,
+        "/api/dev/model-lab/artifact-fixtures/strong_skipped_extreme_nav/artifact/training_log",
+    )
+    assert status == 200
+    assert isinstance(training_log, str)
+    assert "score_date,status,model_version" in training_log
+    assert "fit_scored" in training_log
+
+    status, feature_importance = _get(
+        base_url,
+        "/api/dev/model-lab/artifact-fixtures/strong_skipped_extreme_nav/artifact/feature_importance",
+    )
+    assert status == 200
+    assert isinstance(feature_importance, str)
+    assert "turnover_rate_f" in feature_importance
+
+    status, diag_html = _get(
+        base_url,
+        "/dev/model-lab/diagnostics-fixture?case=strong_skipped_extreme_nav",
+    )
+    assert status == 200
+    assert isinstance(diag_html, str)
+    assert "diagnosticsFixtureIdFromLocation" in diag_html
+
+    status, diagnostics = _get(
+        base_url,
+        "/api/dev/model-lab/artifact-fixtures/strong_skipped_extreme_nav/artifact/diagnostics",
+    )
+    assert status == 200
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["run_summary"]["highest_severity"] == "warn"
+
+
+def test_model_lab_candidate_routes(
+    live_server: tuple[str, _UnifiedService],
+) -> None:
+    base_url, svc = live_server
+
+    status_empty, empty = _get(base_url, "/api/model-lab/candidates")
+    assert status_empty == 200
+    assert isinstance(empty, dict)
+    assert empty["candidates"] == []
+
+    payload = _build_model_candidate_payload(
+        svc.workspace_root / "candidate_http_inputs",
+        candidate_name="http_model_candidate",
+    )
+    status_post, saved = _post(
+        base_url,
+        "/api/model-lab/candidates",
+        {"model_candidate_payload": payload},
+    )
+    assert status_post == 201
+    assert isinstance(saved, dict)
+    assert saved["name"] == "http_model_candidate"
+    candidate_path = (
+        svc.workspace_root
+        / "model_candidates"
+        / "research"
+        / "http_model_candidate"
+        / "model_candidate.json"
+    )
+    assert candidate_path.exists()
+    assert candidate_path.with_name("research_log.md").exists()
+
+    status_validate, validation = _post(
+        base_url,
+        "/api/model-lab/candidates/http_model_candidate/validate",
+        {},
+    )
+    assert status_validate == 200
+    assert isinstance(validation, dict)
+    assert validation["ok"] is True
+    assert validation["candidate_json_sha256"]
+    assert validation["case_spec_sha256"]
+    assert validation["feature_contract_sha256"]
+
+    status_mat_1, mat_1 = _post(
+        base_url,
+        "/api/model-lab/candidates/http_model_candidate/materialize-spec",
+        {},
+    )
+    assert status_mat_1 == 200
+    assert isinstance(mat_1, dict)
+    assert mat_1["ok"] is True
+    assert mat_1["name"] == "http_model_candidate_v1.yaml"
+    assert (svc.model_lab_specs_root / "http_model_candidate_v1.yaml").exists()
+
+    status_mat_2, mat_2 = _post(
+        base_url,
+        "/api/model-lab/candidates/http_model_candidate/materialize-spec",
+        {},
+    )
+    assert status_mat_2 == 200
+    assert isinstance(mat_2, dict)
+    assert mat_2["name"] == "http_model_candidate_v2.yaml"
+
+    bad_payload = _build_model_candidate_payload(
+        svc.workspace_root / "candidate_http_bad_inputs",
+        candidate_name="http_model_bad",
+        feature_columns=["feature_missing"],
+    )
+    status_bad_post, _ = _post(
+        base_url,
+        "/api/model-lab/candidates",
+        {"model_candidate_payload": bad_payload},
+    )
+    assert status_bad_post == 201
+    status_bad_validate, bad_validation = _post(
+        base_url,
+        "/api/model-lab/candidates/http_model_bad/validate",
+        {},
+    )
+    assert status_bad_validate == 200
+    assert isinstance(bad_validation, dict)
+    assert bad_validation["ok"] is False
+    assert any(
+        issue["code"] == "feature_columns_not_in_features"
+        for issue in bad_validation["errors"]
+    )
+
+    status_run, run_payload = _post(
+        base_url,
+        "/api/model-lab/candidates/http_model_candidate/run",
+        {},
+    )
+    assert status_run == 200
+    assert isinstance(run_payload, dict)
+    assert run_payload["ok"] is True
+    submitted = run_payload["run"]
+    assert isinstance(submitted, dict)
+    assert submitted["draft_model_candidate_name"] == "http_model_candidate"
+    assert submitted["draft_model_candidate_path"] == str(candidate_path)
+    record = svc.run_store.get(str(submitted["run_id"]))
+    assert record is not None
+    assert record.draft_model_candidate_path == str(candidate_path)
+
+
 def test_model_lab_run_routes_run_note_and_duplicate_spec_diff(
     live_server: tuple[str, _UnifiedService],
     tmp_path: Path,
@@ -1598,28 +2094,7 @@ def test_model_lab_run_routes_run_note_and_duplicate_spec_diff(
     base_url, svc = live_server
     specs_dir = svc.workspace_root / "configs" / "real_cases" / "model_factor"
     specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / "features.csv").write_text(
-        "\n".join(
-            [
-                "date,asset,feature_a",
-                "2026-01-02,000001.SZ,1.0",
-                "2026-01-09,000001.SZ,1.1",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (specs_dir / "prices.csv").write_text(
-        "\n".join(
-            [
-                "date,asset,close",
-                "2026-01-02,000001.SZ,10.0",
-                "2026-01-09,000001.SZ,10.5",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    _write_model_factor_fixture_inputs(specs_dir)
     spec_path = specs_dir / "http_model_lab_route.yaml"
     spec_path.write_text(
         "\n".join(
@@ -2072,6 +2547,9 @@ def test_list_custom_factors_route(live_server: tuple[str, _UnifiedService]) -> 
     assert "factors" in data
     names = [f["name"] for f in data["factors"]]
     assert "momentum" in names
+    baseline_names = [f["name"] for f in data["baseline_factor_suite"]]
+    assert "mom_20d" in baseline_names
+    assert "rev_5d" in baseline_names
 
 
 def test_register_custom_factor_route(live_server: tuple[str, _UnifiedService]) -> None:

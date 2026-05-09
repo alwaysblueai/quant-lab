@@ -1,0 +1,168 @@
+{
+  "label": "alpha-lab1 quick screening fixture",
+  "description": "快速筛选模式：用于验证 Factor Snapshot、Quick Decision Metrics、覆盖率事件条和基础组合净值，不需要重新跑实验。",
+  "project_slug": "alpha-lab1-fixture",
+  "run_id": "fixture-alpha-lab1-quick-screening",
+  "case_name": "alpha_lab1_quick_screening_fixture",
+  "summary": {
+    "research_evaluation_profile": "quick_screening",
+    "factor_name": "turnover_reversal_quick_screen",
+    "factor_verdict": "Strong Watchlist",
+    "campaign_triage": "watchlist",
+    "promotion_decision": "hold_for_full_evaluation",
+    "level12_transition_label": "hold_for_full_evaluation",
+    "evaluation_title": "快速筛选通过，等待全面评价",
+    "evaluation_action": "Run full evaluation",
+    "evaluation_next_step": "检查 OOS 稳定性、覆盖率 break 和成本敏感性后再决定是否晋级。",
+    "mean_rank_ic": 0.041,
+    "mean_rank_ic_oos": 0.034,
+    "rank_ic_ir": 0.87,
+    "rank_ic_ir_oos": 0.69,
+    "mean_ic": 0.033,
+    "mean_ic_oos": 0.027,
+    "ic_ir": 0.72,
+    "ic_ir_oos": 0.58,
+    "ic_positive_rate": 0.68,
+    "rank_ic_positive_rate": 0.71,
+    "ic_t_stat": 3.2,
+    "mean_long_short_return": 0.0062,
+    "mean_long_short_return_oos": 0.0048,
+    "long_short_ir": 1.15,
+    "cost_aware_long_short_ir": 0.92,
+    "cost_aware_long_short_sharpe": 1.04,
+    "max_drawdown": -0.082,
+    "ls_max_drawdown": -0.082,
+    "q5_q1": 0.0062,
+    "q5_q1_oos": 0.0048,
+    "group_monotonicity_share": 0.75,
+    "mean_long_short_turnover": 0.74,
+    "mean_long_short_turnover_oos": 0.78,
+    "turnover_p95": 1.18,
+    "turnover_spike_days": 1,
+    "transaction_cost_one_way_rate": 0.001,
+    "coverage_summary": "Coverage is near 100% after warmup; early break days are visible in the event strip.",
+    "eval_coverage_ratio_mean": 0.977,
+    "coverage_break_days": 2,
+    "coverage_break_threshold": 0.9,
+    "n_dates_used": 8,
+    "mean_eval_assets_per_date": 715,
+    "annualization_factor": 252,
+    "split_contract": {
+      "oos_start": "2024-01-12",
+      "purge_days": 5
+    }
+  },
+  "snapshot": {
+    "backtest": {
+      "rebalance_frequency": "daily",
+      "target_horizon": 1,
+      "transaction_cost_one_way_rate": 0.001,
+      "summary": {
+        "rebalance_frequency": "daily",
+        "label_horizon": 1,
+        "annualization_factor": 252,
+        "max_drawdown": -0.082,
+        "nav_points": [
+          ["2024-01-02", 1.0000, "IS"],
+          ["2024-01-17", 1.0415, "OOS"]
+        ]
+      },
+      "split_contract": {
+        "oos_start": "2024-01-12"
+      }
+    },
+    "icRows": [
+      {"date": "2024-01-02", "rank_ic": 0.050, "ic": 0.041, "split_phase": "IS"},
+      {"date": "2024-01-03", "rank_ic": 0.038, "ic": 0.032, "split_phase": "IS"},
+      {"date": "2024-01-04", "rank_ic": -0.008, "ic": -0.006, "split_phase": "IS"},
+      {"date": "2024-01-05", "rank_ic": 0.044, "ic": 0.034, "split_phase": "IS"},
+      {"date": "2024-01-08", "rank_ic": 0.057, "ic": 0.043, "split_phase": "IS"},
+      {"date": "2024-01-09", "rank_ic": 0.036, "ic": 0.028, "split_phase": "IS"},
+      {"date": "2024-01-12", "rank_ic": 0.030, "ic": 0.023, "split_phase": "OOS"},
+      {"date": "2024-01-17", "rank_ic": 0.039, "ic": 0.031, "split_phase": "OOS"}
+    ],
+    "rollingRows": [
+      {"date": "2024-01-02", "rolling_mean_rank_ic": 0.050, "split_phase": "IS"},
+      {"date": "2024-01-03", "rolling_mean_rank_ic": 0.044, "split_phase": "IS"},
+      {"date": "2024-01-04", "rolling_mean_rank_ic": 0.027, "split_phase": "IS"},
+      {"date": "2024-01-05", "rolling_mean_rank_ic": 0.031, "split_phase": "IS"},
+      {"date": "2024-01-08", "rolling_mean_rank_ic": 0.036, "split_phase": "IS"},
+      {"date": "2024-01-09", "rolling_mean_rank_ic": 0.036, "split_phase": "IS"},
+      {"date": "2024-01-12", "rolling_mean_rank_ic": 0.035, "split_phase": "OOS"},
+      {"date": "2024-01-17", "rolling_mean_rank_ic": 0.036, "split_phase": "OOS"}
+    ],
+    "decayRows": [
+      {"horizon": 1, "mean_ic": 0.025, "mean_rank_ic": 0.032, "n_obs": 8},
+      {"horizon": 3, "mean_ic": 0.030, "mean_rank_ic": 0.039, "n_obs": 8},
+      {"horizon": 5, "mean_ic": 0.034, "mean_rank_ic": 0.046, "n_obs": 8},
+      {"horizon": 10, "mean_ic": 0.037, "mean_rank_ic": 0.051, "n_obs": 8},
+      {"horizon": 20, "mean_ic": 0.039, "mean_rank_ic": 0.054, "n_obs": 8}
+    ],
+    "groupRows": [
+      {"date": "2024-01-02", "group": "q1", "group_return": -0.0020, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q3", "group_return": 0.0012, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q5", "group_return": 0.0061, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q1", "group_return": -0.0012, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q3", "group_return": 0.0007, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q5", "group_return": 0.0052, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q1", "group_return": 0.0014, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q3", "group_return": 0.0002, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q5", "group_return": -0.0004, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q1", "group_return": -0.0018, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q3", "group_return": 0.0009, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q5", "group_return": 0.0056, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q1", "group_return": -0.0022, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q3", "group_return": 0.0011, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q5", "group_return": 0.0068, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q1", "group_return": -0.0008, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q3", "group_return": 0.0006, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q5", "group_return": 0.0046, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q1", "group_return": -0.0010, "split_phase": "OOS"},
+      {"date": "2024-01-12", "group": "q3", "group_return": 0.0003, "split_phase": "OOS"},
+      {"date": "2024-01-12", "group": "q5", "group_return": 0.0039, "split_phase": "OOS"},
+      {"date": "2024-01-17", "group": "q1", "group_return": -0.0013, "split_phase": "OOS"},
+      {"date": "2024-01-17", "group": "q3", "group_return": 0.0008, "split_phase": "OOS"},
+      {"date": "2024-01-17", "group": "q5", "group_return": 0.0048, "split_phase": "OOS"}
+    ],
+    "turnoverRows": [
+      {"date": "2024-01-02", "long_short_turnover": 0.62, "split_phase": "IS"},
+      {"date": "2024-01-03", "long_short_turnover": 0.68, "split_phase": "IS"},
+      {"date": "2024-01-04", "long_short_turnover": 0.71, "split_phase": "IS"},
+      {"date": "2024-01-05", "long_short_turnover": 0.74, "split_phase": "IS"},
+      {"date": "2024-01-08", "long_short_turnover": 0.83, "split_phase": "IS"},
+      {"date": "2024-01-09", "long_short_turnover": 0.76, "split_phase": "IS"},
+      {"date": "2024-01-12", "long_short_turnover": 0.88, "split_phase": "OOS"},
+      {"date": "2024-01-17", "long_short_turnover": 0.81, "split_phase": "OOS"}
+    ],
+    "coverageRows": [
+      {"date": "2024-01-02", "eligible_count": 720, "valid_score_count": 540, "valid_forward_return_count": 538, "valid_sample_count": 538, "missing_score_count": 180, "filtered_count": 0, "asset_coverage": 0.750, "split_phase": "IS"},
+      {"date": "2024-01-03", "eligible_count": 721, "valid_score_count": 610, "valid_forward_return_count": 608, "valid_sample_count": 608, "missing_score_count": 111, "filtered_count": 0, "asset_coverage": 0.846, "split_phase": "IS"},
+      {"date": "2024-01-04", "eligible_count": 722, "valid_score_count": 713, "valid_forward_return_count": 711, "valid_sample_count": 711, "missing_score_count": 9, "filtered_count": 0, "asset_coverage": 0.988, "split_phase": "IS"},
+      {"date": "2024-01-05", "eligible_count": 723, "valid_score_count": 715, "valid_forward_return_count": 713, "valid_sample_count": 713, "missing_score_count": 8, "filtered_count": 0, "asset_coverage": 0.989, "split_phase": "IS"},
+      {"date": "2024-01-08", "eligible_count": 724, "valid_score_count": 718, "valid_forward_return_count": 716, "valid_sample_count": 716, "missing_score_count": 6, "filtered_count": 0, "asset_coverage": 0.992, "split_phase": "IS"},
+      {"date": "2024-01-09", "eligible_count": 725, "valid_score_count": 719, "valid_forward_return_count": 718, "valid_sample_count": 718, "missing_score_count": 6, "filtered_count": 0, "asset_coverage": 0.992, "split_phase": "IS"},
+      {"date": "2024-01-12", "eligible_count": 726, "valid_score_count": 720, "valid_forward_return_count": 719, "valid_sample_count": 719, "missing_score_count": 6, "filtered_count": 0, "asset_coverage": 0.992, "split_phase": "OOS"},
+      {"date": "2024-01-17", "eligible_count": 727, "valid_score_count": 722, "valid_forward_return_count": 720, "valid_sample_count": 720, "missing_score_count": 5, "filtered_count": 0, "asset_coverage": 0.993, "split_phase": "OOS"}
+    ],
+    "autocorrRows": [
+      {"lag": 1, "mean_autocorr": 0.31}
+    ],
+    "randomBaselineRows": [],
+    "conditionalMagnitudeRows": [],
+    "conditionalCrossSectionRows": [],
+    "portfolioValidation": {
+      "summary": {
+        "validation_status": "not_run_quick_screening",
+        "recommendation": "Run full evaluation before promotion.",
+        "major_risks_count": 1,
+        "major_risks": ["quick screening profile does not run Level-2 portfolio validation"]
+      }
+    },
+    "integrity": {
+      "highest_severity": "info",
+      "integrity_checks": [
+        {"check_name": "temporal_alignment", "severity": "info", "status": "passed"}
+      ]
+    }
+  }
+}

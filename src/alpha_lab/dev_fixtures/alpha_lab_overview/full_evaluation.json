@@ -1,0 +1,254 @@
+{
+  "label": "alpha-lab1 full evaluation fixture",
+  "description": "全面评价模式：用于验证 Executive Verdict、Core Decision Charts、Portfolio / IC / Data Quality / Trading Diagnostics 等完整看板。",
+  "project_slug": "alpha-lab1-fixture",
+  "run_id": "fixture-alpha-lab1-full-evaluation",
+  "case_name": "alpha_lab1_full_evaluation_fixture",
+  "summary": {
+    "research_evaluation_profile": "stricter_research",
+    "factor_name": "liquidity_adjusted_reversal_full_eval",
+    "factor_verdict": "Promote Candidate",
+    "campaign_triage": "promote_candidate",
+    "promotion_decision": "promoted",
+    "level12_transition_label": "promoted",
+    "portfolio_validation_status": "completed",
+    "portfolio_validation_recommendation": "promote_candidate",
+    "portfolio_validation_major_risks_count": 1,
+    "portfolio_validation_major_risks": ["turnover remains near the promotion threshold; review execution-cost sensitivity before production use"],
+    "promotion_blockers": "turnover remains near the promotion threshold",
+    "evaluation_title": "全面评价通过，建议进入组合验证候选池",
+    "evaluation_action": "Promote candidate",
+    "evaluation_next_step": "保留成本敏感性和 OOS 滚动稳定性复核记录。",
+    "mean_rank_ic": 0.036,
+    "mean_rank_ic_full": 0.036,
+    "mean_rank_ic_is": 0.038,
+    "mean_rank_ic_oos": 0.033,
+    "rank_ic_ir": 0.74,
+    "rank_ic_ir_full": 0.74,
+    "rank_ic_ir_oos": 0.66,
+    "mean_ic": 0.029,
+    "mean_ic_oos": 0.026,
+    "ic_ir": 0.63,
+    "ic_ir_oos": 0.55,
+    "ic_positive_rate": 0.70,
+    "rank_ic_positive_rate": 0.75,
+    "rolling_rank_ic_positive_share": 0.72,
+    "subperiod_ic_positive_share": 0.67,
+    "ic_t_stat": 3.8,
+    "ic_decay_retention_5_over_1": 0.82,
+    "mean_long_short_return": 0.0049,
+    "mean_long_short_return_full": 0.0049,
+    "mean_long_short_return_oos": 0.0038,
+    "long_short_ir": 0.96,
+    "long_short_ir_full": 0.96,
+    "cost_aware_long_short_ir": 0.71,
+    "cost_aware_long_short_ir_full": 0.71,
+    "cost_aware_long_short_sharpe": 0.88,
+    "max_drawdown": -0.093,
+    "max_drawdown_full": -0.093,
+    "ls_max_drawdown": -0.093,
+    "q5_q1": 0.0049,
+    "q5_q1_oos": 0.0038,
+    "group_monotonicity_share": 0.82,
+    "mean_long_short_turnover": 0.28,
+    "mean_long_short_turnover_oos": 0.31,
+    "turnover_p95": 0.43,
+    "turnover_spike_days": 2,
+    "transaction_cost_one_way_rate": 0.001,
+    "sample_coverage": 0.972,
+    "avg_asset_coverage": 0.975,
+    "min_asset_coverage": 0.884,
+    "coverage_summary": "Coverage is near 100% after warmup; one early break is isolated.",
+    "eval_coverage_ratio_mean": 0.972,
+    "coverage_break_days": 1,
+    "coverage_break_threshold": 0.9,
+    "n_dates_used": 10,
+    "mean_eval_assets_per_date": 812,
+    "annualization_factor": 252,
+    "split_contract": {
+      "oos_start": "2024-01-16",
+      "purge_days": 5
+    },
+    "research_evaluation_snapshot": {
+      "level2_promotion": {
+        "min_mean_rank_ic_promote": 0.01,
+        "min_rank_ic_ir_promote": 0.2,
+        "min_ic_positive_rate_promote": 0.52,
+        "min_rolling_positive_share_promote": 0.52,
+        "min_subperiod_positive_share_promote": 0.52,
+        "min_oos_rank_ic_promote": 0.0,
+        "min_oos_rank_ic_ratio_promote": 0.5,
+        "min_oos_portfolio_return_promote": 0.0,
+        "min_estimated_cost_adjusted_ir_promote": 0.5,
+        "max_drawdown_promote": 0.2,
+        "high_turnover": 0.3,
+        "max_turnover_spike_days_promote": 5,
+        "min_coverage_mean_promote": 0.95,
+        "min_asset_coverage_promote": 0.95,
+        "max_coverage_break_days_promote": 5
+      }
+    }
+  },
+  "snapshot": {
+    "backtest": {
+      "rebalance_frequency": "daily",
+      "target_horizon": 1,
+      "transaction_cost_one_way_rate": 0.001,
+      "summary": {
+        "rebalance_frequency": "daily",
+        "label_horizon": 1,
+        "annualization_factor": 252,
+        "max_drawdown": -0.093,
+        "nav_points": [
+          ["2024-01-02", 1.0000, "IS"],
+          ["2024-01-22", 1.0432, "OOS"]
+        ]
+      },
+      "split_contract": {
+        "oos_start": "2024-01-16"
+      }
+    },
+    "icRows": [
+      {"date": "2024-01-02", "rank_ic": 0.041, "ic": 0.033, "split_phase": "IS"},
+      {"date": "2024-01-03", "rank_ic": 0.035, "ic": 0.028, "split_phase": "IS"},
+      {"date": "2024-01-04", "rank_ic": 0.029, "ic": 0.023, "split_phase": "IS"},
+      {"date": "2024-01-05", "rank_ic": -0.004, "ic": -0.002, "split_phase": "IS"},
+      {"date": "2024-01-08", "rank_ic": 0.052, "ic": 0.041, "split_phase": "IS"},
+      {"date": "2024-01-09", "rank_ic": 0.040, "ic": 0.032, "split_phase": "IS"},
+      {"date": "2024-01-12", "rank_ic": 0.036, "ic": 0.028, "split_phase": "IS"},
+      {"date": "2024-01-16", "rank_ic": 0.031, "ic": 0.025, "split_phase": "OOS"},
+      {"date": "2024-01-18", "rank_ic": 0.028, "ic": 0.022, "split_phase": "OOS"},
+      {"date": "2024-01-22", "rank_ic": 0.039, "ic": 0.030, "split_phase": "OOS"}
+    ],
+    "rollingRows": [
+      {"date": "2024-01-02", "rolling_mean_rank_ic": 0.041, "split_phase": "IS"},
+      {"date": "2024-01-03", "rolling_mean_rank_ic": 0.038, "split_phase": "IS"},
+      {"date": "2024-01-04", "rolling_mean_rank_ic": 0.035, "split_phase": "IS"},
+      {"date": "2024-01-05", "rolling_mean_rank_ic": 0.025, "split_phase": "IS"},
+      {"date": "2024-01-08", "rolling_mean_rank_ic": 0.031, "split_phase": "IS"},
+      {"date": "2024-01-09", "rolling_mean_rank_ic": 0.034, "split_phase": "IS"},
+      {"date": "2024-01-12", "rolling_mean_rank_ic": 0.036, "split_phase": "IS"},
+      {"date": "2024-01-16", "rolling_mean_rank_ic": 0.035, "split_phase": "OOS"},
+      {"date": "2024-01-18", "rolling_mean_rank_ic": 0.034, "split_phase": "OOS"},
+      {"date": "2024-01-22", "rolling_mean_rank_ic": 0.035, "split_phase": "OOS"}
+    ],
+    "decayRows": [
+      {"horizon": 1, "mean_ic": 0.031, "mean_rank_ic": 0.038, "n_obs": 10},
+      {"horizon": 3, "mean_ic": 0.028, "mean_rank_ic": 0.034, "n_obs": 10},
+      {"horizon": 5, "mean_ic": 0.025, "mean_rank_ic": 0.031, "n_obs": 10},
+      {"horizon": 10, "mean_ic": 0.017, "mean_rank_ic": 0.022, "n_obs": 10},
+      {"horizon": 20, "mean_ic": 0.012, "mean_rank_ic": 0.016, "n_obs": 10}
+    ],
+    "groupRows": [
+      {"date": "2024-01-02", "group": "q1", "group_return": -0.0012, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q2", "group_return": -0.0003, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q3", "group_return": 0.0005, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q4", "group_return": 0.0016, "split_phase": "IS"},
+      {"date": "2024-01-02", "group": "q5", "group_return": 0.0038, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q1", "group_return": -0.0008, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q2", "group_return": 0.0001, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q3", "group_return": 0.0007, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q4", "group_return": 0.0017, "split_phase": "IS"},
+      {"date": "2024-01-03", "group": "q5", "group_return": 0.0034, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q1", "group_return": -0.0004, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q2", "group_return": 0.0002, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q3", "group_return": 0.0008, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q4", "group_return": 0.0014, "split_phase": "IS"},
+      {"date": "2024-01-04", "group": "q5", "group_return": 0.0028, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q1", "group_return": 0.0009, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q2", "group_return": 0.0005, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q3", "group_return": 0.0002, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q4", "group_return": 0.0001, "split_phase": "IS"},
+      {"date": "2024-01-05", "group": "q5", "group_return": 0.0004, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q1", "group_return": -0.0015, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q2", "group_return": -0.0002, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q3", "group_return": 0.0008, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q4", "group_return": 0.0020, "split_phase": "IS"},
+      {"date": "2024-01-08", "group": "q5", "group_return": 0.0047, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q1", "group_return": -0.0011, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q2", "group_return": -0.0001, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q3", "group_return": 0.0006, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q4", "group_return": 0.0018, "split_phase": "IS"},
+      {"date": "2024-01-09", "group": "q5", "group_return": 0.0040, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q1", "group_return": -0.0010, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q2", "group_return": 0.0000, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q3", "group_return": 0.0007, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q4", "group_return": 0.0016, "split_phase": "IS"},
+      {"date": "2024-01-12", "group": "q5", "group_return": 0.0036, "split_phase": "IS"},
+      {"date": "2024-01-16", "group": "q1", "group_return": -0.0009, "split_phase": "OOS"},
+      {"date": "2024-01-16", "group": "q2", "group_return": -0.0001, "split_phase": "OOS"},
+      {"date": "2024-01-16", "group": "q3", "group_return": 0.0004, "split_phase": "OOS"},
+      {"date": "2024-01-16", "group": "q4", "group_return": 0.0011, "split_phase": "OOS"},
+      {"date": "2024-01-16", "group": "q5", "group_return": 0.0029, "split_phase": "OOS"},
+      {"date": "2024-01-18", "group": "q1", "group_return": -0.0007, "split_phase": "OOS"},
+      {"date": "2024-01-18", "group": "q2", "group_return": 0.0000, "split_phase": "OOS"},
+      {"date": "2024-01-18", "group": "q3", "group_return": 0.0003, "split_phase": "OOS"},
+      {"date": "2024-01-18", "group": "q4", "group_return": 0.0012, "split_phase": "OOS"},
+      {"date": "2024-01-18", "group": "q5", "group_return": 0.0026, "split_phase": "OOS"},
+      {"date": "2024-01-22", "group": "q1", "group_return": -0.0010, "split_phase": "OOS"},
+      {"date": "2024-01-22", "group": "q2", "group_return": -0.0002, "split_phase": "OOS"},
+      {"date": "2024-01-22", "group": "q3", "group_return": 0.0005, "split_phase": "OOS"},
+      {"date": "2024-01-22", "group": "q4", "group_return": 0.0014, "split_phase": "OOS"},
+      {"date": "2024-01-22", "group": "q5", "group_return": 0.0033, "split_phase": "OOS"}
+    ],
+    "turnoverRows": [
+      {"date": "2024-01-02", "long_short_turnover": 0.22, "split_phase": "IS"},
+      {"date": "2024-01-03", "long_short_turnover": 0.24, "split_phase": "IS"},
+      {"date": "2024-01-04", "long_short_turnover": 0.27, "split_phase": "IS"},
+      {"date": "2024-01-05", "long_short_turnover": 0.31, "split_phase": "IS"},
+      {"date": "2024-01-08", "long_short_turnover": 0.29, "split_phase": "IS"},
+      {"date": "2024-01-09", "long_short_turnover": 0.28, "split_phase": "IS"},
+      {"date": "2024-01-12", "long_short_turnover": 0.26, "split_phase": "IS"},
+      {"date": "2024-01-16", "long_short_turnover": 0.32, "split_phase": "OOS"},
+      {"date": "2024-01-18", "long_short_turnover": 0.30, "split_phase": "OOS"},
+      {"date": "2024-01-22", "long_short_turnover": 0.35, "split_phase": "OOS"}
+    ],
+    "coverageRows": [
+      {"date": "2024-01-02", "eligible_count": 810, "valid_score_count": 716, "valid_forward_return_count": 714, "valid_sample_count": 714, "missing_score_count": 94, "filtered_count": 0, "asset_coverage": 0.884, "split_phase": "IS"},
+      {"date": "2024-01-03", "eligible_count": 811, "valid_score_count": 790, "valid_forward_return_count": 788, "valid_sample_count": 788, "missing_score_count": 21, "filtered_count": 0, "asset_coverage": 0.974, "split_phase": "IS"},
+      {"date": "2024-01-04", "eligible_count": 812, "valid_score_count": 793, "valid_forward_return_count": 790, "valid_sample_count": 790, "missing_score_count": 19, "filtered_count": 0, "asset_coverage": 0.976, "split_phase": "IS"},
+      {"date": "2024-01-05", "eligible_count": 813, "valid_score_count": 794, "valid_forward_return_count": 792, "valid_sample_count": 792, "missing_score_count": 19, "filtered_count": 0, "asset_coverage": 0.977, "split_phase": "IS"},
+      {"date": "2024-01-08", "eligible_count": 814, "valid_score_count": 799, "valid_forward_return_count": 797, "valid_sample_count": 797, "missing_score_count": 15, "filtered_count": 0, "asset_coverage": 0.982, "split_phase": "IS"},
+      {"date": "2024-01-09", "eligible_count": 815, "valid_score_count": 799, "valid_forward_return_count": 798, "valid_sample_count": 798, "missing_score_count": 16, "filtered_count": 0, "asset_coverage": 0.980, "split_phase": "IS"},
+      {"date": "2024-01-12", "eligible_count": 816, "valid_score_count": 800, "valid_forward_return_count": 799, "valid_sample_count": 799, "missing_score_count": 16, "filtered_count": 0, "asset_coverage": 0.980, "split_phase": "IS"},
+      {"date": "2024-01-16", "eligible_count": 817, "valid_score_count": 799, "valid_forward_return_count": 798, "valid_sample_count": 798, "missing_score_count": 18, "filtered_count": 0, "asset_coverage": 0.978, "split_phase": "OOS"},
+      {"date": "2024-01-18", "eligible_count": 818, "valid_score_count": 801, "valid_forward_return_count": 799, "valid_sample_count": 799, "missing_score_count": 17, "filtered_count": 0, "asset_coverage": 0.979, "split_phase": "OOS"},
+      {"date": "2024-01-22", "eligible_count": 819, "valid_score_count": 804, "valid_forward_return_count": 802, "valid_sample_count": 802, "missing_score_count": 15, "filtered_count": 0, "asset_coverage": 0.982, "split_phase": "OOS"}
+    ],
+    "autocorrRows": [
+      {"lag": 1, "mean_autocorr": 0.22},
+      {"lag": 5, "mean_autocorr": 0.10}
+    ],
+    "randomBaselineRows": [
+      {"metric": "rank_ic", "observed": 0.036, "null_mean": 0.001, "null_p95": 0.018, "p_value": 0.031, "n_permutations": 200}
+    ],
+    "conditionalMagnitudeRows": [
+      {"bucket": "Q1", "mean_rank_ic": 0.018, "n_obs": 10},
+      {"bucket": "Q3", "mean_rank_ic": 0.030, "n_obs": 10},
+      {"bucket": "Q5", "mean_rank_ic": 0.047, "n_obs": 10}
+    ],
+    "conditionalCrossSectionRows": [
+      {"bucket": "small", "mean_rank_ic": 0.029, "n_obs": 4},
+      {"bucket": "large", "mean_rank_ic": 0.039, "n_obs": 6}
+    ],
+    "portfolioValidation": {
+      "summary": {
+        "validation_status": "completed",
+        "recommendation": "promote_candidate",
+        "major_risks_count": 1,
+        "major_risks": ["turnover remains near the promotion threshold; review execution-cost sensitivity before production use"]
+      },
+      "checks": [
+        {"check_name": "cost_adjusted_ir", "status": "passed", "severity": "info", "actual": 0.71, "threshold": 0.50},
+        {"check_name": "turnover", "status": "warning", "severity": "warn", "actual": 0.28, "threshold": 0.30}
+      ]
+    },
+    "integrity": {
+      "highest_severity": "info",
+      "integrity_checks": [
+        {"check_name": "temporal_alignment", "severity": "info", "status": "passed"},
+        {"check_name": "label_feature_leakage", "severity": "info", "status": "passed"}
+      ]
+    }
+  }
+}

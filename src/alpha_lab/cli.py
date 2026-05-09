@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import math
 import os
 import re
@@ -46,12 +47,15 @@ _UNIFIED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset(
         "real-case",
         "campaign",
         "bridge",
+        "idea",
         "vault",
         "profiles",
         "web",
         "data",
         "fast-screen",
         "model-idea",
+        "validate-draft-factor",
+        "validate-draft-model",
     }
 )
 _SUPPORTED_CAMPAIGNS: frozenset[str] = frozenset({"research_campaign_1"})
@@ -487,6 +491,90 @@ def build_unified_parser() -> argparse.ArgumentParser:
         help="Arguments forwarded to 'alpha-lab fast-screen' (run|deep-dive|list-modules).",
     )
 
+    validate_draft = top.add_parser(
+        "validate-draft-factor",
+        help="Validate a research custom factor.json before Stage3 backend execution.",
+        description=(
+            "Validate a Stage3 backend draft factor contract before running the "
+            "standard single-factor pipeline. The gate checks JSON schema, "
+            "custom-factor entrypoint, forbidden file/network operations, simple "
+            "leakage patterns, toy-frame execution, and audit hashes."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    validate_draft.add_argument(
+        "factor_json",
+        help="Path to custom_factors/research/<factor_name>/factor.json.",
+    )
+    validate_draft.add_argument(
+        "--available-fields",
+        default=None,
+        help=(
+            "Optional comma-separated dataset field list. When supplied, every "
+            "required column in factor.json must be present."
+        ),
+    )
+    validate_draft.add_argument(
+        "--allow-non-research-path",
+        action="store_true",
+        help="Allow validating a factor.json outside custom_factors/research for tests only.",
+    )
+    validate_draft.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Print machine-readable validation payload.",
+    )
+
+    validate_draft_model = top.add_parser(
+        "validate-draft-model",
+        help="Validate a Stage3 backend draft model_candidate.json before pipeline run.",
+        description=(
+            "Validate a Stage3 backend draft model candidate contract before "
+            "running the standard real-case model-factor pipeline. The gate "
+            "checks contract version, candidate path scope, the embedded "
+            "case_spec_payload via the model-factor spec parser, feature-column "
+            "availability against the features file header, and audit hashes."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    validate_draft_model.add_argument(
+        "model_candidate_json",
+        help=(
+            "Path to model_candidates/research/<candidate_name>/model_candidate.json."
+        ),
+    )
+    validate_draft_model.add_argument(
+        "--available-fields",
+        default=None,
+        help=(
+            "Optional comma-separated dataset field list. When supplied, every "
+            "feature_column in case_spec_payload must be present."
+        ),
+    )
+    validate_draft_model.add_argument(
+        "--allow-non-research-path",
+        action="store_true",
+        help=(
+            "Allow validating a model_candidate.json outside "
+            "model_candidates/research for tests only."
+        ),
+    )
+    validate_draft_model.add_argument(
+        "--skip-features-file-check",
+        action="store_true",
+        help=(
+            "Skip the features file existence/header check. Use only for offline "
+            "schema-only validation."
+        ),
+    )
+    validate_draft_model.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Print machine-readable validation payload.",
+    )
+
     real_case = top.add_parser(
         "real-case",
         help="Run real-case Level 1/2 research-validation workflows.",
@@ -813,6 +901,74 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     build_bridge_parser(bridge)
 
+    idea = top.add_parser(
+        "idea",
+        help="Generate Stage 1 idea-explorer draft artifacts.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    idea_commands = idea.add_subparsers(dest="idea_action", required=True)
+    idea_draft = idea_commands.add_parser(
+        "draft",
+        help="Create shared prompt, per-model ledger placeholders, and reconcile template.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    idea_draft.add_argument("--idea", required=True, help="Natural-language idea to explore.")
+    idea_draft.add_argument(
+        "--models",
+        default="claude,codex",
+        help="Comma-separated Stage 1 engines, e.g. claude,codex.",
+    )
+    idea_draft.add_argument(
+        "--mode",
+        default="start",
+        choices=["start", "free", "constrained"],
+        help="Stage 1 prompt strictness.",
+    )
+    idea_draft.add_argument(
+        "--stage",
+        default="mechanism_discovery",
+        choices=["mechanism_discovery", "signal_mapping"],
+        help="Idea-explorer stage to draft.",
+    )
+    idea_draft.add_argument("--project", default=None, help="Optional bridge project slug.")
+    idea_draft.add_argument("--top-k", type=int, default=8, help="Retrieval depth.")
+    idea_draft.add_argument(
+        "--available-data",
+        action="append",
+        default=[],
+        help="Available data identifier. May be repeated.",
+    )
+    idea_draft.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root used for artifacts/alpha_lab_explorer/drafts.",
+    )
+    idea_draft.add_argument(
+        "--output-root",
+        default=None,
+        help="Optional draft output root. Defaults under workspace artifacts.",
+    )
+    idea_draft.add_argument(
+        "--vault-root",
+        default=None,
+        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
+    )
+    idea_draft.add_argument(
+        "--persist-session",
+        action="store_true",
+        help="Persist the shared explore prompt as an alpha_lab_explorer session.",
+    )
+    idea_draft.add_argument(
+        "--inject-recent-drift",
+        action="store_true",
+        help="Inject recent lint drift into the shared prompt.",
+    )
+    idea_draft.add_argument(
+        "--parent-session-id",
+        default=None,
+        help="Optional upstream explore session id for stage chaining.",
+    )
+
     vault = top.add_parser(
         "vault",
         help=(
@@ -860,6 +1016,12 @@ def unified_main(argv: list[str] | None = None) -> int:
         from alpha_lab.fast_screen.cli import main as fast_screen_main
 
         return fast_screen_main(args.args)
+
+    if args.top_command == "validate-draft-factor":
+        return _run_validate_draft_factor(args)
+
+    if args.top_command == "validate-draft-model":
+        return _run_validate_draft_model(args)
 
     if args.top_command == "real-case":
         forwarded = [args.action, *args.args]
@@ -1020,6 +1182,41 @@ def unified_main(argv: list[str] | None = None) -> int:
 
         return bridge_main(resolved_argv_for_bridge(args))
 
+    if args.top_command == "idea":
+        if args.idea_action == "draft":
+            from alpha_lab.research_bridge.service import draft_idea
+
+            available_data = list(args.available_data) if args.available_data else None
+            try:
+                result = draft_idea(
+                    vault_root=args.vault_root,
+                    idea=args.idea,
+                    models=args.models,
+                    mode=args.mode,
+                    project_slug=args.project,
+                    top_k=args.top_k,
+                    available_data=available_data,
+                    stage=args.stage,
+                    workspace_root=args.workspace_root,
+                    output_root=args.output_root,
+                    persist_session=bool(args.persist_session),
+                    inject_recent_drift=bool(args.inject_recent_drift),
+                    parent_session_id=args.parent_session_id,
+                )
+            except (ValueError, FileExistsError, OSError) as exc:
+                parser.error(str(exc))
+            payload = result.to_payload()
+            print("")
+            print("  Workflow : idea-draft")
+            print("  Status   : success")
+            print(f"  Stage    : {payload['stage']}")
+            print(f"  Models   : {', '.join(result.models)}")
+            print(f"  Output   : {result.draft_dir}")
+            print(f"  Shared   : {result.shared_prompt_path}")
+            print(f"  Reconcile: {result.reconcile_path}")
+            return 0
+        parser.error(f"unsupported idea command: {args.idea_action!r}")
+
     if args.top_command == "vault":
         from alpha_lab.vault_cli import run_vault_command  # noqa: PLC0415
 
@@ -1036,6 +1233,77 @@ def unified_main(argv: list[str] | None = None) -> int:
         return model_idea_main(args.args)
 
     parser.error(f"unsupported top-level command: {args.top_command!r}")
+
+
+def _run_validate_draft_factor(args: argparse.Namespace) -> int:
+    from alpha_lab.draft_factor_validation import validate_draft_factor_file
+
+    available_fields = _parse_available_fields(args.available_fields)
+    result = validate_draft_factor_file(
+        args.factor_json,
+        available_fields=available_fields,
+        allow_non_research_path=bool(args.allow_non_research_path),
+    )
+    payload = result.to_payload()
+    if bool(args.json_output):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print("")
+        print("  Workflow : validate-draft-factor")
+        print(f"  Status   : {'success' if result.ok else 'failed'}")
+        print(f"  Factor   : {result.factor_name}")
+        print(f"  Path     : {result.path}")
+        print(f"  Code SHA : {result.code_sha256}")
+        print(f"  JSON SHA : {result.factor_json_sha256}")
+        if result.errors:
+            print("  Errors   :")
+            for issue in result.errors:
+                print(f"    - [{issue.code}] {issue.message}")
+        if result.warnings:
+            print("  Warnings :")
+            for issue in result.warnings:
+                print(f"    - [{issue.code}] {issue.message}")
+    return 0 if result.ok else 1
+
+
+def _run_validate_draft_model(args: argparse.Namespace) -> int:
+    from alpha_lab.draft_model_validation import validate_draft_model_file
+
+    available_fields = _parse_available_fields(args.available_fields)
+    result = validate_draft_model_file(
+        args.model_candidate_json,
+        available_fields=available_fields,
+        allow_non_research_path=bool(args.allow_non_research_path),
+        require_features_file=not bool(args.skip_features_file_check),
+    )
+    payload = result.to_payload()
+    if bool(args.json_output):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print("")
+        print("  Workflow : validate-draft-model")
+        print(f"  Status   : {'success' if result.ok else 'failed'}")
+        print(f"  Candidate: {result.candidate_name}")
+        print(f"  Path     : {result.path}")
+        print(f"  JSON SHA : {result.candidate_json_sha256}")
+        print(f"  Spec SHA : {result.case_spec_sha256}")
+        print(f"  Feat SHA : {result.feature_contract_sha256}")
+        if result.errors:
+            print("  Errors   :")
+            for issue in result.errors:
+                print(f"    - [{issue.code}] {issue.message}")
+        if result.warnings:
+            print("  Warnings :")
+            for issue in result.warnings:
+                print(f"    - [{issue.code}] {issue.message}")
+    return 0 if result.ok else 1
+
+
+def _parse_available_fields(raw: str | None) -> set[str] | None:
+    if raw is None:
+        return None
+    fields = {part.strip() for part in raw.split(",") if part.strip()}
+    return fields or None
 
 
 def resolved_argv_for_data(args: argparse.Namespace) -> list[str]:

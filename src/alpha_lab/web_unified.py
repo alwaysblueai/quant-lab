@@ -16,6 +16,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -33,6 +34,16 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
+from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
+from alpha_lab.custom_factors import (
+    BUILTIN_FACTOR_NAMES,
+    compile_custom_factor,
+    custom_factor_meta_path,
+    custom_factor_write_path,
+    iter_custom_factor_meta_paths,
+    load_persisted_custom_factors,
+)
+from alpha_lab.draft_model_validation import validate_draft_model_file
 from alpha_lab.exceptions import (
     AlphaLabConfigError,
     AlphaLabDataError,
@@ -40,6 +51,10 @@ from alpha_lab.exceptions import (
     AlphaLabIOError,
 )
 from alpha_lab.factor_recipe import factor_registry
+from alpha_lab.model_candidates import (
+    model_candidate_write_path,
+    read_draft_model_source,
+)
 from alpha_lab.real_cases.common_io import (
     ensure_parquet_tabular_frame,
     resolve_tabular_frame_path,
@@ -59,8 +74,14 @@ from alpha_lab.real_cases.single_factor.spec import (
 from alpha_lab.reporting.renderers import write_case_report
 from alpha_lab.research_bridge.categories import get_category_profile, list_categories
 from alpha_lab.research_bridge.graph_view import VaultGraph
+from alpha_lab.research_bridge.mechanism_index import (
+    mechanism_index_status as bridge_mechanism_index_status,
+)
 from alpha_lab.research_bridge.model_idea import (
     apply_spec_patch_hint as model_lab_apply_spec_patch_hint,
+)
+from alpha_lab.research_bridge.model_idea import (
+    delete_model_idea_session as delete_model_lab_idea_session,
 )
 from alpha_lab.research_bridge.model_idea import (
     explore_model_idea as model_lab_explore_idea,
@@ -86,6 +107,7 @@ from alpha_lab.research_bridge.preflight import run_preflight
 from alpha_lab.research_bridge.service import (
     PROJECTS_DIRNAME,
     apply_writeback,
+    draft_idea,
     init_project,
     refresh_project_pack,
     scaffold_case,
@@ -94,6 +116,9 @@ from alpha_lab.research_bridge.service import (
 )
 from alpha_lab.research_bridge.service import (
     explore_idea as bridge_explore_idea,
+)
+from alpha_lab.research_bridge.sessions import (
+    delete_explore_session as delete_alpha_explore_session,
 )
 from alpha_lab.research_bridge.sessions import (
     list_explore_sessions as list_alpha_explore_sessions,
@@ -106,11 +131,39 @@ from alpha_lab.research_evaluation_config import (
     CAMPAIGN_PROFILE_COMPARE_DEFAULTS,
     RESEARCH_EVALUATION_PROFILE_LABELS,
 )
+from alpha_lab.splits import preflight_split_contract, rebalance_frequency_to_step
 from alpha_lab.vault_export import export_to_vault, resolve_vault_root
 
 RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 RunWorkflow = Literal["single_factor", "model_factor"]
+_KNOWLEDGE_WRITEBACK_STAGES: frozenset[str] = frozenset({"stage2", "stage3", "run"})
+_KNOWLEDGE_WRITEBACK_CARD_TYPES: frozenset[str] = frozenset(
+    {
+        "experiment_note",
+        "mechanism_note",
+        "validation_report",
+        "failure_observation",
+        "experiment_result",
+    }
+)
+_KNOWLEDGE_WRITEBACK_TARGET_DIRS: dict[str, str] = {
+    "experiment_note": "30_research_notes",
+    "mechanism_note": "30_research_notes",
+    "validation_report": "40_validation",
+    "failure_observation": "60_failure_observations",
+    "experiment_result": "50_experiments",
+}
+_KNOWLEDGE_WRITEBACK_FILENAME_PREFIXES: dict[str, str] = {
+    "experiment_note": "Note",
+    "mechanism_note": "Mechanism",
+    "validation_report": "Validation",
+    "failure_observation": "Failure",
+    "experiment_result": "Experiment",
+}
 _MODEL_LAB_PROJECT_SLUG = "__model_lab__"
+_WEB_SECRET_SETTINGS_REL_PATH = (
+    Path(".research_bridge_cache") / "secret_settings.json"
+)
 _MODEL_LAB_COMPARE_METRIC_KEYS: tuple[str, ...] = (
     "model_family",
     "factor_verdict",
@@ -201,25 +254,70 @@ _RUN_SUMMARY_COMPACT_KEYS: tuple[str, ...] = (
     "evaluation_next_step",
     "model_family",
     "mean_ic",
+    "mean_ic_full",
+    "mean_ic_is",
+    "mean_ic_oos",
+    "mean_ic_oos_decay_ratio",
     "mean_rank_ic",
+    "mean_rank_ic_full",
+    "mean_rank_ic_is",
+    "mean_rank_ic_oos",
+    "mean_rank_ic_oos_decay_ratio",
     "rank_ic_ir",
+    "rank_ic_ir_full",
+    "rank_ic_ir_is",
+    "rank_ic_ir_oos",
+    "rank_ic_ir_oos_decay_ratio",
     "ic_ir",
+    "ic_ir_full",
+    "ic_ir_is",
+    "ic_ir_oos",
+    "ic_ir_oos_decay_ratio",
     "ic_positive_rate",
+    "ic_positive_rate_full",
+    "ic_positive_rate_is",
+    "ic_positive_rate_oos",
     "rank_ic_positive_rate",
+    "rank_ic_positive_rate_full",
+    "rank_ic_positive_rate_is",
+    "rank_ic_positive_rate_oos",
     "group_monotonicity_summary",
+    "group_monotonicity_share",
+    "monotonic_share",
     "group_spread_summary",
     "ic_decay_half_life_summary",
     "ic_decay_retention_5_over_1",
     "ic_half_life_summary",
     "ic_half_life_horizon",
+    "mean_long_short_return",
+    "mean_long_short_return_full",
+    "mean_long_short_return_is",
+    "mean_long_short_return_oos",
+    "mean_long_short_return_oos_decay_ratio",
     "mean_long_short_turnover",
+    "mean_long_short_turnover_full",
+    "mean_long_short_turnover_is",
+    "mean_long_short_turnover_oos",
     "cost_aware_long_short_sharpe",
     "cost_aware_long_short_ir",
+    "cost_aware_long_short_ir_full",
+    "cost_aware_long_short_ir_is",
+    "cost_aware_long_short_ir_oos",
+    "cost_aware_long_short_ir_oos_decay_ratio",
     "long_short_ir",
+    "long_short_ir_full",
+    "long_short_ir_is",
+    "long_short_ir_oos",
+    "long_short_ir_oos_decay_ratio",
+    "raw_long_short_ir",
     "ic_t_stat",
     "max_drawdown",
+    "max_drawdown_full",
+    "max_drawdown_is",
+    "max_drawdown_oos",
     "ls_max_drawdown",
     "coverage_summary",
+    "coverage_break_days",
     "n_dates_used",
     "mean_eval_assets_per_date",
     "eval_coverage_ratio_mean",
@@ -268,7 +366,9 @@ _ARTIFACT_DISK_FILENAMES: dict[str, str] = {
     "diagnostics": "diagnostics.json",
     "training_log": "training_log.csv",
     "feature_importance": "feature_importance.csv",
+    "feature_importance_ledger": "feature_importance_ledger.csv",
     "model_definition_json": "model_definition.json",
+    "feature_manifest_json": "feature_manifest.json",
 }
 
 # Some artifact keys refer to the same on-disk file under different names.
@@ -376,6 +476,9 @@ class _RunRecord:
     error: str | None = None
     workflow: RunWorkflow = "single_factor"
     note: str | None = None
+    draft_model_candidate_path: str | None = None
+    draft_model_candidate_name: str | None = None
+    draft_model_candidate_hash: str | None = None
 
     def _artifact_paths_for_api(self) -> dict[str, str]:
         """Return artifact paths that are actually retrievable by endpoint."""
@@ -420,6 +523,9 @@ class _RunRecord:
             error=self.error,
             workflow=self.workflow,
             note=self.note,
+            draft_model_candidate_path=self.draft_model_candidate_path,
+            draft_model_candidate_name=self.draft_model_candidate_name,
+            draft_model_candidate_hash=self.draft_model_candidate_hash,
         )
 
     def to_payload(self) -> dict[str, object]:
@@ -453,6 +559,9 @@ class _RunRecord:
             "error": self.error,
             "workflow": self.workflow,
             "note": self.note,
+            "draft_model_candidate_path": self.draft_model_candidate_path,
+            "draft_model_candidate_name": self.draft_model_candidate_name,
+            "draft_model_candidate_hash": self.draft_model_candidate_hash,
         }
 
     def to_compact_payload(self) -> dict[str, object]:
@@ -488,6 +597,9 @@ class _RunRecord:
             "_compact": True,
             "workflow": self.workflow,
             "note": self.note,
+            "draft_model_candidate_path": self.draft_model_candidate_path,
+            "draft_model_candidate_name": self.draft_model_candidate_name,
+            "draft_model_candidate_hash": self.draft_model_candidate_hash,
         }
 
 
@@ -503,6 +615,10 @@ class _RunTask:
     render_report: bool
     workflow: RunWorkflow = "single_factor"
     note: str | None = None
+    draft_model_candidate_path: str | None = None
+    draft_model_candidate_name: str | None = None
+    draft_model_candidate_hash: str | None = None
+    screening_retrain_every_n_dates: int | None = None
 
 
 @dataclass(frozen=True)
@@ -562,6 +678,9 @@ class _RunStore:
             render_report=task.render_report,
             workflow=task.workflow,
             note=task.note,
+            draft_model_candidate_path=task.draft_model_candidate_path,
+            draft_model_candidate_name=task.draft_model_candidate_name,
+            draft_model_candidate_hash=task.draft_model_candidate_hash,
             updated_at_utc=submitted_at,
             progress_percent=0,
             progress_message="已提交到队列，等待调度",
@@ -578,6 +697,12 @@ class _RunStore:
             self._tasks[record.run_id] = task
         self._dispatch_event.set()
         return record.clone()
+
+    def restore_completed(self, record: _RunRecord) -> None:
+        with self._lock:
+            if record.run_id in self._records:
+                return
+            self._records[record.run_id] = record
 
     def get(self, run_id: str) -> _RunRecord | None:
         with self._lock:
@@ -1342,6 +1467,10 @@ def _build_model_lab_subprocess_command(
         task,
         spec_path=spec_path,
     )
+    cache_root_dir = _resolve_model_factor_web_cache_root_dir(
+        task,
+        spec_path=spec_path,
+    )
     cmd = [
         sys.executable,
         "-m",
@@ -1354,8 +1483,45 @@ def _build_model_lab_subprocess_command(
         "skip",
         "--output-root-dir",
         str(output_root_dir),
+        "--cache-root-dir",
+        str(cache_root_dir),
     ]
+    if task.screening_retrain_every_n_dates is not None:
+        cmd.extend(
+            [
+                "--screening-retrain-every-n-dates",
+                str(task.screening_retrain_every_n_dates),
+            ]
+        )
+    if task.draft_model_candidate_path:
+        cmd.extend(["--draft-model-candidate", task.draft_model_candidate_path])
     return cmd
+
+
+def _resolve_model_factor_web_cache_root_dir(
+    task: _RunTask,
+    *,
+    spec_path: Path | None = None,
+) -> Path:
+    """Resolve a shared model-factor cache root for web runs.
+
+    Returns ``<base_root>/_model_factor_shared_cache`` so the dataset cache
+    sits beside ``_web_runs/`` and is reused across web submissions instead of
+    being duplicated under every per-run output directory.
+    """
+
+    resolved_spec_path = Path(spec_path or task.spec_path).expanduser().resolve()
+    try:
+        spec = load_model_factor_case_spec(resolved_spec_path)
+        base_root = (
+            Path(task.output_root_dir).expanduser().resolve()
+            if task.output_root_dir is not None
+            else Path(spec.output.root_dir).expanduser().resolve()
+        )
+    except Exception:
+        base_root = Path(task.output_root_dir or "__default_output_root__").expanduser().resolve()
+
+    return base_root / "_model_factor_shared_cache"
 
 
 def _resolve_model_factor_web_output_parts(
@@ -1482,6 +1648,7 @@ def _load_model_factor_artifact_paths_from_manifest(output_dir: Path) -> dict[st
         "training_log": "training_log.csv",
         "feature_importance": "feature_importance.csv",
         "model_definition_json": "model_definition.json",
+        "feature_manifest_json": "feature_manifest.json",
         "experiment_card": "experiment_card.md",
     }
     for key, filename in fallback_filenames.items():
@@ -1587,7 +1754,9 @@ class _UnifiedService:
         self.workspace_root = workspace_root.resolve()
         self.run_store = _RunStore()
         self._custom_factors_dir = self.workspace_root / "custom_factors"
+        self._apply_saved_llm_settings()
         self._load_persisted_custom_factors()
+        self._restore_model_lab_web_runs()
 
     @property
     def projects_root(self) -> Path:
@@ -1597,14 +1766,241 @@ class _UnifiedService:
     def model_lab_specs_root(self) -> Path:
         return (self.workspace_root / "configs" / "real_cases" / "model_factor").resolve()
 
+    @property
+    def model_lab_candidates_root(self) -> Path:
+        return (self.workspace_root / "model_candidates" / "research").resolve()
+
+    @property
+    def _secret_settings_path(self) -> Path:
+        return (self.workspace_root / _WEB_SECRET_SETTINGS_REL_PATH).resolve()
+
+    def _load_secret_settings(self) -> dict[str, object]:
+        path = self._secret_settings_path
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _write_secret_settings(self, payload: dict[str, object]) -> None:
+        path = self._secret_settings_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        try:
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+
+    def _apply_saved_llm_settings(self) -> None:
+        settings = self._load_secret_settings()
+        api_key = str(settings.get("anthropic_api_key") or "").strip()
+        base_url = str(settings.get("anthropic_base_url") or "").strip()
+        if api_key:
+            os.environ["ANTHROPIC_API_KEY"] = api_key
+        if base_url:
+            os.environ["ANTHROPIC_BASE_URL"] = base_url
+        if bool(settings.get("research_bridge_v2_enabled")):
+            os.environ["ALPHA_LAB_RESEARCH_BRIDGE_V2"] = "1"
+
+    def llm_settings_status(self) -> dict[str, object]:
+        settings = self._load_secret_settings()
+        saved_key = str(settings.get("anthropic_api_key") or "").strip()
+        env_key = str(os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+        saved_base_url = str(settings.get("anthropic_base_url") or "").strip()
+        env_base_url = str(os.environ.get("ANTHROPIC_BASE_URL") or "").strip()
+        if saved_key:
+            key_source = "saved"
+        elif env_key:
+            key_source = "env"
+        else:
+            key_source = "none"
+        if saved_base_url:
+            base_url_source = "saved"
+        elif env_base_url:
+            base_url_source = "env"
+        else:
+            base_url_source = "default"
+        return {
+            "ok": True,
+            "anthropic_api_key_configured": bool(saved_key or env_key),
+            "anthropic_api_key_source": key_source,
+            "anthropic_base_url": saved_base_url or env_base_url,
+            "anthropic_base_url_source": base_url_source,
+            "research_bridge_v2_enabled": (
+                os.environ.get("ALPHA_LAB_RESEARCH_BRIDGE_V2") == "1"
+            ),
+            "settings_path": str(self._secret_settings_path),
+        }
+
+    def mechanism_index_status(self) -> dict[str, object]:
+        status = bridge_mechanism_index_status(
+            workspace_root=self.workspace_root,
+            vault_root=self.vault_root,
+        )
+        key_configured = bool(str(os.environ.get("ANTHROPIC_API_KEY") or "").strip())
+        v2_enabled = os.environ.get("ALPHA_LAB_RESEARCH_BRIDGE_V2") == "1"
+        return {
+            **status,
+            "anthropic_api_key_configured": key_configured,
+            "research_bridge_v2_enabled": v2_enabled,
+            "research_bridge_v2_active": v2_enabled and key_configured,
+        }
+
+    def save_llm_settings(self, payload: dict[str, object]) -> dict[str, object]:
+        settings = self._load_secret_settings()
+        existing_saved_key = str(settings.get("anthropic_api_key") or "").strip()
+        existing_saved_base_url = str(settings.get("anthropic_base_url") or "").strip()
+        raw_key = str(payload.get("anthropic_api_key") or "").strip()
+        raw_base_url = str(payload.get("anthropic_base_url") or "").strip()
+        if bool(payload.get("clear_anthropic_api_key")):
+            settings.pop("anthropic_api_key", None)
+            if (
+                existing_saved_key
+                and os.environ.get("ANTHROPIC_API_KEY") == existing_saved_key
+            ):
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+        elif raw_key:
+            settings["anthropic_api_key"] = raw_key
+            os.environ["ANTHROPIC_API_KEY"] = raw_key
+
+        if bool(payload.get("clear_anthropic_base_url")):
+            settings.pop("anthropic_base_url", None)
+            if (
+                existing_saved_base_url
+                and os.environ.get("ANTHROPIC_BASE_URL") == existing_saved_base_url
+            ):
+                os.environ.pop("ANTHROPIC_BASE_URL", None)
+        elif "anthropic_base_url" in payload:
+            if raw_base_url:
+                settings["anthropic_base_url"] = raw_base_url
+                os.environ["ANTHROPIC_BASE_URL"] = raw_base_url
+            else:
+                settings.pop("anthropic_base_url", None)
+                if (
+                    existing_saved_base_url
+                    and os.environ.get("ANTHROPIC_BASE_URL") == existing_saved_base_url
+                ):
+                    os.environ.pop("ANTHROPIC_BASE_URL", None)
+
+        if "research_bridge_v2_enabled" in payload:
+            v2_enabled = bool(payload.get("research_bridge_v2_enabled"))
+            settings["research_bridge_v2_enabled"] = v2_enabled
+            if v2_enabled:
+                os.environ["ALPHA_LAB_RESEARCH_BRIDGE_V2"] = "1"
+            else:
+                os.environ.pop("ALPHA_LAB_RESEARCH_BRIDGE_V2", None)
+
+        self._write_secret_settings(settings)
+        return self.llm_settings_status()
+
+    def _restore_model_lab_web_runs(self) -> None:
+        web_runs_root = self.workspace_root / "outputs" / "real_cases" / "_web_runs"
+        if not web_runs_root.exists():
+            return
+        for manifest_path in sorted(web_runs_root.glob("*/*/run_manifest.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                output_dir = manifest_path.parent.resolve()
+                run_id = output_dir.parent.name
+                case_name = str(manifest.get("case_name") or output_dir.name)
+                outputs = manifest.get("outputs")
+                artifact_paths = {
+                    str(key): str(value)
+                    for key, value in (outputs.items() if isinstance(outputs, Mapping) else [])
+                    if key and value
+                }
+                artifact_paths.setdefault("run_manifest", str(manifest_path))
+                metrics_path = output_dir / "metrics.json"
+                summary = (
+                    _extract_metrics_summary(metrics_path, run_status="succeeded")
+                    if metrics_path.exists()
+                    else {}
+                )
+                evaluation_standard = manifest.get("evaluation_standard")
+                evaluation_profile = "default_research"
+                if isinstance(evaluation_standard, Mapping):
+                    evaluation_profile = str(
+                        evaluation_standard.get("profile_name") or evaluation_profile
+                    )
+                submitted_at = str(
+                    manifest.get("run_timestamp_utc")
+                    or manifest.get("generated_at_utc")
+                    or _utc_now_iso()
+                )
+                draft_model_source = (
+                    manifest.get("draft_model_source")
+                    if isinstance(manifest.get("draft_model_source"), Mapping)
+                    else None
+                )
+                draft_model_candidate_path = (
+                    _coerce_finite_or_text(draft_model_source.get("path"))
+                    if isinstance(draft_model_source, Mapping)
+                    else None
+                )
+                draft_model_candidate_name = (
+                    _coerce_finite_or_text(draft_model_source.get("name"))
+                    if isinstance(draft_model_source, Mapping)
+                    else None
+                )
+                draft_model_candidate_hash = (
+                    _coerce_finite_or_text(
+                        draft_model_source.get("candidate_json_sha256")
+                    )
+                    if isinstance(draft_model_source, Mapping)
+                    else None
+                )
+                record = _RunRecord(
+                    run_id=run_id,
+                    project_slug=_MODEL_LAB_PROJECT_SLUG,
+                    case_name=case_name,
+                    round_id=None,
+                    spec_path=str(manifest.get("spec_path") or ""),
+                    submitted_at_utc=submitted_at,
+                    evaluation_profile=evaluation_profile,
+                    output_root_dir=None,
+                    render_report=True,
+                    status="succeeded",
+                    started_at_utc=submitted_at,
+                    finished_at_utc=submitted_at,
+                    updated_at_utc=submitted_at,
+                    output_dir=str(output_dir),
+                    progress_percent=100,
+                    progress_message="已从本地产物恢复",
+                    progress_events=[
+                        {
+                            "ts": submitted_at,
+                            "message": "已从本地产物恢复",
+                            "percent": 100,
+                        }
+                    ],
+                    artifact_paths=artifact_paths,
+                    summary=summary,
+                    workflow="model_factor",
+                    draft_model_candidate_path=draft_model_candidate_path,
+                    draft_model_candidate_name=draft_model_candidate_name,
+                    draft_model_candidate_hash=(
+                        draft_model_candidate_hash[:12]
+                        if draft_model_candidate_hash
+                        else None
+                    ),
+                )
+                self.run_store.restore_completed(record)
+            except Exception:
+                continue
+
     # ---- Dashboard --------------------------------------------------------
 
     def dashboard(self) -> dict[str, object]:
         projects = self.list_projects()
-        runs = [item.to_payload() for item in self.run_store.list_records()]
+        records = self.run_store.list_records()
         status_counts: dict[str, int] = {"queued": 0, "running": 0, "succeeded": 0, "failed": 0}
-        for record in runs:
-            status = str(record["status"])
+        for record in records:
+            status = str(record.status)
             status_counts[status] = status_counts.get(status, 0) + 1
         vault_stats = self.vault_stats()
         return {
@@ -1619,7 +2015,7 @@ class _UnifiedService:
                 for project in projects
                 if str(project.get("lifecycle", "")).strip() == "active"
             ],
-            "recent_runs": runs[:10],
+            "recent_runs": [record.to_compact_payload() for record in records[:10]],
             "next_actions": [
                 {
                     "project_slug": project["slug"],
@@ -1741,6 +2137,180 @@ class _UnifiedService:
             )
         return rows
 
+    def list_model_lab_candidates(self) -> list[dict[str, object]]:
+        root = self.model_lab_candidates_root
+        if not root.exists():
+            return []
+        rows: list[dict[str, object]] = []
+        for path in sorted(root.glob("*/model_candidate.json")):
+            if not path.is_file():
+                continue
+            try:
+                rows.append(self._model_lab_candidate_summary(path))
+            except Exception as exc:  # noqa: BLE001
+                rows.append(
+                    {
+                        "name": path.parent.name,
+                        "path": str(path),
+                        "valid": False,
+                        "validation_status": "failed",
+                        "error": str(exc),
+                    }
+                )
+        return rows
+
+    def read_model_lab_candidate(self, candidate: str) -> dict[str, object]:
+        path = self._resolve_model_lab_candidate_path(candidate)
+        return {
+            **self._model_lab_candidate_summary(path),
+            "content": _read_text_with_limit(path, limit_bytes=_MAX_TEXT_BYTES),
+            "research_log": _read_text_with_limit(
+                path.with_name("research_log.md"),
+                limit_bytes=_MAX_TEXT_BYTES,
+            ),
+        }
+
+    def save_model_lab_candidate(self, payload: dict[str, object]) -> dict[str, object]:
+        candidate_payload = _extract_model_candidate_payload(payload)
+        candidate_name = _safe_model_candidate_name(
+            str(candidate_payload.get("candidate_name") or "")
+        )
+        target = self._resolve_model_lab_candidate_path(candidate_name, require_exists=False)
+        overwrite = bool(payload.get("overwrite", True))
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"model candidate already exists: {candidate_name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        rendered = json.dumps(
+            candidate_payload,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        target.write_text(rendered + "\n", encoding="utf-8")
+        source = read_draft_model_source(target)
+        self._append_model_candidate_research_log(
+            candidate_name,
+            "created/imported",
+            f"candidate_json_sha256={source.candidate_json_sha256}",
+        )
+        return {"ok": True, **self.read_model_lab_candidate(candidate_name)}
+
+    def validate_model_lab_candidate(
+        self,
+        candidate: str,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        payload = payload or {}
+        path = self._resolve_model_lab_candidate_path(candidate)
+        available_fields = _coerce_available_fields(payload.get("available_fields"))
+        result = validate_draft_model_file(
+            path,
+            available_fields=available_fields,
+            require_features_file=not bool(payload.get("skip_features_file_check", False)),
+        )
+        result_payload = result.to_payload()
+        if result.ok:
+            detail = (
+                f"candidate_json_sha256={result.candidate_json_sha256} "
+                f"case_spec_sha256={result.case_spec_sha256} "
+                f"feature_contract_sha256={result.feature_contract_sha256}"
+            )
+            event = "validated"
+        else:
+            codes = ",".join(str(item.code) for item in result.errors)
+            detail = f"error_codes={codes or 'unknown'}"
+            event = "failed"
+        self._append_model_candidate_research_log(candidate, event, detail)
+        return result_payload
+
+    def materialize_model_lab_candidate_spec(
+        self,
+        candidate: str,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        payload = payload or {}
+        path = self._resolve_model_lab_candidate_path(candidate)
+        validation = validate_draft_model_file(path)
+        if not validation.ok:
+            return {"ok": False, "validation": validation.to_payload()}
+        raw_payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw_payload, dict):
+            raise ValueError("model_candidate.json root must be an object")
+        case_spec_payload = raw_payload.get("case_spec_payload")
+        if not isinstance(case_spec_payload, dict):
+            raise ValueError("case_spec_payload must be an object")
+        target_path = self._next_model_lab_candidate_spec_path(
+            candidate,
+            target_name=_optional_text(payload.get("target_name")),
+            overwrite=bool(payload.get("overwrite", False)),
+        )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(
+            _dump_spec_payload(case_spec_payload, target_path.suffix),
+            encoding="utf-8",
+        )
+        spec = load_model_factor_case_spec(target_path)
+        self._append_model_candidate_research_log(
+            candidate,
+            "materialized",
+            f"case={target_path.name}",
+        )
+        return {
+            "ok": True,
+            "candidate": candidate,
+            "name": target_path.name,
+            "path": str(target_path),
+            "case_name": spec.name,
+            "factor_name": spec.factor_name,
+            "model_family": spec.model.family,
+            "feature_count": len(spec.feature_columns),
+            "validation": validation.to_payload(),
+        }
+
+    def run_model_lab_candidate(
+        self,
+        candidate: str,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        payload = payload or {}
+        validation = self.validate_model_lab_candidate(candidate, payload)
+        if not bool(validation.get("ok")):
+            return {"ok": False, "validation": validation}
+        materialized = self.materialize_model_lab_candidate_spec(candidate, payload)
+        if not bool(materialized.get("ok")):
+            return {"ok": False, "validation": validation, "materialized": materialized}
+        candidate_path = self._resolve_model_lab_candidate_path(candidate)
+        run_payload = {
+            "spec_name": materialized["name"],
+            "evaluation_profile": str(
+                payload.get("evaluation_profile") or "exploratory_screening"
+            ),
+            "screening_retrain_every_n_dates": _as_int(
+                payload.get("screening_retrain_every_n_dates"),
+                default=40,
+            ),
+            "vault_export_mode": str(payload.get("vault_export_mode") or "skip"),
+            "render_report": bool(payload.get("render_report", True)),
+            "output_root_dir": _optional_text(payload.get("output_root_dir")),
+            "note": _optional_text(payload.get("note")) or f"draft:{candidate}",
+            "draft_model_candidate_path": str(candidate_path),
+        }
+        submitted = self.submit_model_lab_run(run_payload)
+        self._append_model_candidate_research_log(
+            candidate,
+            "run_submitted",
+            "case="
+            f"{materialized['name']} run={submitted['run_id']} "
+            f"profile={run_payload['evaluation_profile']}",
+        )
+        return {
+            "ok": True,
+            "candidate": candidate,
+            "validation": validation,
+            "materialized": materialized,
+            "run": submitted,
+        }
+
     def read_model_lab_source(self, source_key: str) -> dict[str, object]:
         item = next((row for row in _MODEL_LAB_SOURCE_SPECS if row["key"] == source_key), None)
         if item is None:
@@ -1757,6 +2327,203 @@ class _UnifiedService:
             "size_bytes": path.stat().st_size,
             "line_count": text.count("\n") + (0 if not text else 1),
         }
+
+    def _build_model_lab_idea_agent_prompts(
+        self,
+        *,
+        result: dict[str, object],
+        spec_name: str | None,
+        spec_path: str | None,
+    ) -> list[dict[str, object]]:
+        report = (
+            result.get("constraint_report")
+            if isinstance(result.get("constraint_report"), dict)
+            else {}
+        )
+        report_dict = cast(dict[str, object], report)
+        current_spec = (
+            report_dict.get("current_spec")
+            if isinstance(report_dict.get("current_spec"), dict)
+            else {}
+        )
+        current_spec_dict = cast(dict[str, object], current_spec)
+        recommendations = (
+            report_dict.get("recommendations")
+            if isinstance(report_dict.get("recommendations"), dict)
+            else {}
+        )
+        recommendations_dict = cast(dict[str, object], recommendations)
+        extras = (
+            recommendations_dict.get("extras")
+            if isinstance(recommendations_dict.get("extras"), dict)
+            else {}
+        )
+        extras_dict = cast(dict[str, object], extras)
+        diagnostics = (
+            result.get("retrieval_diagnostics")
+            if isinstance(result.get("retrieval_diagnostics"), dict)
+            else {}
+        )
+        diagnostics_dict = cast(dict[str, object], diagnostics)
+
+        def _compact_json(value: object, *, limit: int = 2400) -> str:
+            raw = json.dumps(value, ensure_ascii=False, indent=2)
+            if len(raw) <= limit:
+                return raw
+            return raw[:limit].rstrip() + "\n... <truncated>"
+
+        idea = str(result.get("idea") or "").strip()
+        shared_prompt = str(result.get("gpt_prompt") or "").strip()
+        feature_sample = current_spec_dict.get("feature_columns_sample")
+        if not isinstance(feature_sample, list):
+            feature_sample = []
+        knowledge_matches = extras_dict.get("knowledge_matches")
+        if not isinstance(knowledge_matches, list):
+            knowledge_matches = []
+        existing_model_specs = extras_dict.get("existing_model_specs")
+        if not isinstance(existing_model_specs, list):
+            existing_model_specs = []
+        factor_inventory = extras_dict.get("factor_inventory")
+        if not isinstance(factor_inventory, dict):
+            factor_inventory = {}
+        baseline_factors = factor_inventory.get("baseline_factors", [])
+        if not isinstance(baseline_factors, list):
+            baseline_factors = []
+        custom_factors = factor_inventory.get("custom_factors", [])
+        if not isinstance(custom_factors, list):
+            custom_factors = []
+        single_factor_cases = factor_inventory.get("single_factor_cases", [])
+        if not isinstance(single_factor_cases, list):
+            single_factor_cases = []
+        builtin_methods = factor_inventory.get("builtin_methods", [])
+        if not isinstance(builtin_methods, list):
+            builtin_methods = []
+        single_factor_runs = extras_dict.get("single_factor_runs")
+        if not isinstance(single_factor_runs, list):
+            single_factor_runs = []
+        source_anchors = recommendations_dict.get("source_anchors")
+        if not isinstance(source_anchors, list):
+            source_anchors = []
+        context_block = "\n".join(
+            [
+                "## 共享检索上下文摘要",
+                f"- idea: {idea or '-'}",
+                f"- spec_name: {spec_name or '-'}",
+                f"- spec_path: {spec_path or '-'}",
+                f"- stage: {result.get('stage') or '-'}",
+                f"- mode: {result.get('mode') or '-'}",
+                f"- Claude rerank/source: {diagnostics_dict.get('available_data_source') or '-'}",
+                f"- current model family: {current_spec_dict.get('model_family') or '-'}",
+                f"- feature count: {current_spec_dict.get('feature_count') or '-'}",
+                "- feature sample: "
+                + (", ".join(str(item) for item in feature_sample[:16]) or "-"),
+                "- feature availability: "
+                f"{current_spec_dict.get('feature_availability_mode') or '-'} / "
+                f"{current_spec_dict.get('feature_availability_column') or '-'} / "
+                "safety_lag="
+                f"{current_spec_dict.get('feature_availability_safety_lag_days')}",
+                "",
+                "### 知识库命中",
+                _compact_json(knowledge_matches[:8]),
+                "",
+                "### 已有 model-factor specs",
+                _compact_json(existing_model_specs[:8]),
+                "",
+                "### 已有 factor 数据",
+                _compact_json(
+                    {
+                        "builtin_methods": builtin_methods,
+                        "baseline_factors": baseline_factors[:8],
+                        "custom_factors": custom_factors[:8],
+                        "single_factor_cases": single_factor_cases[:8],
+                        "single_factor_runs": single_factor_runs[:8],
+                    },
+                    limit=3200,
+                ),
+                "",
+                "### 代码库锚点",
+                _compact_json(source_anchors[:8]),
+            ]
+        )
+
+        shared_block = "\n".join(
+            [
+                "## 后端生成的共享 Prompt",
+                (
+                    "下面是 Model-Lab idea explorer 已经基于 vault、当前 spec、"
+                    "代码锚点和历史 run 上下文生成的共享 prompt。"
+                ),
+                "桌面 agent 必须把它当作事实输入，不要跳过。",
+                "",
+                shared_prompt or "(empty shared prompt)",
+            ]
+        )
+
+        prompts = [
+            {
+                "agent": "claude",
+                "label": "Claude Code",
+                "role": "机制深挖与跨卡片融合",
+                "copy_label": "复制 Claude Code Prompt",
+                "prompt": "\n\n".join(
+                    [
+                        "# Model-Lab Stage 1 Agent Prompt - Claude Code",
+                        "你负责从知识库卡片和共享检索上下文中做模型机制深挖。",
+                        (
+                            "只输出 Markdown 点评；不要写 YAML、不要写代码、"
+                            "不要运行实验、不要给最终有效性判断。"
+                        ),
+                        (
+                            "优先发现 loss/regularization、feature interaction、"
+                            "target construction、sample weighting、training window、"
+                            "model selection 的可讨论机制，并保留不确定性。"
+                        ),
+                        context_block,
+                        shared_block,
+                        (
+                            "## 输出要求\n- 阅读摘要\n- 候选模型机制点评\n"
+                            "- 与当前 spec/baseline 的结构差异\n"
+                            "- 需要用户和网页版 GPT 继续判断的问题\n"
+                            "- 进入 Stage2 时需要保留的 concern"
+                        ),
+                    ]
+                ),
+            },
+            {
+                "agent": "codex",
+                "label": "Codex GUI",
+                "role": "本地合同、字段和可执行性审查",
+                "copy_label": "复制 Codex GUI Prompt",
+                "prompt": "\n\n".join(
+                    [
+                        "# Model-Lab Stage 1 Agent Prompt - Codex GUI",
+                        (
+                            "你负责从 alpha-lab/model-lab 本地实现角度审查这些模型机制"
+                            "是否能落到现有 spec variant 合同。"
+                        ),
+                        (
+                            "只输出 Markdown 点评；不要改文件、不要创建 notebook/脚本、"
+                            "不要运行 validator 或训练。"
+                        ),
+                        (
+                            "重点审查 feature_columns、safe_bfq/已有特征、"
+                            "feature_availability、PIT、target leakage、"
+                            "training/model_selection 合同和 artifact 审计要求。"
+                        ),
+                        context_block,
+                        shared_block,
+                        (
+                            "## 输出要求\n- 当前字段和 contract 能支持什么\n"
+                            "- 哪些机制只能作为 future enhancement\n"
+                            "- 哪些 spec surface 会被触碰\n"
+                            "- Stage2 生成 model_candidate_payload 前必须澄清的问题\n"
+                            "- Stage3 后端实验最容易失败的检查点"
+                        ),
+                    ]
+                ),
+            },
+        ]
+        return prompts
 
     def explore_model_lab_idea(self, payload: dict[str, object]) -> dict[str, object]:
         idea = str(payload.get("idea") or "").strip()
@@ -1786,6 +2553,11 @@ class _UnifiedService:
             stage=stage,
             inject_recent_drift=inject_recent_drift,
             parent_session_id=parent_session_id,
+        )
+        result["agent_prompts"] = self._build_model_lab_idea_agent_prompts(
+            result=result,
+            spec_name=spec_name,
+            spec_path=spec_path,
         )
         session_summary: dict[str, object] | None = None
         if save_session:
@@ -1843,15 +2615,27 @@ class _UnifiedService:
             "requires_code_change": bool(patch_hint.get("requires_code_change", False)),
         }
 
-    def list_model_lab_idea_sessions(self, *, limit: int = 20) -> list[dict[str, object]]:
+    def list_model_lab_idea_sessions(
+        self,
+        *,
+        limit: int = 20,
+        include_archived: bool = False,
+    ) -> list[dict[str, object]]:
         normalized_limit = max(1, min(int(limit), 200))
         return list_model_lab_idea_sessions(
             workspace_root=self.workspace_root,
             limit=normalized_limit,
+            include_archived=include_archived,
         )
 
     def read_model_lab_idea_session(self, session_id: str) -> dict[str, object]:
         return read_model_lab_idea_session(
+            session_id=session_id,
+            workspace_root=self.workspace_root,
+        )
+
+    def delete_model_lab_idea_session(self, session_id: str) -> dict[str, object]:
+        return delete_model_lab_idea_session(
             session_id=session_id,
             workspace_root=self.workspace_root,
         )
@@ -1888,6 +2672,25 @@ class _UnifiedService:
         spec_path = self._resolve_model_lab_spec_path(spec_name)
         spec = load_model_factor_case_spec(spec_path)
         _preflight_model_lab_spec_inputs(spec)
+        draft_model_candidate_path = _optional_text(payload.get("draft_model_candidate_path"))
+        draft_model_candidate_name: str | None = None
+        draft_model_candidate_hash: str | None = None
+        if draft_model_candidate_path is not None:
+            candidate_path = Path(draft_model_candidate_path).expanduser().resolve()
+            try:
+                candidate_path.relative_to(self.model_lab_candidates_root)
+            except ValueError as exc:
+                raise PermissionError(
+                    "draft_model_candidate_path must be under research candidates"
+                ) from exc
+            if candidate_path.name != "model_candidate.json" or not candidate_path.is_file():
+                raise FileNotFoundError(
+                    f"draft model candidate not found: {draft_model_candidate_path}"
+                )
+            source = read_draft_model_source(candidate_path)
+            draft_model_candidate_path = str(candidate_path)
+            draft_model_candidate_name = source.name
+            draft_model_candidate_hash = source.candidate_json_sha256[:12]
         task = _RunTask(
             run_id=uuid.uuid4().hex,
             project_slug=_MODEL_LAB_PROJECT_SLUG,
@@ -1899,6 +2702,13 @@ class _UnifiedService:
             render_report=bool(payload.get("render_report", True)),
             workflow="model_factor",
             note=_optional_text(payload.get("note")),
+            draft_model_candidate_path=draft_model_candidate_path,
+            draft_model_candidate_name=draft_model_candidate_name,
+            draft_model_candidate_hash=draft_model_candidate_hash,
+            screening_retrain_every_n_dates=(
+                _as_int(payload.get("screening_retrain_every_n_dates"), default=0)
+                or None
+            ),
         )
         submitted = self.run_store.submit(task).to_payload()
         return {"ok": True, **submitted}
@@ -2131,6 +2941,7 @@ class _UnifiedService:
             "metric_rows": metric_rows,
             "top_features_by_run": top_features_by_run,
             "feature_stability": comparison,
+            "spec_diff": _build_model_lab_run_spec_diff(records),
             "ic_series": compare_dates,
             "turnover_series": turnover_dates,
             "leakage": {
@@ -2161,6 +2972,17 @@ class _UnifiedService:
         payloads: list[dict[str, object]] = []
         for item in records:
             row = item.to_compact_payload() if compact else item.to_payload()
+            draft_source = _load_run_draft_model_source(item)
+            if draft_source is not None:
+                row["draft_model_source"] = draft_source
+                row["draft_model_candidate_name"] = str(
+                    draft_source.get("name") or row.get("draft_model_candidate_name") or ""
+                )
+                row["draft_model_candidate_hash"] = str(
+                    draft_source.get("candidate_json_sha256")
+                    or row.get("draft_model_candidate_hash")
+                    or ""
+                )[:12]
             summary = _ensure_run_summary(item)
             action, next_step = _derive_evaluation_action_and_next_step(
                 summary,
@@ -2261,6 +3083,92 @@ class _UnifiedService:
         if not candidate.exists() or not candidate.is_file():
             raise FileNotFoundError(f"model-lab spec not found: {raw}")
         return candidate
+
+    def _resolve_model_lab_candidate_path(
+        self,
+        candidate: str,
+        *,
+        require_exists: bool = True,
+    ) -> Path:
+        name = _safe_model_candidate_name(candidate)
+        expected = model_candidate_write_path(self.workspace_root, name).resolve()
+        root = self.model_lab_candidates_root.resolve()
+        try:
+            expected.relative_to(root)
+        except ValueError as exc:
+            raise PermissionError("invalid model candidate path") from exc
+        if require_exists and (not expected.exists() or not expected.is_file()):
+            raise FileNotFoundError(f"model candidate not found: {name}")
+        return expected
+
+    def _model_lab_candidate_summary(self, path: Path) -> dict[str, object]:
+        path = path.expanduser().resolve()
+        source = read_draft_model_source(path)
+        validation = validate_draft_model_file(path, require_features_file=False)
+        audit = source.to_audit_dict()
+        return {
+            "name": source.name,
+            "path": str(path),
+            "mtime_utc": _iso_from_timestamp(path.stat().st_mtime),
+            "valid": validation.ok,
+            "validation_status": "ok" if validation.ok else "failed",
+            "validation": validation.to_payload(),
+            "model_family": source.model_family or "",
+            "feature_count": len(source.feature_columns),
+            "feature_columns": list(source.feature_columns),
+            "candidate_json_sha256": source.candidate_json_sha256,
+            "case_spec_sha256": source.case_spec_sha256,
+            "feature_contract_sha256": source.feature_contract_sha256,
+            "candidate_json_sha256_short": source.candidate_json_sha256[:12],
+            "case_spec_sha256_short": source.case_spec_sha256[:12],
+            "feature_contract_sha256_short": source.feature_contract_sha256[:12],
+            "audit": audit,
+        }
+
+    def _next_model_lab_candidate_spec_path(
+        self,
+        candidate: str,
+        *,
+        target_name: str | None,
+        overwrite: bool,
+    ) -> Path:
+        specs_root = self.model_lab_specs_root.resolve()
+        specs_root.mkdir(parents=True, exist_ok=True)
+        if target_name is not None:
+            safe_name = _safe_candidate_case_filename(target_name)
+            target = (specs_root / safe_name).resolve()
+            try:
+                target.relative_to(specs_root)
+            except ValueError as exc:
+                raise PermissionError("invalid target spec path") from exc
+            if target.exists() and not overwrite:
+                raise FileExistsError(f"target spec already exists: {target.name}")
+            return target
+
+        candidate_name = _safe_model_candidate_name(candidate)
+        version = 1
+        while True:
+            target = (specs_root / f"{candidate_name}_v{version}.yaml").resolve()
+            if overwrite or not target.exists():
+                return target
+            version += 1
+
+    def _append_model_candidate_research_log(
+        self,
+        candidate: str,
+        event: str,
+        detail: str = "",
+    ) -> None:
+        path = self._resolve_model_lab_candidate_path(candidate, require_exists=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        log_path = path.with_name("research_log.md")
+        line = f"- {_utc_now_iso()} {event}"
+        if detail.strip():
+            line = f"{line} {detail.strip()}"
+        prior = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        if prior and not prior.endswith("\n"):
+            prior += "\n"
+        log_path.write_text(prior + line + "\n", encoding="utf-8")
 
     def _resolve_model_lab_source_path(self, source_key: str) -> Path:
         item = next((row for row in _MODEL_LAB_SOURCE_SPECS if row["key"] == source_key), None)
@@ -2516,15 +3424,649 @@ class _UnifiedService:
             "lint_report": report.to_dict(),
         }
 
-    def list_explore_sessions(self, *, limit: int = 20) -> list[dict[str, object]]:
+    def create_idea_draft(
+        self,
+        idea: str,
+        *,
+        mode: str = "start",
+        models: list[str] | tuple[str, ...] | str | None = None,
+        project_slug: str | None = None,
+        stage: str | None = None,
+        top_k: int = 8,
+        available_data: list[str] | frozenset[str] | None = None,
+        inject_recent_drift: bool = False,
+        persist_session: bool = False,
+        parent_session_id: str | None = None,
+        output_root: str | Path | None = None,
+        minimal_artifacts: bool = False,
+    ) -> dict[str, object]:
+        result = draft_idea(
+            vault_root=self.vault_root,
+            idea=idea,
+            mode=mode,
+            models=models,
+            project_slug=project_slug,
+            top_k=top_k,
+            available_data=available_data,
+            stage=stage,
+            workspace_root=self.workspace_root,
+            inject_recent_drift=inject_recent_drift,
+            persist_session=persist_session,
+            parent_session_id=parent_session_id,
+            output_root=output_root,
+        )
+
+        models_list = list(result.models)
+        payload = result.to_payload()
+        payload["ok"] = True
+        payload["vault_root"] = str(self.vault_root)
+        shared_prompt_content = _read_text_preview(
+            Path(payload["shared_prompt_path"]),
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        reconcile_content = _read_text_preview(
+            Path(payload["reconcile_path"]),
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        retrieval_log_content = _read_text_preview(
+            Path(payload["retrieval_log_path"]),
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        final_ledger_content = _read_text_preview(
+            Path(payload["final_ledger_path"]),
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        manifest_content = _read_text_preview(
+            Path(payload["manifest_path"]),
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        payload["artifacts"] = {
+            "shared_prompt": {
+                "path": payload["shared_prompt_path"],
+                "content": shared_prompt_content,
+            },
+            "reconcile": {
+                "path": payload["reconcile_path"],
+                "content": reconcile_content,
+            },
+            "retrieval_log": {
+                "path": payload["retrieval_log_path"],
+                "content": retrieval_log_content,
+            },
+            "final_ledger": {
+                "path": payload["final_ledger_path"],
+                "content": final_ledger_content,
+            },
+            "manifest": {
+                "path": payload["manifest_path"],
+                "content": manifest_content,
+            },
+            "model_dispatch": [],
+            "ledgers": [],
+        }
+        for model in models_list:
+            model_key = str(model)
+            dispatch_path = result.model_dispatch_paths.get(model_key)
+            ledger_path = result.ledger_paths.get(model_key)
+            if dispatch_path is not None:
+                payload["artifacts"]["model_dispatch"].append(
+                    {
+                        "model": model_key,
+                        "path": str(dispatch_path),
+                        "content": _read_text_preview(
+                            dispatch_path,
+                            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+                        ),
+                    }
+                )
+            if ledger_path is not None:
+                ledger_content = _read_text_preview(
+                    ledger_path,
+                    limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+                )
+                ledger_entry = {
+                    "model": model_key,
+                    "path": str(ledger_path),
+                    "content": ledger_content,
+                }
+                ledger_entry.update(
+                    self._idea_draft_ledger_status(
+                        model=model_key,
+                        path=ledger_path,
+                        content=ledger_content,
+                    )
+                )
+                payload["artifacts"]["ledgers"].append(
+                    ledger_entry
+                )
+        if minimal_artifacts:
+            support_paths = [
+                payload.get("shared_prompt_path"),
+                payload.get("reconcile_path"),
+                payload.get("retrieval_log_path"),
+                payload.get("manifest_path"),
+                *[str(path) for path in result.model_dispatch_paths.values()],
+            ]
+            for raw_path in support_paths:
+                raw_text = str(raw_path or "").strip()
+                if not raw_text:
+                    continue
+                support_path = Path(raw_text)
+                try:
+                    support_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            payload["minimal_artifacts"] = True
+            payload["support_files_written"] = False
+            payload["manifest_path"] = ""
+            for key in [
+                "shared_prompt_path",
+                "reconcile_path",
+                "retrieval_log_path",
+            ]:
+                payload[key] = ""
+            payload["model_dispatch_paths"] = {}
+            payload["artifacts"]["shared_prompt"]["path"] = ""
+            payload["artifacts"]["reconcile"]["path"] = ""
+            payload["artifacts"]["retrieval_log"]["path"] = ""
+            payload["artifacts"]["manifest"] = {"path": "", "content": ""}
+            for entry in payload["artifacts"]["model_dispatch"]:
+                entry["path"] = ""
+        else:
+            payload["minimal_artifacts"] = False
+            payload["support_files_written"] = True
+        payload["artifacts"]["model_dispatch"].sort(key=lambda item: str(item.get("model", "")))
+        payload["artifacts"]["ledgers"].sort(key=lambda item: str(item.get("model", "")))
+        ledger_statuses = [
+            {
+                key: entry.get(key)
+                for key in [
+                    "model",
+                    "path",
+                    "exists",
+                    "filled",
+                    "status",
+                    "status_zh",
+                    "mechanism_count",
+                    "complete_mechanism_count",
+                    "yaml_error",
+                ]
+            }
+            for entry in cast(list[dict[str, object]], payload["artifacts"]["ledgers"])
+        ]
+        ledgers_ready = bool(ledger_statuses) and all(
+            bool(item.get("filled")) for item in ledger_statuses
+        )
+        payload["ledger_status"] = ledger_statuses
+        payload["ledgers_ready"] = ledgers_ready
+        payload["reconcile_ready"] = ledgers_ready
+        return payload
+
+    def read_idea_draft_status(
+        self,
+        manifest_path: str = "",
+        *,
+        ledger_paths: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        if not str(manifest_path or "").strip():
+            return self._read_minimal_idea_draft_status(ledger_paths or {})
+        manifest_file = self._resolve_idea_draft_manifest_path(manifest_path)
+        draft_dir = manifest_file.parent.resolve()
+        manifest_raw = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if not isinstance(manifest_raw, dict):
+            raise AlphaLabDataError("idea draft manifest must be a JSON object")
+
+        models_raw = manifest_raw.get("models")
+        ledger_paths_raw = manifest_raw.get("ledger_paths")
+        dispatch_paths_raw = manifest_raw.get("model_dispatch_paths")
+        models = (
+            [str(item).strip() for item in models_raw if str(item).strip()]
+            if isinstance(models_raw, list)
+            else []
+        )
+        ledger_paths = ledger_paths_raw if isinstance(ledger_paths_raw, dict) else {}
+        dispatch_paths = dispatch_paths_raw if isinstance(dispatch_paths_raw, dict) else {}
+        if not models:
+            models = sorted(str(key) for key in ledger_paths)
+
+        artifacts: dict[str, object] = {
+            "shared_prompt": self._idea_draft_artifact_payload(
+                manifest_raw.get("shared_prompt_path"),
+                draft_dir,
+            ),
+            "reconcile": self._idea_draft_artifact_payload(
+                manifest_raw.get("reconcile_path"),
+                draft_dir,
+            ),
+            "retrieval_log": self._idea_draft_artifact_payload(
+                manifest_raw.get("retrieval_log_path"),
+                draft_dir,
+            ),
+            "final_ledger": self._idea_draft_artifact_payload(
+                manifest_raw.get("final_ledger_path"),
+                draft_dir,
+            ),
+            "manifest": {
+                "path": str(manifest_file),
+                "exists": True,
+                "content": _read_text_preview(
+                    manifest_file,
+                    limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+                ),
+            },
+            "model_dispatch": [],
+            "ledgers": [],
+        }
+
+        model_dispatch = cast(list[dict[str, object]], artifacts["model_dispatch"])
+        ledgers = cast(list[dict[str, object]], artifacts["ledgers"])
+        ledger_statuses: list[dict[str, object]] = []
+        for model in models:
+            dispatch_payload = self._idea_draft_artifact_payload(
+                dispatch_paths.get(model),
+                draft_dir,
+            )
+            dispatch_payload["model"] = model
+            model_dispatch.append(dispatch_payload)
+
+            ledger_payload = self._idea_draft_artifact_payload(
+                ledger_paths.get(model),
+                draft_dir,
+            )
+            ledger_payload["model"] = model
+            ledger_path = Path(str(ledger_payload.get("path") or ""))
+            status = self._idea_draft_ledger_status(
+                model=model,
+                path=ledger_path,
+                content=str(ledger_payload.get("content") or ""),
+            )
+            ledger_payload.update(status)
+            ledgers.append(ledger_payload)
+            ledger_statuses.append(status)
+
+        model_dispatch.sort(key=lambda item: str(item.get("model", "")))
+        ledgers.sort(key=lambda item: str(item.get("model", "")))
+        ledger_statuses.sort(key=lambda item: str(item.get("model", "")))
+        ledgers_ready = bool(ledger_statuses) and all(
+            bool(item.get("filled")) for item in ledger_statuses
+        )
+        diagnostics_raw = manifest_raw.get("retrieval_diagnostics")
+        diagnostics = diagnostics_raw if isinstance(diagnostics_raw, dict) else {}
+        return {
+            "ok": True,
+            "idea": str(manifest_raw.get("idea") or ""),
+            "mode": str(manifest_raw.get("mode") or ""),
+            "stage": str(manifest_raw.get("stage") or ""),
+            "models": models,
+            "draft_dir": str(draft_dir),
+            "manifest_path": str(manifest_file),
+            "retrieval_diagnostics": diagnostics,
+            "artifacts": artifacts,
+            "ledger_status": ledger_statuses,
+            "ledgers_ready": ledgers_ready,
+            "reconcile_ready": ledgers_ready,
+        }
+
+    def _read_minimal_idea_draft_status(
+        self,
+        ledger_paths: Mapping[str, object],
+    ) -> dict[str, object]:
+        normalized_paths = {
+            str(model).strip(): str(path).strip()
+            for model, path in ledger_paths.items()
+            if str(model).strip() and str(path).strip()
+        }
+        artifacts: dict[str, object] = {
+            "shared_prompt": {"path": "", "exists": False, "content": ""},
+            "reconcile": {"path": "", "exists": False, "content": ""},
+            "retrieval_log": {"path": "", "exists": False, "content": ""},
+            "final_ledger": {"path": "", "exists": False, "content": ""},
+            "manifest": {"path": "", "exists": False, "content": ""},
+            "model_dispatch": [],
+            "ledgers": [],
+        }
+        ledgers = cast(list[dict[str, object]], artifacts["ledgers"])
+        ledger_statuses: list[dict[str, object]] = []
+        for model, raw_path in sorted(normalized_paths.items()):
+            ledger_path = self._resolve_idea_draft_ledger_path(raw_path)
+            content = _read_text_preview(
+                ledger_path,
+                limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+            )
+            ledger_payload: dict[str, object] = {
+                "model": model,
+                "path": str(ledger_path),
+                "exists": ledger_path.exists(),
+                "content": content,
+            }
+            status = self._idea_draft_ledger_status(
+                model=model,
+                path=ledger_path,
+                content=content,
+            )
+            ledger_payload.update(status)
+            ledgers.append(ledger_payload)
+            ledger_statuses.append(status)
+        ledgers_ready = bool(ledger_statuses) and all(
+            bool(item.get("filled")) for item in ledger_statuses
+        )
+        return {
+            "ok": True,
+            "idea": "",
+            "mode": "",
+            "stage": "",
+            "models": sorted(normalized_paths),
+            "draft_dir": "",
+            "manifest_path": "",
+            "retrieval_diagnostics": {},
+            "artifacts": artifacts,
+            "ledger_status": ledger_statuses,
+            "ledgers_ready": ledgers_ready,
+            "reconcile_ready": ledgers_ready,
+            "minimal_artifacts": True,
+            "support_files_written": False,
+        }
+
+    def save_idea_draft_ledgers(
+        self,
+        *,
+        ledger_paths: Mapping[str, object],
+        ledgers: Mapping[str, object],
+    ) -> dict[str, object]:
+        normalized_paths = {
+            str(model).strip(): str(path).strip()
+            for model, path in ledger_paths.items()
+            if str(model).strip() and str(path).strip()
+        }
+        if not normalized_paths:
+            raise ValueError("ledger_paths is required")
+        if not isinstance(ledgers, Mapping) or not ledgers:
+            raise ValueError("ledgers content is required")
+
+        artifacts: dict[str, object] = {
+            "shared_prompt": {"path": "", "exists": False, "content": ""},
+            "reconcile": {"path": "", "exists": False, "content": ""},
+            "retrieval_log": {"path": "", "exists": False, "content": ""},
+            "final_ledger": {"path": "", "exists": False, "content": ""},
+            "manifest": {"path": "", "exists": False, "content": ""},
+            "model_dispatch": [],
+            "ledgers": [],
+        }
+        ledger_payloads = cast(list[dict[str, object]], artifacts["ledgers"])
+        ledger_statuses: list[dict[str, object]] = []
+        for model, raw_path in sorted(normalized_paths.items()):
+            content = str(ledgers.get(model) or "").strip()
+            if not content:
+                raise ValueError(f"{model} ledger content is required")
+            ledger_path = self._resolve_idea_draft_ledger_path(raw_path)
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            ledger_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+            written_content = _read_text_preview(
+                ledger_path,
+                limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+            )
+            payload: dict[str, object] = {
+                "model": model,
+                "path": str(ledger_path),
+                "exists": True,
+                "content": written_content,
+            }
+            status = self._idea_draft_ledger_status(
+                model=model,
+                path=ledger_path,
+                content=written_content,
+            )
+            payload.update(status)
+            ledger_payloads.append(payload)
+            ledger_statuses.append(status)
+
+        ledgers_ready = bool(ledger_statuses) and all(
+            bool(item.get("filled")) for item in ledger_statuses
+        )
+        return {
+            "ok": True,
+            "models": sorted(normalized_paths),
+            "ledger_paths": normalized_paths,
+            "artifacts": artifacts,
+            "ledger_status": ledger_statuses,
+            "ledgers_ready": ledgers_ready,
+            "reconcile_ready": ledgers_ready,
+            "minimal_artifacts": True,
+            "support_files_written": False,
+        }
+
+    def save_idea_final_ledger(
+        self,
+        *,
+        final_ledger_path: object,
+        content: object,
+    ) -> dict[str, object]:
+        text = str(content or "").strip()
+        if not text:
+            raise ValueError("final ledger content is required")
+        path = self._resolve_idea_draft_final_ledger_path(final_ledger_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text.rstrip() + "\n", encoding="utf-8")
+        written_content = _read_text_preview(
+            path,
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        status = self._idea_draft_ledger_status(
+            model="final",
+            path=path,
+            content=written_content,
+        )
+        return {
+            "ok": True,
+            "final_ledger_path": str(path),
+            "artifacts": {
+                "final_ledger": {
+                    "path": str(path),
+                    "exists": True,
+                    "content": written_content,
+                    **status,
+                }
+            },
+            "final_ledger_status": status,
+            "ledgers_ready": bool(status.get("filled")),
+            "reconcile_ready": bool(status.get("filled")),
+            "minimal_artifacts": True,
+            "support_files_written": False,
+        }
+
+    def _resolve_idea_draft_manifest_path(self, manifest_path: str) -> Path:
+        raw = str(manifest_path or "").strip()
+        if not raw:
+            raise ValueError("manifest_path is required")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.workspace_root / candidate
+        resolved = candidate.resolve()
+        drafts_root = (
+            self.workspace_root / "artifacts" / "alpha_lab_explorer" / "drafts"
+        ).resolve()
+        try:
+            resolved.relative_to(drafts_root)
+        except ValueError as exc:
+            raise PermissionError("idea draft manifest must live under drafts/") from exc
+        if resolved.name != "manifest.json":
+            raise AlphaLabIOError("idea draft manifest path must end with manifest.json")
+        if not resolved.exists():
+            raise FileNotFoundError(f"idea draft manifest not found: {resolved}")
+        return resolved
+
+    def _resolve_idea_draft_ledger_path(self, raw_path: object) -> Path:
+        raw = str(raw_path or "").strip()
+        if not raw:
+            raise ValueError("ledger path is required")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.workspace_root / candidate
+        resolved = candidate.resolve()
+        drafts_root = (
+            self.workspace_root / "artifacts" / "alpha_lab_explorer" / "drafts"
+        ).resolve()
+        try:
+            resolved.relative_to(drafts_root)
+        except ValueError as exc:
+            raise PermissionError("idea draft ledger must live under drafts/") from exc
+        if not (
+            resolved.name.startswith("ledger_v1.")
+            and resolved.name.endswith(".yaml")
+        ):
+            raise AlphaLabIOError("idea draft ledger path must be ledger_v1.<model>.yaml")
+        return resolved
+
+    def _resolve_idea_draft_final_ledger_path(self, raw_path: object) -> Path:
+        raw = str(raw_path or "").strip()
+        if not raw:
+            raise ValueError("final_ledger_path is required")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.workspace_root / candidate
+        resolved = candidate.resolve()
+        drafts_root = (
+            self.workspace_root / "artifacts" / "alpha_lab_explorer" / "drafts"
+        ).resolve()
+        try:
+            resolved.relative_to(drafts_root)
+        except ValueError as exc:
+            raise PermissionError("final ledger must live under drafts/") from exc
+        if resolved.name != "ledger_v1.yaml":
+            raise AlphaLabIOError("final ledger path must be ledger_v1.yaml")
+        return resolved
+
+    def _resolve_idea_draft_artifact_path(
+        self,
+        raw_path: object,
+        draft_dir: Path,
+    ) -> Path | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        candidate = Path(text).expanduser()
+        if not candidate.is_absolute():
+            candidate = draft_dir / candidate
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(draft_dir)
+        except ValueError as exc:
+            raise PermissionError("idea draft artifact must live beside manifest") from exc
+        return resolved
+
+    def _idea_draft_artifact_payload(
+        self,
+        raw_path: object,
+        draft_dir: Path,
+    ) -> dict[str, object]:
+        path = self._resolve_idea_draft_artifact_path(raw_path, draft_dir)
+        if path is None:
+            return {"path": "", "exists": False, "content": ""}
+        return {
+            "path": str(path),
+            "exists": path.exists(),
+            "content": _read_text_preview(path, limit_bytes=_PROJECT_DOC_PREVIEW_BYTES),
+        }
+
+    def _idea_draft_ledger_status(
+        self,
+        *,
+        model: str,
+        path: Path,
+        content: str,
+    ) -> dict[str, object]:
+        status = "pending_input"
+        status_zh = "等待粘贴写入"
+        yaml_error = ""
+        mechanism_count = 0
+        complete_mechanism_count = 0
+        exists = bool(str(path)) and path.exists()
+        filled = False
+        if exists:
+            text = str(content or "")
+            if not text.strip():
+                status = "empty"
+                status_zh = "空文件"
+            else:
+                try:
+                    parsed = _require_yaml().safe_load(text)
+                except Exception as exc:  # pragma: no cover - defensive UI status
+                    parsed = None
+                    yaml_error = str(exc).splitlines()[0][:240]
+                if isinstance(parsed, dict):
+                    mechanisms = parsed.get("mechanisms")
+                    if isinstance(mechanisms, list):
+                        mechanism_count = len(mechanisms)
+                        for mechanism in mechanisms:
+                            if not isinstance(mechanism, dict):
+                                continue
+                            has_hypothesis = _idea_draft_has_value(
+                                mechanism.get("hypothesis")
+                            )
+                            has_signal = _idea_draft_has_value(
+                                mechanism.get("signal_sketch")
+                            )
+                            has_delta = _idea_draft_has_value(
+                                mechanism.get("novel_delta")
+                            )
+                            has_data = _idea_draft_has_value(
+                                mechanism.get("data_needs")
+                            )
+                            if has_hypothesis and (has_signal or has_delta or has_data):
+                                complete_mechanism_count += 1
+                    filled = complete_mechanism_count > 0
+                template_like = (
+                    "# Stage 1 ledger template" in text
+                    and 'hypothesis: ""' in text
+                    and 'signal_sketch: ""' in text
+                )
+                if filled:
+                    status = "filled"
+                    status_zh = "ledger 已写入"
+                elif yaml_error:
+                    status = "needs_review"
+                    status_zh = "需检查 YAML"
+                elif template_like:
+                    status = "template"
+                    status_zh = "ledger 待 agent 写入"
+                else:
+                    status = "needs_review"
+                    status_zh = "需检查"
+        return {
+            "model": model,
+            "path": str(path) if str(path) else "",
+            "exists": exists,
+            "filled": filled,
+            "status": status,
+            "status_zh": status_zh,
+            "mechanism_count": mechanism_count,
+            "complete_mechanism_count": complete_mechanism_count,
+            "yaml_error": yaml_error,
+        }
+
+    def list_explore_sessions(
+        self,
+        *,
+        limit: int = 20,
+        project_slug: str | None = None,
+        include_archived: bool = False,
+    ) -> list[dict[str, object]]:
         normalized_limit = max(1, min(int(limit), 200))
         return list_alpha_explore_sessions(
             workspace_root=self.workspace_root,
             limit=normalized_limit,
+            project_slug=project_slug,
+            include_archived=include_archived,
         )
 
     def read_explore_session(self, session_id: str) -> dict[str, object]:
         return read_alpha_explore_session(
+            session_id=session_id,
+            workspace_root=self.workspace_root,
+        )
+
+    def delete_explore_session(self, session_id: str) -> dict[str, object]:
+        return delete_alpha_explore_session(
             session_id=session_id,
             workspace_root=self.workspace_root,
         )
@@ -2805,6 +4347,7 @@ class _UnifiedService:
             prices_path=str(payload.get("prices_path") or "./placeholder_prices.csv"),
             universe_path=str(payload.get("universe_path") or "./placeholder_universe.csv"),
             factor_path=str(payload.get("factor_path") or "./placeholder_factor.csv"),
+            builder_kwargs=_parse_builder_kwargs(payload),
         )
         return {
             "project": result.project.slug,
@@ -2822,6 +4365,93 @@ class _UnifiedService:
         if not project_yaml.exists():
             raise FileNotFoundError(f"project not found: {slug}")
         return _list_draft_summaries(drafts_dir)
+
+    def create_writeback_draft(self, payload: dict[str, object]) -> dict[str, object]:
+        slug = _safe_slug(str(payload.get("project_slug") or "").strip())
+        paths = _project_paths(self.vault_root, slug)
+        if not paths["project_yaml"].exists():
+            raise FileNotFoundError(f"project not found: {slug}")
+
+        source_stage = str(payload.get("source_stage") or "").strip().lower()
+        if source_stage not in _KNOWLEDGE_WRITEBACK_STAGES:
+            raise ValueError(
+                f"source_stage must be one of {sorted(_KNOWLEDGE_WRITEBACK_STAGES)}"
+            )
+        card_type = str(payload.get("card_type") or "").strip().lower()
+        if card_type not in _KNOWLEDGE_WRITEBACK_CARD_TYPES:
+            raise ValueError(
+                f"card_type must be one of {sorted(_KNOWLEDGE_WRITEBACK_CARD_TYPES)}"
+            )
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            raise ValueError("title is required")
+        body = str(payload.get("body") or "").strip()
+        if not body:
+            raise ValueError("body is required")
+
+        source_artifacts = _coerce_source_artifacts(payload.get("source_artifacts"))
+        target_path_hint = str(payload.get("target_path_hint") or "").strip()
+        if target_path_hint:
+            target_rel = _normalize_knowledge_target_hint(
+                vault_root=self.vault_root,
+                project_slug=slug,
+                target_path_hint=target_path_hint,
+            )
+        else:
+            target_rel = _default_knowledge_target_path(
+                project_slug=slug,
+                card_type=card_type,
+                title=title,
+            )
+
+        drafts_dir = paths["drafts_dir"]
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+        safe_title = _safe_file_stem(title, fallback=card_type)
+        draft_path = (
+            drafts_dir
+            / f"{stamp}__{card_type}__{safe_title}__writeback_draft.md"
+        )
+        frontmatter: dict[str, object] = {
+            "type": "knowledge_writeback_draft",
+            "project": slug,
+            "source_stage": source_stage,
+            "card_type": card_type,
+            "title": title,
+            "target_path": target_rel,
+            "source_artifacts": source_artifacts,
+            "review_status": "pending",
+            "reviewed_by": "",
+            "reviewed_at": "",
+            "writeback_allowed": True,
+            "vault_export_mode": "versioned",
+        }
+        draft_body = _render_knowledge_writeback_draft_body(
+            title=title,
+            source_stage=source_stage,
+            card_type=card_type,
+            target_path=target_rel,
+            body=body,
+            source_artifacts=source_artifacts,
+        )
+        draft_path.write_text(
+            _compose_markdown_with_frontmatter(frontmatter, draft_body),
+            encoding="utf-8",
+        )
+        preview = _read_text_preview(
+            draft_path,
+            limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+        )
+        summary = _draft_summary(draft_path)
+        return {
+            "ok": True,
+            "draft": summary,
+            "draft_name": draft_path.name,
+            "draft_path": str(draft_path),
+            "target_path": target_rel,
+            "status": "pending",
+            "preview": preview,
+        }
 
     def read_draft(self, slug: str, draft_name: str) -> dict[str, object]:
         paths = _project_paths(self.vault_root, slug)
@@ -2866,11 +4496,19 @@ class _UnifiedService:
             "next_action",
             "vault_export_mode",
             "review_note",
+            "target_path",
+            "title",
         }
         for key, value in payload.items():
             if key not in allowed:
                 continue
-            if key == "reviewed_at" and str(value).strip().lower() == "now":
+            if key == "target_path":
+                frontmatter[key] = _normalize_knowledge_target_hint(
+                    vault_root=self.vault_root,
+                    project_slug=slug,
+                    target_path_hint=str(value),
+                )
+            elif key == "reviewed_at" and str(value).strip().lower() == "now":
                 frontmatter[key] = _utc_now_iso()
             else:
                 frontmatter[key] = str(value)
@@ -2891,6 +4529,16 @@ class _UnifiedService:
             raise FileNotFoundError(f"project not found: {slug}")
         draft_path = _resolve_draft_path(paths["drafts_dir"], draft_name)
         mode = _optional_text(payload.get("mode")) if payload is not None else None
+        frontmatter, body = _load_markdown_with_frontmatter(draft_path)
+        if str(frontmatter.get("type") or "").strip() == "knowledge_writeback_draft":
+            return _apply_knowledge_writeback_draft(
+                vault_root=self.vault_root,
+                project_slug=slug,
+                draft_path=draft_path,
+                frontmatter=frontmatter,
+                body=body,
+                mode=mode,
+            )
         result = apply_writeback(
             vault_root=self.vault_root,
             project_slug=slug,
@@ -3058,15 +4706,22 @@ class _UnifiedService:
         if not spec_path.exists():
             raise FileNotFoundError(f"case spec does not exist: {spec_path}")
         project = load_project_config(paths["project_yaml"])
+        spec = load_single_factor_case_spec(spec_path)
+        evaluation_profile = str(
+            payload.get("evaluation_profile") or project.alpha_lab_defaults.evaluation_profile
+        )
+        _preflight_strict_split_for_spec(
+            spec,
+            object_name="alpha-lab",
+            source="single_factor_submit_preflight",
+        )
         task = _RunTask(
             run_id=uuid.uuid4().hex,
             project_slug=slug,
             case_name=case_name,
             round_id=_optional_text(payload.get("round_id")),
             spec_path=str(spec_path),
-            evaluation_profile=str(
-                payload.get("evaluation_profile") or project.alpha_lab_defaults.evaluation_profile
-            ),
+            evaluation_profile=evaluation_profile,
             output_root_dir=_optional_text(payload.get("output_root_dir")),
             render_report=bool(payload.get("render_report", True)),
         )
@@ -3145,30 +4800,28 @@ class _UnifiedService:
     # ---- Custom Factor Workshop ---------------------------------------------
 
     def _load_persisted_custom_factors(self) -> None:
-        """Load previously saved custom factors from disk and register them."""
-        if not self._custom_factors_dir.exists():
-            return
-        for meta_path in sorted(self._custom_factors_dir.glob("*.json")):
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                name = meta["name"]
-                code = meta["code"]
-                fn = _compile_custom_factor(name, code)
-                if name not in factor_registry:
-                    factor_registry.register(name, fn)
-            except Exception:
-                pass  # skip broken persisted factors silently
+        """Load previously saved custom factors from disk and register them.
+
+        On-disk layout: ``custom_factors/{research,promoted}/<name>/factor.json``.
+        The sibling ``research_log.md`` (if present) is the iteration log and is
+        not loaded here.
+        """
+        load_persisted_custom_factors(self.workspace_root, ignore_errors=True)
 
     def list_custom_factors(self) -> dict[str, object]:
         """List all registered factor methods (built-in + custom)."""
-        builtin = {"momentum", "reversal", "low_volatility", "amplitude", "downside_volatility"}
         all_methods = factor_registry.supported_methods()
         items: list[dict[str, object]] = []
         for method in all_methods:
-            is_custom = method not in builtin
-            meta: dict[str, object] = {"name": method, "is_custom": is_custom}
+            is_custom = method not in BUILTIN_FACTOR_NAMES
+            meta: dict[str, object] = {
+                "name": method,
+                "is_custom": is_custom,
+                "role": "custom_factor" if is_custom else "base_method",
+                "baseline_role": "base_method_only" if not is_custom else "candidate_or_custom",
+            }
             if is_custom:
-                meta_path = self._custom_factors_dir / f"{method}.json"
+                meta_path = self._custom_factor_meta_path(method)
                 if meta_path.exists():
                     try:
                         saved = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -3179,8 +4832,10 @@ class _UnifiedService:
             items.append(meta)
         return {
             "factors": items,
+            "baseline_factor_suite": baseline_factor_suite_payload(include_non_default=True),
             "total": len(items),
             "custom_count": sum(1 for i in items if i.get("is_custom")),
+            "baseline_count": len(baseline_factor_suite_payload(include_non_default=True)),
         }
 
     def register_custom_factor(self, payload: dict[str, object]) -> dict[str, object]:
@@ -3198,46 +4853,53 @@ class _UnifiedService:
         description = str(payload.get("description") or "").strip()
 
         # Compile and validate the code
-        fn = _compile_custom_factor(name, code)
+        fn = compile_custom_factor(name, code)
 
         # Register in the global factor_registry
         factor_registry.register(name, fn)
 
         # Persist to disk
-        self._custom_factors_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = self._custom_factor_write_path(name)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta = {
             "name": name,
             "description": description,
             "code": code,
             "created_at": _utc_now_iso(),
         }
-        meta_path = self._custom_factors_dir / f"{name}.json"
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return {"name": name, "registered": True, "persisted": str(meta_path)}
 
     def delete_custom_factor(self, name: str) -> dict[str, object]:
-        """Unregister a custom factor and remove its persisted file."""
-        builtin = {"momentum", "reversal", "low_volatility", "amplitude", "downside_volatility"}
+        """Unregister a custom factor and remove its persisted file.
+
+        Removes ``factor.json`` and the enclosing ``<name>/`` directory if it is
+        empty. A sibling ``research_log.md`` (or any other artifact) keeps the
+        directory around — iteration history outlives a single registration.
+        """
         name = name.strip().lower()
-        if name in builtin:
+        if name in BUILTIN_FACTOR_NAMES:
             raise ValueError(f"cannot delete built-in factor: {name}")
         if name not in factor_registry:
             raise FileNotFoundError(f"factor not found: {name}")
 
-        # Remove from registry
         factor_registry._builders.pop(name, None)
 
-        # Remove persisted file
-        meta_path = self._custom_factors_dir / f"{name}.json"
+        meta_path = self._custom_factor_meta_path(name)
         if meta_path.exists():
             meta_path.unlink()
+            parent = meta_path.parent
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
 
         return {"name": name, "deleted": True}
 
     def get_custom_factor_code(self, name: str) -> dict[str, object]:
         """Return the source code of a persisted custom factor."""
-        meta_path = self._custom_factors_dir / f"{name}.json"
+        meta_path = self._custom_factor_meta_path(name)
         if not meta_path.exists():
             raise FileNotFoundError(f"custom factor not found: {name}")
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -3246,6 +4908,15 @@ class _UnifiedService:
             "code": meta.get("code", ""),
             "description": meta.get("description", ""),
         }
+
+    def _iter_custom_factor_meta_paths(self) -> list[Path]:
+        return iter_custom_factor_meta_paths(self.workspace_root)
+
+    def _custom_factor_meta_path(self, name: str) -> Path:
+        return custom_factor_meta_path(self.workspace_root, name)
+
+    def _custom_factor_write_path(self, name: str) -> Path:
+        return custom_factor_write_path(self.workspace_root, name)
 
 
 # ---------------------------------------------------------------------------
@@ -3264,16 +4935,54 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
         if path == "/":
             self._send_html(_index_html())
             return
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+        if path in {"/dev/alpha-lab/overview-fixture", "/dev/alpha-lab1/overview-fixture"}:
+            self._send_html(_index_html(reload_template=True))
+            return
         if path == "/model-lab":
             self._send_html(_model_lab_html())
+            return
+        if path == "/dev/model-lab/overview-fixture":
+            self._send_html(_model_lab_html(reload_template=True))
+            return
+        if path == "/dev/model-lab/artifact-fixture":
+            self._send_html(_model_lab_html(reload_template=True))
+            return
+        if path == "/dev/model-lab/diagnostics-fixture":
+            self._send_html(_model_lab_html(reload_template=True))
+            return
+
+        if path == "/api/dev/model-lab/overview-fixtures":
+            self._send_json({"ok": True, "fixtures": _list_model_lab_overview_fixtures()})
+            return
+        if path == "/api/dev/model-lab/artifact-fixtures":
+            self._send_json({"ok": True, "fixtures": _list_model_lab_overview_fixtures()})
+            return
+        if path in {
+            "/api/dev/alpha-lab/overview-fixtures",
+            "/api/dev/alpha-lab1/overview-fixtures",
+        }:
+            self._send_json({"ok": True, "fixtures": _list_alpha_lab_overview_fixtures()})
             return
 
         # Dashboard
         if path == "/api/dashboard":
             self._send_json(self.svc.dashboard())
             return
+        if path == "/api/settings/llm":
+            self._send_json(self.svc.llm_settings_status())
+            return
+        if path == "/api/settings/mechanism-index":
+            self._send_json(self.svc.mechanism_index_status())
+            return
         if path == "/api/model-lab/specs":
             self._send_json({"specs": self.svc.list_model_lab_specs()})
+            return
+        if path == "/api/model-lab/candidates":
+            self._send_json({"candidates": self.svc.list_model_lab_candidates()})
             return
         if path == "/api/model-lab/sources":
             self._send_json({"sources": self.svc.list_model_lab_sources()})
@@ -3281,12 +4990,36 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/model-lab/idea-explorer/sessions":
             query = parse_qs(parsed.query)
             limit = _as_int((query.get("limit") or ["20"])[0], default=20)
-            self._send_json({"sessions": self.svc.list_model_lab_idea_sessions(limit=limit)})
+            include_archived_raw = str(
+                (query.get("include_archived") or [""])[0]
+            ).strip().lower()
+            include_archived = include_archived_raw in {"1", "true", "yes", "y"}
+            self._send_json(
+                {
+                    "sessions": self.svc.list_model_lab_idea_sessions(
+                        limit=limit,
+                        include_archived=include_archived,
+                    )
+                }
+            )
             return
         if path == "/api/vault/explore-sessions":
             query = parse_qs(parsed.query)
             limit = _as_int((query.get("limit") or ["20"])[0], default=20)
-            self._send_json({"sessions": self.svc.list_explore_sessions(limit=limit)})
+            include_archived_raw = str(
+                (query.get("include_archived") or [""])[0]
+            ).strip().lower()
+            include_archived = include_archived_raw in {"1", "true", "yes", "y"}
+            project_slug = str((query.get("project_slug") or [""])[0]).strip() or None
+            self._send_json(
+                {
+                    "sessions": self.svc.list_explore_sessions(
+                        limit=limit,
+                        project_slug=project_slug,
+                        include_archived=include_archived,
+                    )
+                }
+            )
             return
 
         # Project list
@@ -3327,10 +5060,51 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
 
         # Project-scoped routes
         parts = _path_parts(path)
+        if (
+            len(parts) == 5
+            and parts[0] == "api"
+            and parts[1] == "dev"
+            and parts[2] == "model-lab"
+            and parts[3] == "overview-fixtures"
+        ):
+            try:
+                self._send_json(_load_model_lab_overview_fixture(parts[4]))
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
+        if (
+            len(parts) == 5
+            and parts[0] == "api"
+            and parts[1] == "dev"
+            and parts[2] in {"alpha-lab", "alpha-lab1"}
+            and parts[3] == "overview-fixtures"
+        ):
+            try:
+                self._send_json(_load_alpha_lab_overview_fixture(parts[4]))
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
+        if (
+            len(parts) == 7
+            and parts[0] == "api"
+            and parts[1] == "dev"
+            and parts[2] == "model-lab"
+            and parts[3] == "artifact-fixtures"
+            and parts[5] == "artifact"
+        ):
+            try:
+                content_type, content = _load_model_lab_artifact_fixture(parts[4], parts[6])
+                self._send_text(content, content_type=content_type)
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "model-lab":
             try:
                 if len(parts) == 4 and parts[2] == "specs":
                     self._send_json(self.svc.read_model_lab_spec(parts[3]))
+                    return
+                if len(parts) == 4 and parts[2] == "candidates":
+                    self._send_json(self.svc.read_model_lab_candidate(parts[3]))
                     return
                 if len(parts) == 4 and parts[2] == "sources":
                     self._send_json(self.svc.read_model_lab_source(parts[3]))
@@ -3510,6 +5284,92 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     )
                 )
                 return
+            if parsed.path == "/api/vault/idea-draft":
+                idea = str(payload.get("idea") or "").strip()
+                mode = str(payload.get("mode") or "start").strip() or "start"
+                models = payload.get("models")
+                project_slug = str(payload.get("project_slug") or "").strip() or None
+                stage = str(payload.get("stage") or "").strip() or None
+                raw_available = payload.get("available_data")
+                available_data = (
+                    [str(item).strip() for item in raw_available if str(item).strip()]
+                    if isinstance(raw_available, list)
+                    else None
+                )
+                top_k = _as_int(payload.get("top_k"), default=8)
+                inject_recent_drift = bool(payload.get("inject_recent_drift", False))
+                persist_session = bool(payload.get("persist_session", False))
+                minimal_artifacts = bool(payload.get("minimal_artifacts", False))
+                parent_session_id = (
+                    str(payload.get("parent_session_id") or "").strip() or None
+                )
+                output_root = str(payload.get("output_root") or "").strip() or None
+                self._send_json(
+                    self.svc.create_idea_draft(
+                        idea=idea,
+                        mode=mode,
+                        models=models,
+                        project_slug=project_slug,
+                        stage=stage,
+                        top_k=top_k,
+                        available_data=available_data,
+                        inject_recent_drift=inject_recent_drift,
+                        persist_session=persist_session,
+                        parent_session_id=parent_session_id,
+                        output_root=output_root,
+                        minimal_artifacts=minimal_artifacts,
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/idea-draft/status":
+                manifest_path = str(payload.get("manifest_path") or "").strip()
+                raw_ledger_paths = payload.get("ledger_paths")
+                ledger_paths = (
+                    cast(Mapping[str, object], raw_ledger_paths)
+                    if isinstance(raw_ledger_paths, Mapping)
+                    else None
+                )
+                self._send_json(
+                    self.svc.read_idea_draft_status(
+                        manifest_path,
+                        ledger_paths=ledger_paths,
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/idea-draft/ledgers":
+                raw_ledger_paths = payload.get("ledger_paths")
+                raw_ledgers = payload.get("ledgers")
+                ledger_paths = (
+                    cast(Mapping[str, object], raw_ledger_paths)
+                    if isinstance(raw_ledger_paths, Mapping)
+                    else {}
+                )
+                ledgers = (
+                    cast(Mapping[str, object], raw_ledgers)
+                    if isinstance(raw_ledgers, Mapping)
+                    else {}
+                )
+                self._send_json(
+                    self.svc.save_idea_draft_ledgers(
+                        ledger_paths=ledger_paths,
+                        ledgers=ledgers,
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/idea-draft/final-ledger":
+                self._send_json(
+                    self.svc.save_idea_final_ledger(
+                        final_ledger_path=payload.get("final_ledger_path"),
+                        content=payload.get("content"),
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/writeback-drafts":
+                self._send_json(
+                    self.svc.create_writeback_draft(payload),
+                    status=HTTPStatus.CREATED,
+                )
+                return
             if parsed.path == "/api/vault/record-explore-response":
                 session_id = str(payload.get("session_id") or "").strip()
                 response_text = str(payload.get("response_text") or "")
@@ -3519,6 +5379,9 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/vault/preflight":
                 self._send_json(self.svc.run_preflight_check(payload))
+                return
+            if parsed.path == "/api/settings/llm":
+                self._send_json(self.svc.save_llm_settings(payload))
                 return
             if parsed.path == "/api/custom-factors":
                 self._send_json(self.svc.register_custom_factor(payload), status=HTTPStatus.CREATED)
@@ -3535,6 +5398,41 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/model-lab/idea-explorer/record-response":
                 self._send_json(self.svc.record_model_lab_idea_response(payload))
+                return
+            if parsed.path == "/api/model-lab/candidates":
+                self._send_json(
+                    self.svc.save_model_lab_candidate(payload),
+                    status=HTTPStatus.CREATED,
+                )
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "candidates"
+                and parts[4] == "validate"
+            ):
+                self._send_json(self.svc.validate_model_lab_candidate(parts[3], payload))
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "candidates"
+                and parts[4] == "materialize-spec"
+            ):
+                self._send_json(
+                    self.svc.materialize_model_lab_candidate_spec(parts[3], payload)
+                )
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "candidates"
+                and parts[4] == "run"
+            ):
+                self._send_json(self.svc.run_model_lab_candidate(parts[3], payload))
                 return
             if parsed.path == "/api/model-lab/runs":
                 self._send_json(self.svc.submit_model_lab_run(payload))
@@ -3652,6 +5550,23 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 and parts[2] == "specs"
             ):
                 self._send_json(self.svc.delete_model_lab_spec(parts[3]))
+                return
+            if (
+                len(parts) == 5
+                and parts[0] == "api"
+                and parts[1] == "model-lab"
+                and parts[2] == "idea-explorer"
+                and parts[3] == "sessions"
+            ):
+                self._send_json(self.svc.delete_model_lab_idea_session(parts[4]))
+                return
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "vault"
+                and parts[2] == "explore-sessions"
+            ):
+                self._send_json(self.svc.delete_explore_session(parts[3]))
                 return
             if (
                 len(parts) == 4
@@ -3866,6 +5781,15 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _send_text(self, body: str, *, content_type: str) -> None:
+        encoded = body.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def _send_error_payload(self, exc: Exception) -> None:
         status = HTTPStatus.BAD_REQUEST
         if isinstance(exc, FileNotFoundError):
@@ -3883,6 +5807,155 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _coerce_source_artifacts(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    return []
+
+
+def _safe_file_stem(value: str, *, fallback: str) -> str:
+    raw = str(value).strip() or fallback
+    normalized = "".join(ch if ch.isalnum() or ch in {"-", "_", ".", " "} else "-" for ch in raw)
+    normalized = re.sub(r"\s+", "-", normalized).strip("._-")
+    if not normalized:
+        normalized = fallback
+    return normalized[:96].strip("._-") or fallback
+
+
+def _default_knowledge_target_path(
+    *,
+    project_slug: str,
+    card_type: str,
+    title: str,
+) -> str:
+    target_dir = _KNOWLEDGE_WRITEBACK_TARGET_DIRS[card_type]
+    prefix = _KNOWLEDGE_WRITEBACK_FILENAME_PREFIXES[card_type]
+    safe_title = _safe_file_stem(title, fallback=card_type)
+    return (
+        f"{PROJECTS_DIRNAME}/{_safe_slug(project_slug)}/"
+        f"{target_dir}/{prefix} - {safe_title}.md"
+    )
+
+
+def _normalize_knowledge_target_hint(
+    *,
+    vault_root: Path,
+    project_slug: str,
+    target_path_hint: str,
+) -> str:
+    raw = str(target_path_hint or "").strip().replace("\\", "/")
+    if not raw:
+        raise ValueError("target_path_hint is required")
+    if re.match(r"^[A-Za-z]:", raw):
+        raise PermissionError("target_path_hint must be vault-relative")
+    root = vault_root.resolve()
+    rel = raw.lstrip("/")
+    candidate = (root / rel).resolve()
+    project_dir = (root / PROJECTS_DIRNAME / _safe_slug(project_slug)).resolve()
+    try:
+        candidate.relative_to(project_dir)
+    except ValueError as exc:
+        raise PermissionError("target path must stay inside the selected project") from exc
+    if candidate.suffix.lower() != ".md":
+        raise ValueError("target path must be a markdown file")
+    return candidate.relative_to(root).as_posix()
+
+
+def _render_knowledge_writeback_draft_body(
+    *,
+    title: str,
+    source_stage: str,
+    card_type: str,
+    target_path: str,
+    body: str,
+    source_artifacts: list[str],
+) -> str:
+    lines = [
+        f"# {title}",
+        "",
+        "## 写回元信息",
+        f"- 来源阶段: {source_stage}",
+        f"- 推荐卡片类型: `{card_type}`",
+        f"- 目标 vault 路径: `{target_path}`",
+        "- 写回原则: 只收用户审阅后的判断或本地验证后的事实，不收 agent 原始过程稿。",
+        "",
+        "## 正文",
+        body.strip(),
+    ]
+    if source_artifacts:
+        lines.extend(["", "## Source Artifacts"])
+        lines.extend(f"- `{item}`" for item in source_artifacts)
+    return "\n".join(lines)
+
+
+def _apply_knowledge_writeback_draft(
+    *,
+    vault_root: Path,
+    project_slug: str,
+    draft_path: Path,
+    frontmatter: dict[str, object],
+    body: str,
+    mode: str | None,
+) -> dict[str, object]:
+    review_status = str(frontmatter.get("review_status") or "").strip().lower()
+    if review_status != "approved":
+        raise ValueError(f"draft {draft_path} has not been approved")
+    if not bool(frontmatter.get("writeback_allowed", True)):
+        raise ValueError(f"draft {draft_path} is not allowed for writeback")
+
+    mode_l = str(mode or frontmatter.get("vault_export_mode") or "versioned").strip().lower()
+    if mode_l not in {"skip", "overwrite", "versioned"}:
+        raise ValueError("mode must be one of skip, overwrite, versioned")
+    if mode_l == "skip":
+        return {
+            "project": project_slug,
+            "draft_path": str(draft_path),
+            "status": "skipped",
+            "success": True,
+            "target_paths": [],
+            "mode_used": "skip",
+            "error": None,
+        }
+
+    target_rel = _normalize_knowledge_target_hint(
+        vault_root=vault_root,
+        project_slug=project_slug,
+        target_path_hint=str(frontmatter.get("target_path") or ""),
+    )
+    target_path = (vault_root.resolve() / target_rel).resolve()
+    if target_path.exists() and mode_l == "versioned":
+        stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+        target_path = target_path.with_name(
+            f"{target_path.stem}__{stamp}{target_path.suffix}"
+        )
+
+    target_frontmatter: dict[str, object] = {
+        "type": str(frontmatter.get("card_type") or "experiment_note"),
+        "project": project_slug,
+        "source_stage": str(frontmatter.get("source_stage") or ""),
+        "source_artifacts": _coerce_source_artifacts(frontmatter.get("source_artifacts")),
+        "reviewed_by": str(frontmatter.get("reviewed_by") or ""),
+        "reviewed_at": str(frontmatter.get("reviewed_at") or ""),
+        "created_from_draft": draft_path.name,
+    }
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(
+        _compose_markdown_with_frontmatter(target_frontmatter, body),
+        encoding="utf-8",
+    )
+    return {
+        "project": project_slug,
+        "draft_path": str(draft_path),
+        "status": "success",
+        "success": True,
+        "target_paths": [str(target_path)],
+        "mode_used": mode_l,
+        "error": None,
+    }
 
 
 def _project_paths(vault_root: Path, slug: str) -> dict[str, Path]:
@@ -4020,6 +6093,10 @@ def _draft_summary(draft_path: Path) -> dict[str, object]:
         "project": str(frontmatter.get("project") or ""),
         "round_id": str(frontmatter.get("round_id") or ""),
         "case_name": str(frontmatter.get("case_name") or ""),
+        "source_stage": str(frontmatter.get("source_stage") or ""),
+        "card_type": str(frontmatter.get("card_type") or ""),
+        "target_path": str(frontmatter.get("target_path") or ""),
+        "draft_type": str(frontmatter.get("type") or ""),
         "review_status": str(frontmatter.get("review_status") or ""),
         "reviewed_by": str(frontmatter.get("reviewed_by") or ""),
         "reviewed_at": str(frontmatter.get("reviewed_at") or ""),
@@ -4072,6 +6149,18 @@ def _read_text_preview(path: Path, *, limit_bytes: int) -> str:
     return content.rstrip() + f"\n\n> [内容已截断 — 显示前 {limit_kb} KB，文件共 {size_kb} KB]"
 
 
+def _idea_draft_has_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list | tuple | set):
+        return any(_idea_draft_has_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_idea_draft_has_value(item) for item in value.values())
+    return True
+
+
 def _extract_metrics_summary(
     metrics_path: Path | None,
     *,
@@ -4110,6 +6199,31 @@ def _read_json_artifact(path: Path | None) -> dict[str, object] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _load_run_draft_model_source(run: _RunRecord) -> dict[str, object] | None:
+    for artifact_key, fallback_name in (
+        ("run_manifest", "run_manifest.json"),
+        ("model_definition_json", "model_definition.json"),
+        ("feature_manifest_json", "feature_manifest.json"),
+    ):
+        payload = _read_json_artifact(
+            _resolve_run_artifact_path(
+                run,
+                artifact_key=artifact_key,
+                fallback_name=fallback_name,
+            )
+        )
+        if not isinstance(payload, dict):
+            continue
+        source = payload.get("draft_model_source")
+        if isinstance(source, dict):
+            return {str(key): value for key, value in source.items()}
+        inputs = payload.get("inputs")
+        if isinstance(inputs, dict) and isinstance(inputs.get("draft_model_source"), dict):
+            nested = cast(dict[object, object], inputs["draft_model_source"])
+            return {str(key): value for key, value in nested.items()}
+    return None
 
 
 def _read_csv_artifact_rows(path: Path | None) -> list[dict[str, str]]:
@@ -4233,6 +6347,7 @@ def _build_run_overview_snapshot(run: _RunRecord) -> dict[str, object]:
         )
     return {
         "failure": _build_run_failure_snapshot(run),
+        "draftModelSource": _load_run_draft_model_source(run),
         "portfolioValidation": _load_model_factor_portfolio_validation_snapshot(run),
         "backtest": _read_json_artifact(
             _resolve_run_artifact_path(
@@ -4282,6 +6397,27 @@ def _build_run_overview_snapshot(run: _RunRecord) -> dict[str, object]:
                 run,
                 artifact_key="coverage",
                 fallback_name="coverage.csv",
+            )
+        ),
+        "randomBaselineRows": _read_csv_artifact_rows(
+            _resolve_run_artifact_path(
+                run,
+                artifact_key="random_baseline_null",
+                fallback_name="random_baseline_null.csv",
+            )
+        ),
+        "conditionalMagnitudeRows": _read_csv_artifact_rows(
+            _resolve_run_artifact_path(
+                run,
+                artifact_key="conditional_ic_by_magnitude",
+                fallback_name="conditional_ic_by_magnitude.csv",
+            )
+        ),
+        "conditionalCrossSectionRows": _read_csv_artifact_rows(
+            _resolve_run_artifact_path(
+                run,
+                artifact_key="conditional_ic_by_cross_section_size",
+                fallback_name="conditional_ic_by_cross_section_size.csv",
             )
         ),
         "industryRows": _read_partition_rows(
@@ -4572,6 +6708,7 @@ def _enrich_evaluation_summary(
     run_status: str | None = None,
 ) -> dict[str, object]:
     enriched = {str(key): value for key, value in summary.items()}
+    _enrich_split_summary_fields(enriched)
     title = _pick_evaluation_title(enriched)
     action, next_step = _derive_evaluation_action_and_next_step(
         enriched,
@@ -4582,6 +6719,27 @@ def _enrich_evaluation_summary(
     enriched["evaluation_action"] = action
     enriched["evaluation_next_step"] = next_step
     return enriched
+
+
+def _enrich_split_summary_fields(summary: dict[str, object]) -> None:
+    raw_contract = summary.get("split_contract")
+    if isinstance(raw_contract, Mapping):
+        contract = {str(key): value for key, value in raw_contract.items()}
+        summary["split_contract"] = contract
+        summary["split_status"] = "strict"
+        for key in ("is_start", "is_end", "oos_start", "oos_end"):
+            if key in contract:
+                summary.setdefault(key, contract[key])
+        if "embargo_days" in contract:
+            summary["embargo_days"] = contract["embargo_days"]
+            summary.setdefault("split_embargo_days", contract["embargo_days"])
+        return
+
+    split_description = str(summary.get("split_description") or "").strip().lower()
+    if split_description in {"full_sample", "full-sample", "full sample"}:
+        summary["split_status"] = "full_sample"
+    else:
+        summary.setdefault("split_status", "missing")
 
 
 def _read_yaml_document_safe(path_text: str) -> dict[str, object] | None:
@@ -4739,6 +6897,58 @@ def _strip_spec_diff_metadata(payload: dict[str, object]) -> dict[str, object]:
     return stripped
 
 
+def _preflight_strict_split_for_spec(
+    spec: object,
+    *,
+    object_name: str,
+    source: str,
+) -> dict[str, object]:
+    prices_path = str(getattr(spec, "prices_path", "") or "").strip()
+    if not prices_path:
+        raise AlphaLabIOError(f"{object_name} 启动前检查失败：prices_path 不能为空")
+    try:
+        prices_resolved = resolve_tabular_frame_path(prices_path, object_name="prices")
+        date_values = _read_tabular_date_values(prices_resolved, object_name="prices")
+        target = getattr(spec, "target", None)
+        target_horizon = int(getattr(target, "horizon", 1) or 1)
+        rebalance_step = rebalance_frequency_to_step(
+            getattr(spec, "rebalance_frequency", None)
+        )
+    except Exception as exc:
+        raise AlphaLabIOError(
+            f"{object_name} split 启动前检查失败，请先修复 prices 数据或配置：{exc}"
+        ) from exc
+
+    contract, remediations = preflight_split_contract(
+        date_values,
+        target_horizon=target_horizon,
+        rebalance_step=rebalance_step,
+        source=source,
+    )
+    if contract is None:
+        bullet_lines = "\n".join(f"- {item}" for item in remediations)
+        raise AlphaLabIOError(
+            f"{object_name} strict split 启动前检查失败，任务未启动：\n{bullet_lines}"
+        )
+    return contract.to_metadata()
+
+
+def _read_tabular_date_values(path: Path, *, object_name: str) -> Any:
+    import pandas as pd
+
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".csv":
+            return pd.read_csv(path, usecols=["date"])["date"]
+        if suffix in {".parquet", ".pq"}:
+            return pd.read_parquet(path, columns=["date"])["date"]
+    except Exception as exc:
+        raise AlphaLabDataError(
+            f"{object_name} 无法读取 date 列用于 split preflight: {path} ({exc})"
+        ) from exc
+    raise AlphaLabIOError(f"{object_name} 文件后缀不支持: {path}")
+
+
 def _preflight_model_lab_spec_inputs(spec: object) -> None:
     prices_path = str(getattr(spec, "prices_path", "") or "").strip()
     features_path = str(getattr(spec, "features_path", "") or "").strip()
@@ -4806,6 +7016,15 @@ def _preflight_model_lab_spec_inputs(spec: object) -> None:
             )
         except Exception as exc:
             failures.append(str(exc))
+
+    try:
+        _preflight_strict_split_for_spec(
+            spec,
+            object_name="model-lab",
+            source="model_factor_submit_preflight",
+        )
+    except Exception as exc:
+        failures.append(str(exc))
 
     if failures:
         bullet_lines = "\n".join(f"- {item}" for item in failures)
@@ -5022,6 +7241,56 @@ def _collect_model_lab_run_compare_payload(
         "ic_series": _load_run_rank_ic_timeseries(run),
         "turnover_series": _load_run_turnover_timeseries(run),
         "leakage": _load_model_factor_run_leakage_summary(run),
+        }
+
+
+def _build_model_lab_run_spec_diff(records: list[_RunRecord]) -> dict[str, object]:
+    if len(records) != 2:
+        return {
+            "status": "requires_two_runs",
+            "message": "spec diff is shown when exactly two runs are selected",
+        }
+    left, right = records
+    left_path = Path(left.spec_path)
+    right_path = Path(right.spec_path)
+    if not left_path.exists() or not right_path.exists():
+        return {
+            "status": "unavailable",
+            "message": "one or both run spec files are unavailable",
+            "left_run_id": left.run_id,
+            "right_run_id": right.run_id,
+            "left": left_path.name,
+            "right": right_path.name,
+        }
+    left_text = left_path.read_text(encoding="utf-8").splitlines()
+    right_text = right_path.read_text(encoding="utf-8").splitlines()
+    left_payload = _read_yaml_document_safe(str(left_path))
+    right_payload = _read_yaml_document_safe(str(right_path))
+    semantic_equal_ignoring_meta = False
+    if isinstance(left_payload, dict) and isinstance(right_payload, dict):
+        semantic_equal_ignoring_meta = _strip_spec_diff_metadata(
+            left_payload
+        ) == _strip_spec_diff_metadata(right_payload)
+    unified = "\n".join(
+        difflib.unified_diff(
+            left_text,
+            right_text,
+            fromfile=left_path.name,
+            tofile=right_path.name,
+            lineterm="",
+        )
+    )
+    if semantic_equal_ignoring_meta:
+        unified = ""
+    return {
+        "status": "ok",
+        "left_run_id": left.run_id,
+        "right_run_id": right.run_id,
+        "left": left_path.name,
+        "right": right_path.name,
+        "unified": unified,
+        "has_difference": bool(unified.strip()),
+        "semantic_equal_ignoring_metadata": semantic_equal_ignoring_meta,
     }
 
 
@@ -5179,6 +7448,13 @@ def _load_model_factor_run_leakage_summary(run: _RunRecord) -> dict[str, object]
                         "severity": str(item.get("severity") or "").strip(),
                         "module_name": _coerce_finite_or_text(item.get("module_name")),
                         "object_name": _coerce_finite_or_text(item.get("object_name")),
+                        "message": _coerce_finite_or_text(item.get("message")),
+                        "remediation": _coerce_finite_or_text(item.get("remediation")),
+                        "metrics": (
+                            item.get("metrics")
+                            if isinstance(item.get("metrics"), dict)
+                            else {}
+                        ),
                     }
                 )
             summary["integrity_checks"] = parsed
@@ -5358,6 +7634,69 @@ def _as_int(value: object, *, default: int) -> int:
     return default
 
 
+def _coerce_builder_kwarg(value: object) -> object:
+    if isinstance(value, str):
+        text = value.strip()
+        lowered = text.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        if lowered == "null":
+            return None
+        try:
+            parsed_float = float(text)
+        except ValueError:
+            return text
+        if math.isfinite(parsed_float):
+            parsed_int = int(parsed_float)
+            return parsed_int if parsed_float == parsed_int else parsed_float
+        return text
+    return value
+
+
+def _parse_builder_kwargs(payload: Mapping[str, object]) -> dict[str, object]:
+    explicit_fields = {
+        "shock_gate_mode",
+        "shock_q",
+        "shock_threshold",
+        "outside_event_policy",
+        "neutralize_basic",
+        "invert",
+        "exclude_limit",
+        "exclude_st",
+        "exclude_suspended",
+    }
+    explicit_kwargs = {
+        key: _coerce_builder_kwarg(payload[key])
+        for key in explicit_fields
+        if key in payload and payload[key] not in (None, "")
+    }
+    raw = payload.get("builder_kwargs")
+    json_text = str(payload.get("builder_kwargs_json") or "").strip()
+    if raw is None and not json_text:
+        raw_kwargs: dict[str, object] = {}
+    elif raw is None:
+        try:
+            raw = json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"builder_kwargs_json must be valid JSON: {exc}") from exc
+        if not isinstance(raw, Mapping):
+            raise ValueError("builder_kwargs must be a JSON object")
+        raw_kwargs = {str(key): _coerce_builder_kwarg(value) for key, value in raw.items()}
+    else:
+        if not isinstance(raw, Mapping):
+            raise ValueError("builder_kwargs must be a JSON object")
+        raw_kwargs = {str(key): _coerce_builder_kwarg(value) for key, value in raw.items()}
+    raw_kwargs.update(explicit_kwargs)
+    reserved = {"method", "lookback", "window", "skip_recent"}
+    return {
+        key: value
+        for key, value in raw_kwargs.items()
+        if str(key) not in reserved
+    }
+
+
 def _coerce_text_list(value: object, *, delimiter: str) -> list[str]:
     if value is None:
         return []
@@ -5386,6 +7725,8 @@ _MODEL_LAB_SPEC_NAME_HINT = (
     f"文件名（不含后缀）≤ {_MODEL_LAB_SPEC_STEM_MAX_LEN} 字符；"
     f"例如 stock_ridge.yaml、stock_gbdt_smoke.yaml"
 )
+_MODEL_LAB_CANDIDATE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+_MODEL_LAB_CANDIDATE_CASE_FILENAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.-]*\.ya?ml$")
 
 
 def _safe_spec_filename(value: str) -> str:
@@ -5421,6 +7762,127 @@ def _safe_spec_filename(value: str) -> str:
     normalized = f"{stem_norm}{suffix}"
     if not _MODEL_LAB_SPEC_NAME_PATTERN.match(normalized):
         raise ValueError(_MODEL_LAB_SPEC_NAME_HINT)
+    return normalized
+
+
+def _safe_model_candidate_name(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if not _MODEL_LAB_CANDIDATE_NAME_PATTERN.match(normalized):
+        raise ValueError(
+            "candidate_name must be snake_case, start with a letter, and use "
+            "3-64 lowercase chars"
+        )
+    return normalized
+
+
+def _safe_candidate_case_filename(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raise ValueError("target_name is required")
+    if "/" in raw or "\\" in raw:
+        raise PermissionError("invalid target spec path")
+    if Path(raw).suffix.lower() not in {".yaml", ".yml"}:
+        raw = f"{raw}.yaml"
+    raw = re.sub(r"[^a-z0-9._-]", "_", raw)
+    raw = re.sub(r"_{2,}", "_", raw).strip("._-")
+    if Path(raw).suffix.lower() not in {".yaml", ".yml"}:
+        raw = f"{Path(raw).stem}.yaml"
+    if not _MODEL_LAB_CANDIDATE_CASE_FILENAME_PATTERN.match(raw):
+        raise ValueError("target_name must be a simple YAML filename")
+    return raw
+
+
+def _coerce_available_fields(value: object) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        fields = {item.strip() for item in value.split(",") if item.strip()}
+        return fields or None
+    if isinstance(value, (list, tuple, set)):
+        fields = {str(item).strip() for item in value if str(item).strip()}
+        return fields or None
+    return None
+
+
+def _extract_model_candidate_payload(payload: dict[str, object]) -> dict[str, object]:
+    for key in ("model_candidate_payload", "candidate", "payload"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return _normalize_model_candidate_payload(value)
+    if _looks_like_model_candidate_payload(payload):
+        return _normalize_model_candidate_payload(payload)
+
+    for key in ("text", "content", "stage2_output"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            parsed = _extract_model_candidate_payload_from_text(value)
+            if parsed is not None:
+                return parsed
+    raise ValueError(
+        "model_candidate_payload not found; paste a JSON/YAML object with "
+        "contract_version and case_spec_payload"
+    )
+
+
+def _extract_model_candidate_payload_from_text(text: str) -> dict[str, object] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    whole = _parse_model_candidate_block(raw)
+    if whole is not None:
+        return whole
+    fence_pattern = re.compile(r"```(?:json|yaml|yml)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+    for match in fence_pattern.finditer(raw):
+        parsed = _parse_model_candidate_block(match.group(1).strip())
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_model_candidate_block(text: str) -> dict[str, object] | None:
+    for loader in (_parse_json_mapping, _parse_yaml_mapping):
+        parsed = loader(text)
+        if parsed is None:
+            continue
+        if isinstance(parsed.get("model_candidate_payload"), dict):
+            parsed = cast(dict[str, object], parsed["model_candidate_payload"])
+        if _looks_like_model_candidate_payload(parsed):
+            return _normalize_model_candidate_payload(parsed)
+    return None
+
+
+def _parse_json_mapping(text: str) -> dict[str, object] | None:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {str(key): value for key, value in parsed.items()}
+
+
+def _parse_yaml_mapping(text: str) -> dict[str, object] | None:
+    try:
+        yaml = _require_yaml()
+        parsed = yaml.safe_load(text)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {str(key): value for key, value in parsed.items()}
+
+
+def _looks_like_model_candidate_payload(payload: Mapping[str, object]) -> bool:
+    return "contract_version" in payload and "case_spec_payload" in payload
+
+
+def _normalize_model_candidate_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    normalized = {str(key): value for key, value in payload.items()}
+    candidate_name = _safe_model_candidate_name(str(normalized.get("candidate_name") or ""))
+    normalized["candidate_name"] = candidate_name
+    case_spec_payload = normalized.get("case_spec_payload")
+    if not isinstance(case_spec_payload, dict):
+        raise ValueError("case_spec_payload must be an object")
     return normalized
 
 
@@ -5517,6 +7979,12 @@ def _compile_custom_factor(name: str, code: str) -> Any:
 
 _MD_RENDER_JS_PATH = Path(__file__).with_name("web_unified_md_render.js")
 _MD_RENDER_JS: str | None = None
+_ALPHA_LAB_OVERVIEW_FIXTURE_DIR = (
+    Path(__file__).with_name("dev_fixtures") / "alpha_lab_overview"
+)
+_MODEL_LAB_OVERVIEW_FIXTURE_DIR = (
+    Path(__file__).with_name("dev_fixtures") / "model_lab_overview"
+)
 
 
 def _md_render_js() -> str:
@@ -5542,8 +8010,13 @@ def _load_index_html_template() -> str:
     return _INDEX_HTML_TEMPLATE
 
 
-def _index_html() -> str:
-    return _index_html_raw().replace("@@MD_RENDER_JS@@", _md_render_js())
+def _index_html(*, reload_template: bool = False) -> str:
+    template = (
+        _INDEX_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
+        if reload_template
+        else _index_html_raw()
+    )
+    return template.replace("@@MD_RENDER_JS@@", _md_render_js())
 
 
 def _index_html_raw() -> str:
@@ -5557,5 +8030,463 @@ def _load_model_lab_html_template() -> str:
     return _MODEL_LAB_HTML_TEMPLATE
 
 
-def _model_lab_html() -> str:
-    return _load_model_lab_html_template().replace("@@MD_RENDER_JS@@", _md_render_js())
+def _model_lab_html(*, reload_template: bool = False) -> str:
+    template = (
+        _MODEL_LAB_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
+        if reload_template
+        else _load_model_lab_html_template()
+    )
+    return template.replace("@@MD_RENDER_JS@@", _md_render_js())
+
+
+def _safe_model_lab_fixture_id(value: str) -> str:
+    fixture_id = str(value or "").strip()
+    if not fixture_id:
+        raise FileNotFoundError("overview fixture id is required")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", fixture_id):
+        raise FileNotFoundError(f"invalid overview fixture id: {fixture_id}")
+    return fixture_id
+
+
+def _safe_alpha_lab_fixture_id(value: str) -> str:
+    fixture_id = str(value or "").strip()
+    if not fixture_id:
+        raise FileNotFoundError("overview fixture id is required")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", fixture_id):
+        raise FileNotFoundError(f"invalid overview fixture id: {fixture_id}")
+    return fixture_id
+
+
+def _list_alpha_lab_overview_fixtures() -> list[dict[str, object]]:
+    if not _ALPHA_LAB_OVERVIEW_FIXTURE_DIR.exists():
+        return []
+    fixtures: list[dict[str, object]] = []
+    for path in sorted(_ALPHA_LAB_OVERVIEW_FIXTURE_DIR.glob("*.json")):
+        fixture_id = path.stem
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        fixtures.append(
+            {
+                "id": fixture_id,
+                "label": str(payload.get("label") or fixture_id),
+                "description": str(payload.get("description") or ""),
+            }
+        )
+    return fixtures
+
+
+def _load_alpha_lab_overview_fixture(fixture_id: str) -> dict[str, object]:
+    safe_id = _safe_alpha_lab_fixture_id(fixture_id)
+    path = (_ALPHA_LAB_OVERVIEW_FIXTURE_DIR / f"{safe_id}.json").resolve()
+    fixture_root = _ALPHA_LAB_OVERVIEW_FIXTURE_DIR.resolve()
+    if not path.exists() or fixture_root not in path.parents:
+        raise FileNotFoundError(f"overview fixture not found: {safe_id}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"overview fixture must be a JSON object: {safe_id}")
+    summary = payload.get("summary")
+    snapshot = payload.get("snapshot")
+    if not isinstance(summary, dict) or not isinstance(snapshot, dict):
+        raise ValueError(f"overview fixture must include summary and snapshot objects: {safe_id}")
+    run_id = str(payload.get("run_id") or f"fixture-{safe_id}")
+    project_slug = str(payload.get("project_slug") or "alpha-lab1-fixture")
+    return {
+        "ok": True,
+        "fixture_id": safe_id,
+        "label": str(payload.get("label") or safe_id),
+        "description": str(payload.get("description") or ""),
+        "project_slug": project_slug,
+        "run_id": run_id,
+        "case_name": str(payload.get("case_name") or safe_id),
+        "summary": summary,
+        "snapshot": snapshot,
+        "run": payload.get("run") if isinstance(payload.get("run"), dict) else {},
+    }
+
+
+def _list_model_lab_overview_fixtures() -> list[dict[str, object]]:
+    if not _MODEL_LAB_OVERVIEW_FIXTURE_DIR.exists():
+        return []
+    fixtures: list[dict[str, object]] = []
+    for path in sorted(_MODEL_LAB_OVERVIEW_FIXTURE_DIR.glob("*.json")):
+        fixture_id = path.stem
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        fixtures.append(
+            {
+                "id": fixture_id,
+                "label": str(payload.get("label") or fixture_id),
+                "description": str(payload.get("description") or ""),
+            }
+        )
+    return fixtures
+
+
+def _load_model_lab_overview_fixture(fixture_id: str) -> dict[str, object]:
+    safe_id = _safe_model_lab_fixture_id(fixture_id)
+    path = (_MODEL_LAB_OVERVIEW_FIXTURE_DIR / f"{safe_id}.json").resolve()
+    fixture_root = _MODEL_LAB_OVERVIEW_FIXTURE_DIR.resolve()
+    if not path.exists() or fixture_root not in path.parents:
+        raise FileNotFoundError(f"overview fixture not found: {safe_id}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"overview fixture must be a JSON object: {safe_id}")
+    summary = payload.get("summary")
+    snapshot = payload.get("snapshot")
+    if not isinstance(summary, dict) or not isinstance(snapshot, dict):
+        raise ValueError(f"overview fixture must include summary and snapshot objects: {safe_id}")
+    run_id = str(payload.get("run_id") or f"fixture-{safe_id}")
+    return {
+        "ok": True,
+        "fixture_id": safe_id,
+        "label": str(payload.get("label") or safe_id),
+        "description": str(payload.get("description") or ""),
+        "run_id": run_id,
+        "summary": summary,
+        "snapshot": snapshot,
+    }
+
+
+def _artifact_fixture_content_type(artifact_key: str) -> str:
+    key = artifact_key.strip().lower()
+    if key in {
+        "metrics",
+        "run_manifest",
+        "model_definition_json",
+        "feature_manifest_json",
+        "diagnostics",
+    }:
+        return "application/json; charset=utf-8"
+    if key in {
+        "training_log",
+        "feature_importance",
+        "feature_importance_ledger",
+        "purged_kfold_folds",
+    }:
+        return "text/csv; charset=utf-8"
+    if key in {"summary", "experiment_card"} or key.endswith("_markdown"):
+        return "text/markdown; charset=utf-8"
+    return "text/plain; charset=utf-8"
+
+
+def _fixture_csv(rows: list[dict[str, object]], headers: list[str]) -> str:
+    lines = [",".join(headers)]
+    for row in rows:
+        values: list[str] = []
+        for header in headers:
+            text = str(row.get(header, ""))
+            if any(token in text for token in [",", "\n", '"']):
+                text = '"' + text.replace('"', '""') + '"'
+            values.append(text)
+        lines.append(",".join(values))
+    return "\n".join(lines) + "\n"
+
+
+def _default_model_lab_artifact_fixture_content(
+    fixture: dict[str, object],
+    artifact_key: str,
+) -> str:
+    key = artifact_key.strip()
+    summary = fixture.get("summary") if isinstance(fixture.get("summary"), dict) else {}
+    snapshot = fixture.get("snapshot") if isinstance(fixture.get("snapshot"), dict) else {}
+    run_id = str(fixture.get("run_id") or f"fixture-{fixture.get('fixture_id', 'artifact')}")
+    if key == "metrics":
+        return json.dumps({"metrics": summary}, ensure_ascii=False, indent=2)
+    if key == "run_manifest":
+        return json.dumps(
+            {
+                "run_id": run_id,
+                "case_name": summary.get("case_name", "fixture_case"),
+                "factor_name": summary.get("factor_name", "fixture_factor"),
+                "workflow": "model_factor",
+                "run_timestamp_utc": "2026-01-29T00:00:00Z",
+                "outputs": {
+                    "metrics": "fixture://metrics.json",
+                    "training_log": "fixture://training_log.csv",
+                    "feature_importance": "fixture://feature_importance.csv",
+                    "summary": "fixture://summary.md",
+                },
+                "evaluation_standard": {"profile_name": "default_research"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    if key == "model_definition_json":
+        return json.dumps(
+            {
+                "model_family": summary.get("model_family", "ridge"),
+                "factor_name": summary.get("factor_name", "fixture_factor"),
+                "target_horizon": 1,
+                "rebalance_frequency": "D",
+                "feature_columns": [
+                    "mom_20d",
+                    "turnover_rate_f",
+                    "volatility_20d",
+                    "size_zscore",
+                    "valuation_pb",
+                ],
+                "hyperparameters": {"alpha": 1.0, "fit_intercept": True},
+                "split_contract": summary.get("split_contract", {}),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    if key == "feature_manifest_json":
+        return json.dumps(
+            {
+                "artifact_type": "alpha_lab_feature_manifest",
+                "factor_name": summary.get("factor_name", "fixture_factor"),
+                "feature_columns": [
+                    "mom_20d",
+                    "turnover_rate_f",
+                    "volatility_20d",
+                    "size_zscore",
+                    "valuation_pb",
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    if key == "summary" or key == "experiment_card":
+        return (
+            "# 实验摘要\n\n"
+            "Strong signal metrics, but promotion was skipped because coverage and "
+            "rolling evidence "
+            "need additional review.\n\n"
+            "## 关键结论\n\n"
+            "- Signal: Strong\n"
+            "- Promotion: skipped_not_promoted\n"
+            "- Data Quality: warmup coverage breaks\n"
+            "- Action: review coverage breaks, rolling stability, and NAV compounding sanity.\n"
+        )
+    if key == "training_log":
+        rows = [
+            {
+                "score_date": "2026-01-02",
+                "status": "skipped",
+                "model_version": "",
+                "n_train_rows": "",
+                "n_score_assets": "",
+                "skip_reason": "insufficient_train_rows",
+            },
+            {
+                "score_date": "2026-01-05",
+                "status": "skipped",
+                "model_version": "",
+                "n_train_rows": "",
+                "n_score_assets": "",
+                "skip_reason": "insufficient_train_rows",
+            },
+            {
+                "score_date": "2026-01-06",
+                "status": "fit_scored",
+                "model_version": 1,
+                "n_train_rows": 12000,
+                "n_score_assets": 4800,
+                "skip_reason": "",
+            },
+            {
+                "score_date": "2026-01-12",
+                "status": "reused_scored",
+                "model_version": 1,
+                "n_train_rows": 12150,
+                "n_score_assets": 4980,
+                "skip_reason": "",
+            },
+            {
+                "score_date": "2026-01-19",
+                "status": "fit_scored",
+                "model_version": 2,
+                "n_train_rows": 13200,
+                "n_score_assets": 4995,
+                "skip_reason": "",
+            },
+            {
+                "score_date": "2026-01-26",
+                "status": "reused_scored",
+                "model_version": 2,
+                "n_train_rows": 13420,
+                "n_score_assets": 4996,
+                "skip_reason": "",
+            },
+        ]
+        return _fixture_csv(
+            rows,
+            [
+                "score_date",
+                "status",
+                "model_version",
+                "n_train_rows",
+                "n_score_assets",
+                "skip_reason",
+            ],
+        )
+    if key == "feature_importance":
+        rows = [
+            {
+                "feature": "turnover_rate_f",
+                "mean_abs_importance": 0.42,
+                "latest_importance": 0.39,
+                "sign_stability": 0.92,
+                "importance_source": "fixture",
+            },
+            {
+                "feature": "mom_20d",
+                "mean_abs_importance": 0.25,
+                "latest_importance": 0.28,
+                "sign_stability": 0.88,
+                "importance_source": "fixture",
+            },
+            {
+                "feature": "volatility_20d",
+                "mean_abs_importance": 0.16,
+                "latest_importance": 0.18,
+                "sign_stability": 0.77,
+                "importance_source": "fixture",
+            },
+            {
+                "feature": "size_zscore",
+                "mean_abs_importance": 0.11,
+                "latest_importance": 0.09,
+                "sign_stability": 0.64,
+                "importance_source": "fixture",
+            },
+            {
+                "feature": "valuation_pb",
+                "mean_abs_importance": 0.06,
+                "latest_importance": 0.06,
+                "sign_stability": 0.58,
+                "importance_source": "fixture",
+            },
+        ]
+        return _fixture_csv(
+            rows,
+            [
+                "feature",
+                "mean_abs_importance",
+                "latest_importance",
+                "sign_stability",
+                "importance_source",
+            ],
+        )
+    if key == "feature_importance_ledger":
+        rows = [
+            {
+                "model_version": 1,
+                "fit_date": "2026-01-06",
+                "feature": "turnover_rate_f",
+                "signed_importance": 0.40,
+                "abs_importance": 0.40,
+                "rank": 1,
+                "importance_source": "fixture",
+            },
+            {
+                "model_version": 1,
+                "fit_date": "2026-01-06",
+                "feature": "mom_20d",
+                "signed_importance": 0.22,
+                "abs_importance": 0.22,
+                "rank": 2,
+                "importance_source": "fixture",
+            },
+            {
+                "model_version": 2,
+                "fit_date": "2026-01-19",
+                "feature": "turnover_rate_f",
+                "signed_importance": 0.39,
+                "abs_importance": 0.39,
+                "rank": 1,
+                "importance_source": "fixture",
+            },
+            {
+                "model_version": 2,
+                "fit_date": "2026-01-19",
+                "feature": "mom_20d",
+                "signed_importance": 0.28,
+                "abs_importance": 0.28,
+                "rank": 2,
+                "importance_source": "fixture",
+            },
+        ]
+        return _fixture_csv(
+            rows,
+            [
+                "model_version",
+                "fit_date",
+                "feature",
+                "signed_importance",
+                "abs_importance",
+                "rank",
+                "importance_source",
+            ],
+        )
+    if key == "purged_kfold_folds":
+        rows = [
+            {"fold": 1, "mean_ic": 0.021, "mean_rank_ic": 0.044, "n_dates": 20},
+            {"fold": 2, "mean_ic": 0.028, "mean_rank_ic": 0.056, "n_dates": 20},
+            {"fold": 3, "mean_ic": 0.024, "mean_rank_ic": 0.052, "n_dates": 20},
+        ]
+        return _fixture_csv(rows, ["fold", "mean_ic", "mean_rank_ic", "n_dates"])
+    if key == "diagnostics":
+        return json.dumps(
+            {
+                "artifact_type": "model_lab_diagnostics_fixture",
+                "run_summary": {
+                    "run_id": run_id,
+                    "status": "succeeded",
+                    "case_name": summary.get("case_name", "fixture_case"),
+                    "factor_name": summary.get("factor_name", "fixture_factor"),
+                    "highest_severity": "warn",
+                    "warning_count": 1,
+                    "error_count": 0,
+                },
+                "stages": [
+                    {"stage": "load_data", "status": "ok", "duration_ms": 1200},
+                    {"stage": "train_model", "status": "ok", "duration_ms": 3400},
+                    {"stage": "artifact_export", "status": "warn", "duration_ms": 900},
+                ],
+                "events": [
+                    {
+                        "ts": "2026-01-29T00:00:00Z",
+                        "level": "warning",
+                        "stage": "artifact_export",
+                        "message": "coverage breaks concentrated in warmup",
+                        "payload": {"break_days": summary.get("coverage_break_days", 0)},
+                    }
+                ],
+                "training_log": _default_model_lab_artifact_fixture_content(
+                    fixture,
+                    "training_log",
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    group_rows = snapshot.get("groupRows") if isinstance(snapshot, dict) else []
+    if key == "group_returns" and isinstance(group_rows, list):
+        return _fixture_csv(
+            [dict(row) for row in group_rows if isinstance(row, dict)],
+            ["date", "group", "group_return", "split_phase"],
+        )
+    return f"Fixture artifact '{key}' is not defined.\n"
+
+
+def _load_model_lab_artifact_fixture(fixture_id: str, artifact_key: str) -> tuple[str, str]:
+    fixture = _load_model_lab_overview_fixture(fixture_id)
+    key = str(artifact_key or "").strip()
+    if not key:
+        raise FileNotFoundError("artifact key is required")
+    artifacts = fixture.get("artifacts")
+    if isinstance(artifacts, Mapping) and key in artifacts:
+        raw = artifacts[key]
+        if isinstance(raw, str):
+            content = raw
+        else:
+            content = json.dumps(raw, ensure_ascii=False, indent=2)
+    else:
+        content = _default_model_lab_artifact_fixture_content(fixture, key)
+    return _artifact_fixture_content_type(key), content
