@@ -21,6 +21,8 @@ def compute_ic_by_group(
 
     factor_name = _extract_single_name(factor_df, "factor_df")
     label_name = _extract_single_name(labels_df, "labels_df")
+    if group_df.duplicated(subset=["date", "asset"]).any():
+        raise AlphaLabDataError("group_df contains duplicate (date, asset) rows")
 
     merged = (
         factor_df[["date", "asset", "value"]]
@@ -29,11 +31,13 @@ def compute_ic_by_group(
             labels_df[["date", "asset", "value"]].rename(columns={"value": "label_value"}),
             on=["date", "asset"],
             how="inner",
+            validate="one_to_one",
         )
         .merge(
             group_df[["date", "asset", group_col]],
             on=["date", "asset"],
             how="left",
+            validate="many_to_one",
         )
     )
     if merged.empty:
@@ -42,6 +46,9 @@ def compute_ic_by_group(
     merged["date"] = pd.to_datetime(merged["date"], errors="coerce")
     merged["factor_value"] = pd.to_numeric(merged["factor_value"], errors="coerce")
     merged["label_value"] = pd.to_numeric(merged["label_value"], errors="coerce")
+    merged = merged.dropna(subset=[group_col]).copy()
+    if merged.empty:
+        return pd.DataFrame(columns=["date", "group", "factor", "label", "ic"])
 
     rows: list[dict[str, object]] = []
     for (date, group), block in merged.groupby(["date", group_col], sort=True, dropna=False):
@@ -233,6 +240,78 @@ def conditional_ic_by_cross_section_size(
     ]
 
 
+BASIC_CONDITIONAL_BUCKET_COLUMNS: list[str] = ["date", "bucket", "ic", "rank_ic", "n"]
+
+
+def conditional_ic_by_bucket(
+    factor_df: pd.DataFrame,
+    labels_df: pd.DataFrame,
+    bucket_df: pd.DataFrame,
+    *,
+    group_col: str = "bucket",
+    bucket_col: str | None = None,
+    min_assets: int = 3,
+) -> pd.DataFrame:
+    """Compute per-date IC by a date-level or asset-level bucket.
+
+    ``bucket_df`` may be ``[date, bucket_col]`` for market-wide regimes or
+    ``[date, asset, bucket_col]`` for cross-sectional buckets.
+    """
+    if min_assets < 2:
+        raise ValueError("min_assets must be >= 2")
+
+    resolved_bucket_col = bucket_col if bucket_col is not None else group_col
+
+    merged = _merge_factor_and_label_values(factor_df, labels_df)
+    if merged.empty:
+        return pd.DataFrame(columns=BASIC_CONDITIONAL_BUCKET_COLUMNS)
+
+    bucket = _normalize_bucket_frame(bucket_df, bucket_col=resolved_bucket_col)
+    if bucket.empty:
+        return pd.DataFrame(columns=BASIC_CONDITIONAL_BUCKET_COLUMNS)
+
+    join_cols = ["date", "asset"] if "asset" in bucket.columns else ["date"]
+    merged = merged.merge(bucket, on=join_cols, how="left", validate="many_to_one")
+    merged = merged.dropna(subset=[resolved_bucket_col, "factor_value", "label_value"]).copy()
+    if merged.empty:
+        return pd.DataFrame(columns=BASIC_CONDITIONAL_BUCKET_COLUMNS)
+
+    merged[resolved_bucket_col] = merged[resolved_bucket_col].astype(str)
+
+    rows: list[dict[str, object]] = []
+    for (date, bucket_value), block in merged.groupby(
+        ["date", resolved_bucket_col],
+        sort=True,
+        dropna=False,
+    ):
+        factor_values = block["factor_value"].to_numpy(dtype=float)
+        label_values = block["label_value"].to_numpy(dtype=float)
+        if len(block) < int(min_assets):
+            ic = float("nan")
+            rank_ic = float("nan")
+        else:
+            ic = _pearson_corr(factor_values, label_values)
+            rank_ic = _pearson_corr(
+                scipy_stats.rankdata(factor_values, method="average"),
+                scipy_stats.rankdata(label_values, method="average"),
+            )
+        rows.append(
+            {
+                "date": date,
+                "bucket": str(bucket_value),
+                "ic": ic,
+                "rank_ic": rank_ic,
+                "n": int(len(block)),
+            }
+        )
+
+    return (
+        pd.DataFrame(rows, columns=BASIC_CONDITIONAL_BUCKET_COLUMNS)
+        .sort_values(["date", "bucket"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+
 def _extract_single_name(df: pd.DataFrame, name: str) -> str:
     names = pd.unique(df["factor"])
     if len(names) != 1:
@@ -261,6 +340,8 @@ def _merge_factor_and_label_values(
 ) -> pd.DataFrame:
     validate_factor_output(factor_df)
     validate_factor_output(labels_df)
+    _extract_single_name(factor_df, "factor_df")
+    _extract_single_name(labels_df, "labels_df")
 
     merged = (
         factor_df[["date", "asset", "factor", "value"]]
@@ -293,6 +374,24 @@ def _merge_factor_and_label_values(
     merged = merged.dropna(subset=["date", "factor_value", "label_value"]).copy()
     merged["factor_abs"] = merged["factor_value"].abs()
     return merged
+
+
+def _normalize_bucket_frame(bucket_df: pd.DataFrame, *, bucket_col: str) -> pd.DataFrame:
+    required = (
+        ("date", "asset", bucket_col) if "asset" in bucket_df.columns else ("date", bucket_col)
+    )
+    _require_columns(bucket_df, required, "bucket_df")
+    out = bucket_df.loc[:, list(required)].copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"]).copy()
+    if "asset" in out.columns:
+        out = out.dropna(subset=["asset"]).copy()
+        key_cols = ["date", "asset"]
+    else:
+        key_cols = ["date"]
+    if out.duplicated(subset=key_cols).any():
+        raise AlphaLabDataError(f"bucket_df contains duplicate {tuple(key_cols)} rows")
+    return out
 
 
 def _assign_quantile_labels(series: pd.Series, *, labels: list[str]) -> pd.Series:

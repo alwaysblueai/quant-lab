@@ -1,0 +1,242 @@
+{
+  "capacity_estimation": {
+    "columns": [
+      "capacity_enabled",
+      "capacity_status",
+      "capacity_notes",
+      "capacity_market_cap_column",
+      "capacity_participation_rate",
+      "capacity_adv_lookback",
+      "equal_weight_mean_long_short_return",
+      "market_cap_weighted_mean_long_short_return",
+      "market_cap_vs_equal_weight_return_delta",
+      "mean_traded_adv",
+      "estimated_capacity_upper_bound"
+    ],
+    "file": "capacity_estimation.csv",
+    "rows": 1,
+    "sha256": "84dee3dcafbcf0fcd177f6ec40f0121b56c8b67f346fdbfcfd29de5cd82a0550"
+  },
+  "conditional_ic_by_cross_section_size": {
+    "columns": [
+      "cross_section_bucket",
+      "median_valid_assets_threshold",
+      "mean_valid_assets",
+      "mean_ic",
+      "mean_rank_ic",
+      "ic_positive_rate",
+      "rank_ic_positive_rate",
+      "n_dates_used"
+    ],
+    "file": "conditional_ic_by_cross_section_size.csv",
+    "rows": 2,
+    "sha256": "3171bea7811bbe6d46155da1a2527469f60c67f0a5720ed193564135d3e2f6ea"
+  },
+  "conditional_ic_by_magnitude": {
+    "columns": [
+      "magnitude_quintile",
+      "mean_ic",
+      "mean_rank_ic",
+      "ic_positive_rate",
+      "rank_ic_positive_rate",
+      "n_dates_used",
+      "mean_assets_per_date"
+    ],
+    "file": "conditional_ic_by_magnitude.csv",
+    "rows": 5,
+    "sha256": "130f0633a5b2b2fce96d87d01bbffa35dd7d404c825c0a15edeb51de092c6fcd"
+  },
+  "coverage": {
+    "columns": [
+      "date",
+      "eligible_count",
+      "valid_score_count",
+      "valid_forward_return_count",
+      "valid_sample_count",
+      "asset_coverage",
+      "forward_return_coverage",
+      "sample_coverage",
+      "coverage",
+      "missingness",
+      "n_assets",
+      "n_non_null",
+      "missing_score_count",
+      "missing_forward_return_count",
+      "invalid_sample_count",
+      "universe_count",
+      "feature_row_count",
+      "complete_feature_count",
+      "feature_nan_row_count",
+      "label_available_count",
+      "scored_count",
+      "scored_evaluable_count",
+      "missing_feature_count",
+      "missing_label_count",
+      "filtered_count",
+      "score_coverage",
+      "universe_coverage",
+      "is_warmup",
+      "coverage_eval_included",
+      "split_phase"
+    ],
+    "file": "coverage.csv",
+    "rows": 160,
+    "sha256": "ede01519f315fd4ca2558329a8f25b83536849e1cfb5f2c756b95a5774e53d05"
+  },
+  "daily_pnl_attribution": {
+    "columns": [
+      "date",
+      "long_leg",
+      "short_leg",
+      "gross",
+      "cost_drag",
+      "net"
+    ],
+    "file": "daily_pnl_attribution.csv",
+    "rows": 60,
+    "sha256": "f8c1ea89e94d233ca616d2d88c26b2d62f98398df37d1451c6151d0f881eae82"
+  },
+  "factor_autocorrelation": {
+    "columns": [
+      "lag",
+      "mean_autocorr",
+      "std_autocorr",
+      "n_dates"
+    ],
+    "file": "factor_autocorrelation.csv",
+    "rows": 5,
+    "sha256": "23d3d15319c3894ae1d9495945e0e7982dad0255202e607a84f2ad9e28528824"
+  },
+  "group_nav": {
+    "columns": [
+      "date",
+      "group",
+      "period_return",
+      "nav",
+      "sample_step",
+      "rebalance_step",
+      "label_horizon"
+    ],
+    "file": "group_nav.csv",
+    "rows": 150,
+    "sha256": "d6fa401a2fa68dce9d876c0f9062e6ddf790111c44cdc48cd78c870e6b40bc80"
+  },
+  "group_returns": {
+    "columns": [
+      "date",
+      "factor",
+      "group",
+      "group_return",
+      "split_phase"
+    ],
+    "file": "group_returns.csv",
+    "rows": 750,
+    "sha256": "f5d9fa07254b123229ff5695ee25334df422aa8dbe5cf442396ec7cee4561ba3"
+  },
+  "ic_decay": {
+    "columns": [
+      "horizon",
+      "mean_ic",
+      "mean_rank_ic",
+      "ic_ir",
+      "t_stat",
+      "p_value",
+      "n_dates"
+    ],
+    "file": "ic_decay.csv",
+    "rows": 6,
+    "sha256": "e024f6bf414c630bf475c3a999142e5e91c0431e1a3b4bc003e3f4ff7462e6da"
+  },
+  "ic_timeseries": {
+    "columns": [
+      "date",
+      "ic",
+      "rank_ic",
+      "mutual_information",
+      "split_phase"
+    ],
+    "file": "ic_timeseries.csv",
+    "rows": 155,
+    "sha256": "2302adbcb8e26cea12d28839fcf08be8397dd113c2efde2bcf09a556898f313f"
+  },
+  "lag_sensitivity": {
+    "columns": [
+      "lag",
+      "mean_ic",
+      "long_short_ir"
+    ],
+    "file": "lag_sensitivity.csv",
+    "rows": 4,
+    "sha256": "b6a559c4dda24b47852e77f05eb8c4aeeedaefabf8dd9a8f4a9fa723d59ba2cb"
+  },
+  "portfolio_weights": {
+    "columns": [
+      "date",
+      "asset",
+      "weight"
+    ],
+    "file": "portfolio_weights.csv",
+    "rows": 0,
+    "sha256": "f5e8de24fabc8c17cf385a8390a05fa4080f77209aab5a642eac1714d2b78e7c"
+  },
+  "quantile_equal_weights": {
+    "columns": [
+      "date",
+      "asset",
+      "factor",
+      "quantile",
+      "weight"
+    ],
+    "file": "quantile_equal_weights.csv",
+    "rows": 780,
+    "sha256": "2eff5d215dfcb7fba732bdfd48822095e9b68d2ffcde0be628be80a29fb119c6"
+  },
+  "quantile_membership": {
+    "columns": [
+      "date",
+      "asset",
+      "factor",
+      "quantile"
+    ],
+    "file": "quantile_membership.csv",
+    "rows": 780,
+    "sha256": "cc0c1916d003ede6ccbcc87abe6abbf3b5ded275cc38713817a7337ebc846eb5"
+  },
+  "random_baseline_null": {
+    "columns": [
+      "permutation",
+      "mean_ic"
+    ],
+    "file": "random_baseline_null.csv",
+    "rows": 50,
+    "sha256": "81421197c9571795bd9a94480a71883836340a6466aab40d9f6f88d1088ba145"
+  },
+  "rolling_stability": {
+    "columns": [
+      "date",
+      "rolling_mean_ic",
+      "rolling_ic_positive_rate",
+      "rolling_mean_rank_ic",
+      "rolling_rank_ic_positive_rate",
+      "rolling_mean_mutual_information",
+      "rolling_mutual_information_positive_rate",
+      "rolling_mean_long_short_return",
+      "rolling_long_short_positive_rate",
+      "split_phase"
+    ],
+    "file": "rolling_stability.csv",
+    "rows": 150,
+    "sha256": "00eaaef5b09ad9284f90f812f29b932f40807cce20f4f019ff3c4dfaac34e1d7"
+  },
+  "turnover": {
+    "columns": [
+      "date",
+      "factor",
+      "turnover",
+      "split_phase"
+    ],
+    "file": "turnover.csv",
+    "rows": 155,
+    "sha256": "87a56a13a6282392f56ad5932a504a884942a047299719296df850e00ed22569"
+  }
+}
