@@ -1,0 +1,96 @@
+{
+  "artifact_type": "alpha_lab_factor_definition",
+  "case_name": "demo_model_alpha_model_factor",
+  "factor_name": "model_alpha",
+  "fallback_derived_fields": [],
+  "package_type": "single_factor",
+  "schema_version": "1.0.0",
+  "source_artifacts": {
+    "factor_definition_yaml_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/model_factor_definition.yaml",
+    "run_manifest_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/run_manifest.json"
+  },
+  "spec": {
+    "direction": "long",
+    "factor_name": "model_alpha",
+    "feature_availability": {
+      "column": null,
+      "mode": "required_timestamp",
+      "safety_lag_days": null
+    },
+    "feature_columns": [
+      "feature_momentum",
+      "feature_quality",
+      "feature_noise"
+    ],
+    "feature_importance": {
+      "enabled": true,
+      "method": "auto",
+      "mode": "every_fit",
+      "over_time": null,
+      "permutation": null,
+      "permutation_max_rows": 50000,
+      "save_ledger": true
+    },
+    "feature_preprocess": {
+      "cross_sectional_group_scope": "date",
+      "cross_sectional_transform": "winsorize_zscore",
+      "industry_group_column": null,
+      "missing_policy": "median_impute",
+      "scale_features": "auto"
+    },
+    "features_path": "<TMP_ROOT>/inputs/features.csv",
+    "model": {
+      "family": "ridge",
+      "params": {
+        "alpha": 1.0
+      }
+    },
+    "model_selection": {
+      "candidates": [],
+      "embargo_pct": 0.05,
+      "enabled": false,
+      "metric": "rank_ic",
+      "n_splits": 4,
+      "turnover_bucket_quantile": 0.2,
+      "turnover_penalty_lambda": 0.0
+    },
+    "n_quantiles": 5,
+    "name": "demo_model_alpha_model_factor",
+    "neutralization": {
+      "enabled": false,
+      "exposures_path": "<TMP_ROOT>/inputs/exposures.csv",
+      "industry_col": "industry",
+      "min_obs": 5,
+      "ridge": 1e-08,
+      "size_col": "size_exposure"
+    },
+    "output": {
+      "root_dir": "<TMP_ROOT>/outputs"
+    },
+    "prices_path": "<TMP_ROOT>/inputs/prices.csv",
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return",
+      "max_abs_forward_return": null,
+      "price_column": "close",
+      "winsorize_zscore": null
+    },
+    "training": {
+      "min_score_assets": 5,
+      "min_train_dates": 20,
+      "min_train_rows": 120,
+      "retrain_every_n_dates": 5,
+      "train_window_n_dates": 45,
+      "window_type": "rolling"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "in_universe_column": "in_universe",
+      "name": "demo_universe",
+      "path": "<TMP_ROOT>/inputs/universe.csv"
+    }
+  }
+}

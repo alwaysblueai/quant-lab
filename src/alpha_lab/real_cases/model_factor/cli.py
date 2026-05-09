@@ -14,6 +14,7 @@ from alpha_lab.research_evaluation_config import (
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
 )
 
+from .benchmark import ModelFactorBenchmarkOptions, run_model_factor_benchmark
 from .pipeline import ModelFactorCaseRunResult, run_model_factor_case
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,23 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Research evaluation profile controlling factor verdict standards, "
             "campaign triage, Level 2 promotion gate thresholds, and Level 2 "
-            "portfolio-validation guardrails."
+            "portfolio-validation guardrails. Use exploratory_screening for "
+            "faster model-factor development iteration."
+        ),
+    )
+    run_parser.add_argument(
+        "--disable-preparation-cache",
+        action="store_true",
+        help="Disable local model-factor data/preprocessed-input cache for this run.",
+    )
+    run_parser.add_argument(
+        "--screening-retrain-every-n-dates",
+        type=int,
+        default=None,
+        help=(
+            "Optional runtime retrain cadence override for exploratory_screening runs. "
+            "Use larger values such as 40 or 60 for faster screening; ignored for "
+            "default_research/stricter_research."
         ),
     )
     run_parser.add_argument(
@@ -53,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional output root override. Final artifact directory is "
             "<output-root-dir>/<case_name>."
+        ),
+    )
+    run_parser.add_argument(
+        "--cache-root-dir",
+        default=None,
+        help=(
+            "Optional preparation cache root override. When set, the model-factor "
+            "dataset cache lives at <cache-root-dir>/_model_factor_cache and is "
+            "shared across runs that point at the same cache root. When unset, "
+            "the cache sits next to the case output dir (CLI default: shared "
+            "across cases under the same output root)."
         ),
     )
     run_parser.add_argument(
@@ -79,6 +107,128 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite existing case_report.md when rendering is enabled.",
     )
+    run_parser.add_argument(
+        "--draft-model-candidate",
+        default=None,
+        help=(
+            "Optional path to a Stage3 model_candidate.json. When set, the run "
+            "writes a draft_model_source audit block (candidate hash, case-spec "
+            "hash, feature-contract hash) into run_manifest.json, "
+            "model_definition.json, and feature_manifest.json."
+        ),
+    )
+
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Run one model-factor case and write a benchmark recorder JSON.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    benchmark_parser.add_argument("spec_path", help="Path to model-factor case YAML/JSON spec.")
+    benchmark_parser.add_argument(
+        "--evaluation-profile",
+        default=DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name,
+        choices=sorted(AVAILABLE_RESEARCH_EVALUATION_PROFILES),
+        help=(
+            "Research evaluation profile for this benchmark. Use exploratory_screening "
+            "for fast development timing and default_research for full research timing."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--disable-preparation-cache",
+        action="store_true",
+        help="Disable local model-factor data/preprocessed-input cache for this benchmark.",
+    )
+    benchmark_parser.add_argument(
+        "--screening-retrain-every-n-dates",
+        type=int,
+        default=None,
+        help="Optional runtime retrain cadence override for exploratory_screening runs.",
+    )
+    benchmark_parser.add_argument(
+        "--output-root-dir",
+        default=None,
+        help=(
+            "Optional case artifact output root override. Final artifact directory is "
+            "<output-root-dir>/<case_name>."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--cache-root-dir",
+        default=None,
+        help=(
+            "Optional preparation cache root override. See run --cache-root-dir."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--benchmark-output-dir",
+        default=None,
+        help=(
+            "Directory for benchmark JSON records. Defaults to "
+            "<output-root-dir>/_benchmark_records or the spec output root."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional stable benchmark run id. Defaults to timestamp + case name.",
+    )
+    benchmark_parser.add_argument(
+        "--note",
+        default=None,
+        help="Optional free-form note stored in the benchmark record.",
+    )
+    benchmark_parser.add_argument(
+        "--memory-sample-interval-seconds",
+        type=float,
+        default=1.0,
+        help="Interval for lightweight /proc/self memory sampling.",
+    )
+    benchmark_parser.add_argument(
+        "--memory-limit-gb",
+        type=float,
+        default=24.0,
+        help=(
+            "Process address-space limit for benchmark runs. This turns many OOM "
+            "cases into catchable MemoryError/ArrowMemoryError records instead of "
+            "letting the kernel OOM-kill WSL. Set to 0 to disable."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--memory-profile",
+        action="store_true",
+        help=(
+            "Write a per-sample RSS/swap timeline with the current model-factor stage "
+            "to a sidecar memory profile artifact."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--tracemalloc-profile",
+        action="store_true",
+        help=(
+            "Capture tracemalloc snapshots at selected stage boundaries and write "
+            "top allocation diffs to the memory profile artifact."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--tracemalloc-nframes",
+        type=int,
+        default=10,
+        help="Number of Python frames retained in tracemalloc stage snapshots.",
+    )
+    benchmark_parser.add_argument(
+        "--vault-root",
+        default=None,
+        help=(
+            "Optional quant-knowledge vault root path. Resolution priority: "
+            "CLI flag -> OBSIDIAN_VAULT_PATH env -> disabled."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--vault-export-mode",
+        default="skip",
+        choices=["skip", "overwrite", "versioned"],
+        help="Vault export behavior when a vault root is available.",
+    )
 
     batch_parser = subparsers.add_parser(
         "run-batch",
@@ -97,7 +247,23 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Research evaluation profile controlling factor verdict standards, "
             "campaign triage, Level 2 promotion gate thresholds, and Level 2 "
-            "portfolio-validation guardrails."
+            "portfolio-validation guardrails. Use exploratory_screening for "
+            "faster model-factor development iteration."
+        ),
+    )
+    batch_parser.add_argument(
+        "--disable-preparation-cache",
+        action="store_true",
+        help="Disable local model-factor data/preprocessed-input cache for this batch.",
+    )
+    batch_parser.add_argument(
+        "--screening-retrain-every-n-dates",
+        type=int,
+        default=None,
+        help=(
+            "Optional runtime retrain cadence override for exploratory_screening batch runs. "
+            "Use larger values such as 40 or 60 for faster screening; ignored for "
+            "default_research/stricter_research."
         ),
     )
     batch_parser.add_argument(
@@ -106,6 +272,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional output root override. Each case writes to "
             "<output-root-dir>/<case_name>."
+        ),
+    )
+    batch_parser.add_argument(
+        "--cache-root-dir",
+        default=None,
+        help=(
+            "Optional preparation cache root override applied to every case in the batch."
         ),
     )
     batch_parser.add_argument(
@@ -141,6 +314,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run-batch":
         return _run_batch(args, parser)
+
+    if args.command == "benchmark":
+        return _run_benchmark(args, parser)
 
     if args.command != "run":
         parser.error(f"unsupported command: {args.command!r}")
@@ -180,13 +356,26 @@ def _run_one(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
 ) -> ModelFactorCaseRunResult:
+    draft_model_source = None
+    candidate_arg = getattr(args, "draft_model_candidate", None)
+    if candidate_arg:
+        from alpha_lab.model_candidates import read_draft_model_source
+
+        try:
+            draft_model_source = read_draft_model_source(candidate_arg)
+        except (ValueError, FileNotFoundError) as exc:
+            parser.error(f"--draft-model-candidate failed to load: {exc}")
     try:
         result = run_model_factor_case(
             Path(spec_path),
             output_root_dir=args.output_root_dir,
+            cache_root_dir=getattr(args, "cache_root_dir", None),
             evaluation_profile=args.evaluation_profile,
+            use_preparation_cache=not bool(args.disable_preparation_cache),
+            screening_retrain_every_n_dates=args.screening_retrain_every_n_dates,
             vault_root=args.vault_root,
             vault_export_mode=args.vault_export_mode,
+            draft_model_source=draft_model_source,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
@@ -244,6 +433,54 @@ def _print_single_success(result: ModelFactorCaseRunResult) -> None:
     print(f"  Vault Export Mode   : {vault_meta.get('mode')}")
     print(f"  Report Render Status: {manifest_payload.get('render_status')}")
     print(f"  Report Path         : {manifest_payload.get('rendered_report_path')}")
+
+
+def _run_benchmark(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        result = run_model_factor_benchmark(
+            ModelFactorBenchmarkOptions(
+                spec_path=args.spec_path,
+                output_root_dir=args.output_root_dir,
+                cache_root_dir=getattr(args, "cache_root_dir", None),
+                benchmark_output_dir=args.benchmark_output_dir,
+                evaluation_profile=args.evaluation_profile,
+                use_preparation_cache=not bool(args.disable_preparation_cache),
+                screening_retrain_every_n_dates=args.screening_retrain_every_n_dates,
+                vault_root=args.vault_root,
+                vault_export_mode=args.vault_export_mode,
+                run_id=args.run_id,
+                note=args.note,
+                memory_sample_interval_seconds=args.memory_sample_interval_seconds,
+                memory_limit_gb=(
+                    None
+                    if args.memory_limit_gb is not None and args.memory_limit_gb <= 0
+                    else args.memory_limit_gb
+                ),
+                memory_profile=bool(args.memory_profile),
+                tracemalloc_profile=bool(args.tracemalloc_profile),
+                tracemalloc_nframes=int(args.tracemalloc_nframes),
+            )
+        )
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        parser.error(str(exc))
+
+    record = result.record
+    print("")
+    print("  Workflow : real-case-model-factor-benchmark")
+    print(f"  Status   : {record.get('status')}")
+    config = record.get("config", {})
+    spec = config.get("spec", {}) if isinstance(config, dict) else {}
+    print(f"  Case     : {spec.get('name') if isinstance(spec, dict) else 'N/A'}")
+    print(f"  Record   : {result.record_path}")
+    print(f"  Wall Sec : {record.get('wall_seconds')}")
+    memory = record.get("memory", {})
+    if isinstance(memory, dict):
+        print(f"  Peak RSS : {memory.get('peak_rss_mb')} MB")
+        print(f"  Peak Swap: {memory.get('peak_swap_mb')} MB")
+    training = record.get("training", {})
+    if isinstance(training, dict):
+        print(f"  Fit Count: {training.get('fit_count')}")
+    return 0
 
 
 

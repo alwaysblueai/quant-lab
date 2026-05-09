@@ -14,13 +14,14 @@ def write_demo_model_factor_case(
     direction: str = "long",
     enable_neutralization: bool = False,
     include_known_at: bool = True,
+    n_days: int = 160,
 ) -> Path:
     """Create a fully runnable synthetic model-factor spec and input files."""
 
     data_dir = tmp_path / "inputs"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    prices, features, universe, exposures = _synthetic_case_tables()
+    prices, features, universe, exposures = _synthetic_case_tables(n_days=n_days)
 
     prices_path = data_dir / "prices.csv"
     features_path = data_dir / "features.csv"
@@ -86,7 +87,7 @@ def write_demo_model_factor_case(
 def _synthetic_case_tables(
     *,
     n_assets: int = 12,
-    n_days: int = 100,
+    n_days: int = 160,
     seed: int = 20260401,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     rng = np.random.default_rng(seed)

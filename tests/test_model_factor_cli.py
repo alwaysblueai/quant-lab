@@ -12,8 +12,10 @@ import alpha_lab.real_cases.model_factor.cli as model_factor_cli
 from alpha_lab.model_factor import FeaturePreprocessConfig
 from alpha_lab.real_cases.model_factor.pipeline import (
     _build_forward_label_cache,
+    _coverage_by_date,
     _load_features,
     _model_factor_price_read_columns,
+    _resolve_preparation_cache_dir,
     run_model_factor_case,
 )
 from alpha_lab.real_cases.model_factor.spec import (
@@ -36,9 +38,110 @@ def test_model_factor_cli_help_mentions_profile_and_level12_workflow() -> None:
         )
     )
     assert "--evaluation-profile" in run_help
+    assert "--disable-preparation-cache" in run_help
+    assert "--screening-retrain-every-n-dates" in run_help
     assert "exploratory_screening" in run_help
+    assert "--cache-root-dir" in run_help
+    benchmark_help = next(
+        action.choices["benchmark"].format_help()
+        for action in parser._actions
+        if (
+            hasattr(action, "choices")
+            and isinstance(action.choices, dict)
+            and "benchmark" in action.choices
+        )
+    )
+    assert "--benchmark-output-dir" in benchmark_help
+    assert "--memory-sample-interval-seconds" in benchmark_help
+    assert "--memory-limit-gb" in benchmark_help
+    assert "--memory-profile" in benchmark_help
+    assert "--tracemalloc-profile" in benchmark_help
+    assert "--cache-root-dir" in benchmark_help
     assert "Level 1/2" in parser.format_help()
     assert "canonical factor" in parser.format_help()
+
+
+def test_resolve_preparation_cache_dir_default_uses_output_parent(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs" / "case"
+    cache_dir = _resolve_preparation_cache_dir(output_dir)
+    assert cache_dir == (tmp_path / "outputs" / "_model_factor_cache").resolve()
+
+
+def test_resolve_preparation_cache_dir_override_routes_under_cache_root(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs" / "_web_runs" / "run-a" / "case"
+    shared_root = tmp_path / "outputs" / "_model_factor_shared_cache"
+    cache_dir = _resolve_preparation_cache_dir(output_dir, cache_root_dir=shared_root)
+    assert cache_dir == (shared_root / "_model_factor_cache").resolve()
+    other_output_dir = tmp_path / "outputs" / "_web_runs" / "run-b" / "case"
+    other_cache_dir = _resolve_preparation_cache_dir(
+        other_output_dir, cache_root_dir=shared_root
+    )
+    assert other_cache_dir == cache_dir
+
+
+def test_model_factor_coverage_uses_eligible_denominator_and_final_scores() -> None:
+    base = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-01",
+                "universe_count": 4,
+                "feature_row_count": 3,
+                "complete_feature_count": 2,
+                "feature_nan_row_count": 1,
+                "label_available_count": 2,
+                "eligible_count": 2,
+                "missing_feature_count": 1,
+                "missing_label_count": 1,
+                "filtered_count": 2,
+            },
+            {
+                "date": "2024-01-02",
+                "universe_count": 4,
+                "feature_row_count": 3,
+                "complete_feature_count": 3,
+                "feature_nan_row_count": 0,
+                "label_available_count": 2,
+                "eligible_count": 2,
+                "missing_feature_count": 1,
+                "missing_label_count": 1,
+                "filtered_count": 2,
+            },
+        ]
+    )
+    factor = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "asset": "A", "factor": "m", "value": 0.1},
+            {"date": "2024-01-01", "asset": "B", "factor": "m", "value": float("nan")},
+            {"date": "2024-01-02", "asset": "A", "factor": "m", "value": 0.2},
+        ]
+    )
+    labels = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "asset": "A", "factor": "forward_return_5", "value": 0.01},
+            {"date": "2024-01-01", "asset": "B", "factor": "forward_return_5", "value": 0.02},
+            {"date": "2024-01-02", "asset": "A", "factor": "forward_return_5", "value": pd.NA},
+            {"date": "2024-01-02", "asset": "B", "factor": "forward_return_5", "value": 0.03},
+        ]
+    )
+
+    coverage = _coverage_by_date(factor, coverage_base_df=base, target_label_df=labels)
+
+    first = coverage.loc[pd.to_datetime(coverage["date"]) == pd.Timestamp("2024-01-01")].iloc[0]
+    assert int(first["universe_count"]) == 4
+    assert int(first["eligible_count"]) == 2
+    assert int(first["scored_count"]) == 1
+    assert int(first["scored_evaluable_count"]) == 1
+    assert int(first["missing_score_count"]) == 1
+    assert first["coverage"] == pytest.approx(0.5)
+    assert first["universe_coverage"] == pytest.approx(0.25)
+
+    second = coverage.loc[pd.to_datetime(coverage["date"]) == pd.Timestamp("2024-01-02")].iloc[
+        0
+    ]
+    assert int(second["scored_count"]) == 1
+    assert int(second["scored_evaluable_count"]) == 0
+    assert int(second["missing_score_count"]) == 2
+    assert second["coverage"] == pytest.approx(0.0)
 
 
 def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
@@ -59,20 +162,53 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     assert (case_dir / "model_definition.json").exists()
     assert (case_dir / "feature_manifest.json").exists()
     assert (case_dir / "diagnostics.json").exists()
+    assert (case_dir / "research_tearsheet.json").exists()
+    assert (case_dir / "research_tearsheet.pdf").exists()
     assert (case_dir / "training_log.csv").exists()
+    assert (case_dir / "training_metrics.csv").exists()
     assert (case_dir / "feature_importance.csv").exists()
+    assert (case_dir / "feature_oos_ic.csv").exists()
     assert (case_dir / "ic_decay.csv").exists()
     assert (case_dir / "purged_kfold_summary.json").exists()
     assert (case_dir / "purged_kfold_folds.csv").exists()
+    assert (case_dir / "purged_kfold_fold_daily.csv").exists()
     assert (case_dir / "model_selection.json").exists()
+    coverage_df = pd.read_csv(case_dir / "coverage.csv")
+    assert {
+        "universe_count",
+        "eligible_count",
+        "scored_count",
+        "scored_evaluable_count",
+        "missing_score_count",
+        "filtered_count",
+        "score_coverage",
+        "universe_coverage",
+    }.issubset(set(coverage_df.columns))
+    assert (coverage_df["eligible_count"] >= coverage_df["scored_evaluable_count"]).all()
 
     manifest = json.loads((case_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["workflow"] == "real_case_model_factor"
     assert "ic_decay.csv" in manifest["required_bundle_files"]
     assert "diagnostics.json" in manifest["required_bundle_files"]
+    assert "research_tearsheet.json" in manifest["required_bundle_files"]
+    assert "research_tearsheet.pdf" in manifest["required_bundle_files"]
     assert "model_selection.json" in manifest["required_bundle_files"]
+    assert "training_metrics.csv" in manifest["required_bundle_files"]
+    assert "feature_oos_ic.csv" in manifest["required_bundle_files"]
+    assert "purged_kfold_fold_daily.csv" in manifest["required_bundle_files"]
     assert "ic_decay" in manifest["outputs"]
     assert "diagnostics" in manifest["outputs"]
+    assert "training_metrics" in manifest["outputs"]
+    assert "feature_oos_ic" in manifest["outputs"]
+    assert "purged_kfold_fold_daily" in manifest["outputs"]
+    manifest_split = manifest["split_contract"]
+    assert manifest_split["source"] == "model_factor_pipeline"
+    assert manifest_split["n_oos_dates"] >= manifest_split["min_oos_dates"]
+    assert manifest["research_tearsheet"]["status"] == "emitted"
+    assert (
+        manifest["research_tearsheet"]["split_contract"]["oos_start"]
+        == manifest_split["oos_start"]
+    )
     feature_preprocess_inputs = manifest["inputs"]["feature_preprocess"]
     assert feature_preprocess_inputs["cross_sectional_transform"] == "winsorize_zscore"
     assert feature_preprocess_inputs["cross_sectional_transform_default_applied"] is True
@@ -96,9 +232,13 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     assert model_selection_outcome["enabled"] is False
     assert isinstance(model_selection_outcome["n_fit_events"], int)
     assert isinstance(model_selection_outcome["n_reuse_events"], int)
+    assert "training_metrics_path" in model_definition_payload["source_artifacts"]
+    assert "feature_oos_ic_path" in model_definition_payload["source_artifacts"]
 
     backtest_payload = json.loads((case_dir / "backtest_result.json").read_text(encoding="utf-8"))
     assert backtest_payload["target_horizon"] == int(spec.target.horizon)
+    assert backtest_payload["split_contract"]["oos_start"] == manifest_split["oos_start"]
+    assert backtest_payload["oos_start"] == manifest_split["oos_start"]
     assert backtest_payload["summary"]["label_horizon"] == int(spec.target.horizon)
     assert backtest_payload["summary"]["nav_rebalance_step"] == max(
         1,
@@ -108,6 +248,7 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     diagnostics_payload = json.loads((case_dir / "diagnostics.json").read_text(encoding="utf-8"))
     assert diagnostics_payload["artifact_type"] == "alpha_lab_model_run_diagnostics"
     assert isinstance(diagnostics_payload["stages"], list)
+    assert isinstance(diagnostics_payload["stage_timings"], dict)
     assert isinstance(diagnostics_payload["events"], list)
     assert isinstance(diagnostics_payload["warnings"], list)
     assert isinstance(diagnostics_payload["data_health"], dict)
@@ -128,8 +269,47 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     metrics = metrics_payload["metrics"]
     assert metrics["model_family"] == "ridge"
     assert metrics["feature_count"] == 3
+    assert metrics["split_contract"]["oos_start"] == manifest_split["oos_start"]
+    assert metrics["oos_start"] == manifest_split["oos_start"]
+    assert metrics["metric_scope"] == "oos"
+    assert metrics["report_metric_scope"] == "full_sample_with_oos_parentheses"
+    assert metrics["report_timeseries_scope"] == "full_path_split_by_phase"
+    assert "mean_rank_ic_full" in metrics
+    assert "mean_rank_ic_is" in metrics
+    assert "mean_rank_ic_oos" in metrics
+    assert "mean_rank_ic_oos_decay_ratio" in metrics
+    assert metrics["mean_rank_ic_oos"] == pytest.approx(metrics["mean_rank_ic"])
+    assert "max_drawdown_full" in metrics
+    assert "max_drawdown_is" in metrics
+    assert "max_drawdown_oos" in metrics
+    assert metrics["split_semantics"] == "model_training_prediction_holdout"
+    assert "Model-Lab" in metrics["split_semantics_label"]
     assert "mean_mutual_information" in metrics
     assert "mutual_information_ir" in metrics
+    training_metrics = pd.read_csv(case_dir / "training_metrics.csv")
+    assert {
+        "model_version",
+        "train_rank_ic",
+        "oos_rank_ic",
+        "train_loss",
+        "oos_loss",
+    }.issubset(set(training_metrics.columns))
+    assert not training_metrics.empty
+    feature_oos_ic = pd.read_csv(case_dir / "feature_oos_ic.csv")
+    assert {"feature", "window_start", "window_end", "rank_ic", "n_obs"}.issubset(
+        set(feature_oos_ic.columns)
+    )
+    assert set(spec.feature_columns).issubset(set(feature_oos_ic["feature"]))
+    purged_fold_daily = pd.read_csv(case_dir / "purged_kfold_fold_daily.csv")
+    assert {"fold", "date", "ic", "rank_ic"}.issubset(set(purged_fold_daily.columns))
+    assert not purged_fold_daily.empty
+    ic_timeseries = pd.read_csv(case_dir / "ic_timeseries.csv")
+    assert {"IS", "OOS"}.issubset(set(ic_timeseries["split_phase"]))
+    assert pd.to_datetime(ic_timeseries["date"]).min() < pd.Timestamp(
+        manifest_split["oos_start"]
+    )
+    group_returns = pd.read_csv(case_dir / "group_returns.csv")
+    assert {"IS", "OOS"}.issubset(set(group_returns["split_phase"]))
     data_load_stage = next(
         item
         for item in diagnostics_payload["stages"]
@@ -137,13 +317,26 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     )
     data_load_result = data_load_stage["result"]
     assert data_load_result["prices_requested_columns"] == ["date", "asset", "close"]
+    assert data_load_result["preparation_cache_enabled"] is True
+    assert data_load_result["preparation_cache_hit"] is False
+    assert data_load_result["split_contract"]["oos_start"] == manifest_split["oos_start"]
     assert "large_unused_price_payload" not in data_load_result["prices_loaded_columns"]
+    assert result.stage_timings["model_fit_count"] > 0
+    assert "evaluate_total" in result.evaluation_result.stage_timings
+    assert "core_backtest.ic" in result.evaluation_result.stage_timings
+    assert "core_backtest.quantile" in result.evaluation_result.stage_timings
 
     model_selection_payload = json.loads(
         (case_dir / "model_selection.json").read_text(encoding="utf-8")
     )
     assert model_selection_payload["artifact_type"] == "alpha_lab_model_selection"
     assert model_selection_payload["status"] == "disabled"
+    tearsheet_payload = json.loads(
+        (case_dir / "research_tearsheet.json").read_text(encoding="utf-8")
+    )
+    assert tearsheet_payload["meta"]["split_contract"]["oos_start"] == manifest_split["oos_start"]
+    assert tearsheet_payload["meta"]["split_semantics"] == "model_training_prediction_holdout"
+    assert (case_dir / "research_tearsheet.pdf").stat().st_size > 0
     training_progress = [
         percent
         for message, percent in progress_events
@@ -153,6 +346,198 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
     assert min(training_progress) >= 30
     assert max(training_progress) <= 68
     assert max(training_progress) > 30
+
+
+def test_run_model_factor_case_reuses_preparation_cache_on_second_run(tmp_path: Path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+    output_root = tmp_path / "cached_runs"
+
+    first = run_model_factor_case(spec_path, output_root_dir=output_root)
+    second = run_model_factor_case(spec_path, output_root_dir=output_root)
+
+    assert len(first.factor_df) == len(second.factor_df)
+    case_dir = output_root / spec.name
+    diagnostics_payload = json.loads((case_dir / "diagnostics.json").read_text(encoding="utf-8"))
+    data_load_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "data_load"
+    )
+    feature_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "feature_validate"
+    )
+    target_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "target_build"
+    )
+    assert data_load_stage["result"]["preparation_cache_hit"] is True
+    assert feature_stage["result"]["cache_hit"] is True
+    assert target_stage["result"]["cache_hit"] is True
+
+
+def test_run_model_factor_case_skips_feature_reload_for_screening_prepared_cache(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    output_root = tmp_path / "screening_cached_runs"
+
+    first = run_model_factor_case(
+        spec_path,
+        output_root_dir=output_root,
+        evaluation_profile="exploratory_screening",
+    )
+    first_diagnostics = json.loads(
+        (first.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    first_data_load_stage = next(
+        item
+        for item in first_diagnostics["stages"]
+        if str(item.get("name")) == "data_load"
+    )
+    assert first_data_load_stage["result"]["preparation_cache_hit"] is False
+    assert first_data_load_stage["result"]["features_loaded_for_data_load"] is True
+    assert first_data_load_stage["result"]["features_skipped_due_to_prepared_cache"] is False
+    assert not pd.read_csv(first.output_dir / "training_metrics.csv").empty
+    assert pd.read_csv(first.output_dir / "feature_oos_ic.csv").empty
+
+    second = run_model_factor_case(
+        spec_path,
+        output_root_dir=output_root,
+        evaluation_profile="exploratory_screening",
+    )
+
+    assert len(first.factor_df) == len(second.factor_df)
+    diagnostics_payload = json.loads(
+        (second.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    data_load_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "data_load"
+    )
+    data_load_result = data_load_stage["result"]
+    assert data_load_result["preparation_cache_hit"] is True
+    assert data_load_result["prepared_inputs_cache_hit"] is True
+    assert data_load_result["features_loaded_for_data_load"] is False
+    assert data_load_result["features_skipped_due_to_prepared_cache"] is True
+
+    feature_manifest = json.loads(
+        (second.output_dir / "feature_manifest.json").read_text(encoding="utf-8")
+    )
+    assert feature_manifest["manifest_source"] == "cache_metadata"
+    assert feature_manifest["features"][0]["non_null_ratio"] is not None
+
+
+def test_run_model_factor_case_reuses_preparation_cache_across_models(
+    tmp_path: Path,
+) -> None:
+    ridge_spec_path = write_demo_model_factor_case(tmp_path, factor_name="ridge_score")
+    lasso_spec_path = tmp_path / "lasso_model_factor_case.yaml"
+    payload = yaml.safe_load(ridge_spec_path.read_text(encoding="utf-8"))
+    payload["name"] = "lasso_model_factor_case"
+    payload["factor_name"] = "lasso_score"
+    payload["model"] = {"family": "lasso", "params": {"alpha": 0.001, "max_iter": 5000}}
+    lasso_spec_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "cross_model_cached_runs"
+
+    ridge = run_model_factor_case(ridge_spec_path, output_root_dir=output_root)
+    lasso = run_model_factor_case(lasso_spec_path, output_root_dir=output_root)
+
+    assert not ridge.factor_df.empty
+    assert not lasso.factor_df.empty
+    ridge_diag = json.loads(
+        (ridge.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    lasso_diag = json.loads(
+        (lasso.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    ridge_data_load = next(
+        item for item in ridge_diag["stages"] if str(item.get("name")) == "data_load"
+    )
+    lasso_data_load = next(
+        item for item in lasso_diag["stages"] if str(item.get("name")) == "data_load"
+    )
+    lasso_feature_stage = next(
+        item for item in lasso_diag["stages"] if str(item.get("name")) == "feature_validate"
+    )
+    lasso_target_stage = next(
+        item for item in lasso_diag["stages"] if str(item.get("name")) == "target_build"
+    )
+    assert ridge_data_load["result"]["preparation_cache_hit"] is False
+    assert lasso_data_load["result"]["preparation_cache_hit"] is True
+    assert (
+        ridge_data_load["result"]["preparation_cache_key"]
+        == lasso_data_load["result"]["preparation_cache_key"]
+    )
+    assert lasso_feature_stage["result"]["cache_hit"] is True
+    assert lasso_target_stage["result"]["cache_hit"] is True
+
+
+def test_run_model_factor_case_applies_screening_retrain_override(tmp_path: Path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    output_root = tmp_path / "screening_override"
+
+    result = run_model_factor_case(
+        spec_path,
+        output_root_dir=output_root,
+        evaluation_profile="exploratory_screening",
+        screening_retrain_every_n_dates=60,
+    )
+
+    assert result.spec.training.retrain_every_n_dates == 60
+    diagnostics_payload = json.loads(
+        (result.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    spec_load_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "spec_load"
+    )
+    assert spec_load_stage["result"]["evaluation_profile"] == "exploratory_screening"
+    assert spec_load_stage["result"]["screening_retrain_every_n_dates"] == 60
+    assert spec_load_stage["result"]["training_retrain_every_n_dates_effective"] == 60
+    metrics_payload = json.loads((result.output_dir / "metrics.json").read_text(encoding="utf-8"))
+    metrics = metrics_payload["metrics"]
+    assert metrics["retrain_density_warning"] is True
+    assert metrics["training_retrain_every_n_dates_effective"] == 60
+
+
+def test_run_model_factor_case_ignores_screening_retrain_override_outside_screening(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+
+    result = run_model_factor_case(
+        spec_path,
+        output_root_dir=tmp_path / "default_research_override_ignored",
+        evaluation_profile="default_research",
+        screening_retrain_every_n_dates=60,
+    )
+
+    assert result.spec.training.retrain_every_n_dates == spec.training.retrain_every_n_dates
+    diagnostics_payload = json.loads(
+        (result.output_dir / "diagnostics.json").read_text(encoding="utf-8")
+    )
+    spec_load_stage = next(
+        item
+        for item in diagnostics_payload["stages"]
+        if str(item.get("name")) == "spec_load"
+    )
+    assert (
+        spec_load_stage["result"]["training_retrain_every_n_dates_effective"]
+        == spec.training.retrain_every_n_dates
+    )
+    warnings = diagnostics_payload.get("warnings")
+    assert isinstance(warnings, list)
+    assert any("筛选重训间隔覆盖未生效" in str(item.get("title")) for item in warnings)
 
 
 def test_model_factor_cli_run_executes_and_writes_bundle(
@@ -182,6 +567,58 @@ def test_model_factor_cli_run_executes_and_writes_bundle(
     assert manifest["render_status"] == "skipped"
     assert manifest["rendered_report"] is False
     assert manifest["rendered_report_path"] is None
+
+
+def test_model_factor_cli_benchmark_writes_recorder_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    out_root = tmp_path / "benchmark_case_out"
+    benchmark_dir = tmp_path / "benchmark_records"
+
+    rc = model_factor_cli.main(
+        [
+            "benchmark",
+            str(spec_path),
+            "--output-root-dir",
+            str(out_root),
+            "--benchmark-output-dir",
+            str(benchmark_dir),
+            "--run-id",
+            "demo_benchmark",
+            "--evaluation-profile",
+            "exploratory_screening",
+            "--screening-retrain-every-n-dates",
+            "60",
+            "--memory-sample-interval-seconds",
+            "0.01",
+            "--memory-profile",
+        ]
+    )
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "real-case-model-factor-benchmark" in captured.out
+    record_path = benchmark_dir / "demo_benchmark.json"
+    assert record_path.exists()
+    assert (benchmark_dir / "latest.json").exists()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["artifact_type"] == "alpha_lab_model_factor_benchmark_record"
+    assert record["status"] == "success"
+    assert record["run_id"] == "demo_benchmark"
+    assert isinstance(record["config_hash"], str)
+    assert record["config"]["runtime"]["evaluation_profile"] == "exploratory_screening"
+    assert record["config"]["runtime"]["memory_limit_gb"] == 24.0
+    assert record["config"]["runtime"]["memory_profile"] is True
+    assert record["memory"]["resource_limits"]["address_space_limit_enabled"] is True
+    assert Path(record["memory"]["profile_path"]).exists()
+    assert record["training"]["fit_count"] >= 1
+    assert record["memory"]["peak_rss_kb"] > 0
+    assert "stage_timings" in record["timings"]
+    assert "evaluation_stage_timings" in record["timings"]
+    assert "preparation_cache_hit" in record["cache_lineage"]
+    assert Path(record["artifacts"]["diagnostics"]).exists()
 
 
 def test_model_factor_cli_run_batch_expands_patterns(
@@ -307,6 +744,17 @@ def test_model_factor_price_read_columns_include_profile_driven_optional_columns
     assert {"ret_5d", "ret_20d"}.issubset(set(optional))
 
 
+def test_model_factor_price_read_columns_include_target_price_column() -> None:
+    evaluation_config = get_research_evaluation_config("default_research")
+
+    required, _ = _model_factor_price_read_columns(
+        evaluation_config,
+        target_price_column="close_qfq",
+    )
+
+    assert required == ("date", "asset", "close", "close_qfq")
+
+
 def test_model_factor_forward_label_cache_precomputes_decay_horizons(
     tmp_path: Path,
 ) -> None:
@@ -326,6 +774,8 @@ def test_model_factor_forward_label_cache_precomputes_decay_horizons(
         prices=prices,
         target_horizon=int(spec.target.horizon),
         target_label_df=target_labels,
+        target_price_column=spec.target.price_column,
+        max_abs_forward_return=spec.target.max_abs_forward_return,
         evaluation_config=get_research_evaluation_config("default_research"),
     )
 
@@ -431,7 +881,7 @@ def test_run_model_factor_case_warns_on_fundamental_features_without_safety_lag(
     assert any("基本面特征可用性风险" in str(item.get("title")) for item in warnings)
 
 
-def test_model_factor_artifacts_export_permutation_feature_importance_for_gbdt(
+def test_model_factor_artifacts_export_cheap_feature_importance_ledger_for_gbdt(
     tmp_path: Path,
 ) -> None:
     spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
@@ -454,26 +904,44 @@ def test_model_factor_artifacts_export_permutation_feature_importance_for_gbdt(
     )
     assert "missing_value_reason" in feature_importance_df.columns
     assert "importance_source" in feature_importance_df.columns
+    assert "latest_abs_importance" in feature_importance_df.columns
+    assert "sign_stability" in feature_importance_df.columns
     assert (feature_importance_df["mean_abs_importance"].astype(str).str.strip() != "").all()
     assert (feature_importance_df["latest_importance"].astype(str).str.strip() != "").all()
     assert (feature_importance_df["missing_value_reason"].astype(str).str.strip() != "").all()
-    assert (feature_importance_df["importance_source"] == "permutation").all()
-    assert (feature_importance_df["missing_value_reason"] == "无缺失").all()
-    assert pd.to_numeric(
-        feature_importance_df["mean_abs_importance"],
-        errors="coerce",
-    ).notna().all()
-    assert pd.to_numeric(
-        feature_importance_df["latest_importance"],
-        errors="coerce",
-    ).notna().all()
+    assert (feature_importance_df["importance_source"] == "built_in_unavailable").all()
+    assert (
+        feature_importance_df["missing_value_reason"]
+        .astype(str)
+        .str.contains("permutation fallback", regex=False)
+        .all()
+    )
+    ledger_df = pd.read_csv(case_dir / "feature_importance_ledger.csv", keep_default_na=False)
+    assert not ledger_df.empty
+    assert {
+        "run_id",
+        "case",
+        "factor",
+        "model_family",
+        "model_version",
+        "fit_date",
+        "feature",
+        "signed_importance",
+        "abs_importance",
+        "normalized_share",
+        "rank",
+        "importance_source",
+    }.issubset(set(ledger_df.columns))
+    assert (ledger_df["importance_source"] == "built_in_unavailable").all()
 
     manifest = json.loads((case_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert "feature_importance_ledger.csv" in manifest["required_bundle_files"]
+    assert "feature_importance_ledger" in manifest["outputs"]
     notes = manifest.get("artifact_missing_value_notes")
     if isinstance(notes, dict):
         details = notes.get("details")
         if isinstance(details, list):
-            assert not any(
+            assert any(
                 str(item.get("artifact")) == "feature_importance.csv"
                 for item in details
             )

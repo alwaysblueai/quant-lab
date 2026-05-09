@@ -33,6 +33,8 @@ class TargetSpec:
 
     kind: TargetKind = "forward_return"
     horizon: int = 5
+    price_column: str = "close"
+    max_abs_forward_return: float | None = None
     winsorize_zscore: float | None = None
 
     def __post_init__(self) -> None:
@@ -40,6 +42,12 @@ class TargetSpec:
             raise AlphaLabConfigError("target.kind currently supports only 'forward_return'")
         if self.horizon <= 0:
             raise AlphaLabConfigError("target.horizon must be > 0")
+        if not isinstance(self.price_column, str) or not self.price_column.strip():
+            raise AlphaLabConfigError("target.price_column must be a non-empty string")
+        if self.max_abs_forward_return is not None and self.max_abs_forward_return <= 0:
+            raise AlphaLabConfigError(
+                "target.max_abs_forward_return must be > 0 when provided"
+            )
         if self.winsorize_zscore is not None and self.winsorize_zscore <= 0:
             raise AlphaLabConfigError(
                 "target.winsorize_zscore must be > 0 when provided (e.g. 3.0)"

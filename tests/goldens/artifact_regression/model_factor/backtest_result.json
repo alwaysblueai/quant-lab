@@ -1,0 +1,236 @@
+{
+  "artifact_type": "alpha_lab_backtest_result",
+  "case_name": "demo_model_alpha_model_factor",
+  "fallback_derived_fields": [],
+  "is_end": "2024-05-03",
+  "is_start": "2024-01-01",
+  "oos_end": "2024-08-09",
+  "oos_start": "2024-05-13",
+  "package_type": "single_factor",
+  "rebalance_frequency": "W",
+  "schema_version": "1.0.0",
+  "source_artifacts": {
+    "group_nav_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/group_nav.csv",
+    "group_returns_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/group_returns.csv",
+    "metrics_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/metrics.json",
+    "turnover_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/turnover.csv"
+  },
+  "split_contract": {
+    "embargo_days": 5,
+    "is_end": "2024-05-03",
+    "is_start": "2024-01-01",
+    "min_is_dates": 60,
+    "min_oos_dates": 60,
+    "n_dates": 160,
+    "n_is_dates": 90,
+    "n_oos_dates": 65,
+    "oos_end": "2024-08-09",
+    "oos_start": "2024-05-13",
+    "policy": "auto_holdout_v1",
+    "rebalance_step": 5,
+    "source": "model_factor_pipeline",
+    "target_horizon": 5
+  },
+  "summary": {
+    "annualized_return": 0.5153898384770825,
+    "annualized_volatility": 0.14177668849137248,
+    "calmar": 8.400168160073623,
+    "drawdown_table": [
+      [
+        "2024-03-29",
+        -0.061354704888737066
+      ],
+      [
+        "2024-04-05",
+        -0.04761964653140771
+      ],
+      [
+        "2024-03-22",
+        -0.03775053926499339
+      ],
+      [
+        "2024-06-28",
+        -0.026676098072097254
+      ],
+      [
+        "2024-04-12",
+        -0.02646065269854081
+      ],
+      [
+        "2024-03-15",
+        -0.020683907222327047
+      ],
+      [
+        "2024-03-08",
+        -0.018883247248252966
+      ],
+      [
+        "2024-04-26",
+        -0.01696995843546778
+      ]
+    ],
+    "excess_return_vs_benchmark": null,
+    "information_ratio": null,
+    "label_horizon": 5,
+    "max_drawdown": -0.061354704888737066,
+    "max_drawdown_oos": 0.01949227981045787,
+    "monthly_return_table": [
+      [
+        "2024-02",
+        0.10331120960544204
+      ],
+      [
+        "2024-03",
+        -0.06135470488873729
+      ],
+      [
+        "2024-04",
+        0.049214399115678154
+      ],
+      [
+        "2024-05",
+        0.08972336276241966
+      ],
+      [
+        "2024-06",
+        -0.013416630427553922
+      ],
+      [
+        "2024-07",
+        0.047024848051807844
+      ],
+      [
+        "2024-08",
+        0.014849989525821172
+      ]
+    ],
+    "nav_point_interval": "5D_non_overlapping",
+    "nav_points": [
+      [
+        "2024-02-02",
+        1.0358514305679971
+      ],
+      [
+        "2024-02-09",
+        1.056152672111815
+      ],
+      [
+        "2024-02-16",
+        1.0576496576038477
+      ],
+      [
+        "2024-02-23",
+        1.103311209605442
+      ],
+      [
+        "2024-03-01",
+        1.0865813769318144
+      ],
+      [
+        "2024-03-08",
+        1.0824771112426934
+      ],
+      [
+        "2024-03-15",
+        1.0804904229086096
+      ],
+      [
+        "2024-03-22",
+        1.0616606164657245
+      ],
+      [
+        "2024-03-29",
+        1.0356178759396646
+      ],
+      [
+        "2024-04-05",
+        1.050771919789891
+      ],
+      [
+        "2024-04-12",
+        1.0741168748696655
+      ],
+      [
+        "2024-04-19",
+        1.1053428089421822
+      ],
+      [
+        "2024-04-26",
+        1.08658518741749
+      ],
+      [
+        "2024-05-03",
+        1.1276175092509073
+      ],
+      [
+        "2024-05-17",
+        1.1372049005356832
+      ],
+      [
+        "2024-05-24",
+        1.1624795053443642
+      ],
+      [
+        "2024-05-31",
+        1.1840772643604212
+      ],
+      [
+        "2024-06-07",
+        1.2002077982395627
+      ],
+      [
+        "2024-06-14",
+        1.189202469056851
+      ],
+      [
+        "2024-06-21",
+        1.1987103853426253
+      ],
+      [
+        "2024-06-28",
+        1.1681909373068282
+      ],
+      [
+        "2024-07-05",
+        1.2041491619256353
+      ],
+      [
+        "2024-07-12",
+        1.200652548704216
+      ],
+      [
+        "2024-07-19",
+        1.188942431694098
+      ],
+      [
+        "2024-07-26",
+        1.2231249386291805
+      ],
+      [
+        "2024-08-02",
+        1.2412883311565945
+      ]
+    ],
+    "nav_rebalance_step": 5,
+    "nav_series_policy": "non_overlapping_forward_return_path_for_chart",
+    "nav_source": "quantile_long_short_from_group_returns",
+    "post_cost_return": 0.0043956331931764465,
+    "post_cost_return_oos": 0.006456981015937975,
+    "pre_cost_return": 0.005471631646419353,
+    "pre_cost_return_oos": 0.006987697358815168,
+    "regime_analysis": "high-vol mean=0.0170; low-vol mean=0.0001",
+    "rolling_drawdown": 0.0,
+    "rolling_sharpe": 2.5644413358903484,
+    "sharpe": 3.6352227151112046,
+    "sortino": 8.484469294597814,
+    "statistics_periods_per_year": 50,
+    "statistics_rebalance_step": 5,
+    "statistics_series_policy": "rebalance_sampled_non_overlapping_forward_returns",
+    "subperiod_analysis": "first_half_ann=37.63%; second_half_ann=66.86%",
+    "tracking_error": null,
+    "turnover": 0.8423076923076923,
+    "turnover_oos": 0.8008474576271186,
+    "win_rate": 0.5801526717557252
+  },
+  "target_horizon": 5
+}

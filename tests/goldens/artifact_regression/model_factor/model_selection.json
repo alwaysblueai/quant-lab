@@ -1,0 +1,30 @@
+{
+  "artifact_type": "alpha_lab_model_selection",
+  "case_name": "demo_model_alpha_model_factor",
+  "configured_model": {
+    "family": "ridge",
+    "params": {
+      "alpha": 1.0
+    }
+  },
+  "configured_model_selection": {
+    "candidates": [],
+    "embargo_pct": 0.05,
+    "enabled": false,
+    "metric": "rank_ic",
+    "n_splits": 4,
+    "turnover_bucket_quantile": 0.2,
+    "turnover_penalty_lambda": 0.0
+  },
+  "factor_name": "model_alpha",
+  "schema_version": "1.0.0",
+  "selection_rows": [],
+  "status": "disabled",
+  "summary": {
+    "candidate_count": 1,
+    "enabled": false,
+    "latest_selected_candidate_id": null,
+    "metric": null,
+    "n_selection_events": 0
+  }
+}

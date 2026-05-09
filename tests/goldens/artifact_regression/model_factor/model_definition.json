@@ -1,0 +1,187 @@
+{
+  "artifact_missing_value_notes": [
+    {
+      "artifact": "training_log.csv",
+      "fields": [
+        "skip_reason",
+        "model_version",
+        "trained_date_start",
+        "trained_date_end"
+      ],
+      "missing_value_count": 208,
+      "reason": "训练日志存在按行条件不适用字段（例如非 skipped 行的 skip_reason、skipped 行的模型版本/训练窗口）；导出时统一写为 N/A 或 not_skipped。"
+    }
+  ],
+  "artifact_type": "alpha_lab_model_definition",
+  "case_name": "demo_model_alpha_model_factor",
+  "diagnostics": {
+    "configured_model_family": "ridge",
+    "factor_name": "model_alpha",
+    "feature_columns": [
+      "feature_momentum",
+      "feature_quality",
+      "feature_noise"
+    ],
+    "feature_count": 3,
+    "feature_importance": {
+      "enabled": true,
+      "importance_source_counts": {
+        "coefficient": 3
+      },
+      "method": "auto",
+      "mode": "every_fit",
+      "n_importance_model_versions": 28,
+      "over_time": {
+        "enabled": true,
+        "source": "cheap_ledger_only",
+        "top_k": 5
+      },
+      "permutation": {
+        "enabled": false,
+        "force": false,
+        "latest_only": true,
+        "n_repeats": 3,
+        "random_state": 42,
+        "sample_rows": 50000,
+        "top_k_features": 20
+      },
+      "permutation_max_rows": 50000,
+      "save_ledger": true
+    },
+    "feature_oos_ic_enabled": true,
+    "feature_oos_ic_rows": 84,
+    "label_winsor_clipped_rows": 0,
+    "label_winsorize_zscore": null,
+    "max_abs_forward_return": null,
+    "mean_score_assets": 12.0,
+    "mean_train_rows": 510.29411764705884,
+    "model_selection": {
+      "candidate_count": 1,
+      "enabled": false,
+      "latest_selected_candidate_id": null,
+      "metric": null,
+      "n_selection_events": 0
+    },
+    "n_score_dates_scored": 136,
+    "n_score_dates_total": 160,
+    "purged_train_gap_dates": 4,
+    "selected_model_families": [
+      "ridge"
+    ],
+    "selection_status_counts": {
+      "disabled": 52,
+      "reused": 108
+    },
+    "skip_reason_counts": {
+      "insufficient_train_dates": 24
+    },
+    "target_horizon": 5,
+    "target_price_column": "close",
+    "top_features": [
+      "feature_momentum",
+      "feature_noise",
+      "feature_quality"
+    ],
+    "trained_model_versions": 28,
+    "training_metrics_rows": 28
+  },
+  "factor_name": "model_alpha",
+  "feature_availability": {
+    "column": null,
+    "mode": "required_timestamp",
+    "safety_lag_days": null
+  },
+  "feature_importance": {
+    "enabled": true,
+    "method": "auto",
+    "mode": "every_fit",
+    "over_time": null,
+    "permutation": null,
+    "permutation_max_rows": 50000,
+    "save_ledger": true
+  },
+  "feature_preprocess": {
+    "cross_sectional_group_scope": "date",
+    "cross_sectional_transform": "winsorize_zscore",
+    "cross_sectional_transform_default_applied": true,
+    "industry_group_column": null,
+    "missing_policy": "median_impute",
+    "scale_features": "auto"
+  },
+  "label_temporal_contract": {
+    "label_extreme_filtered_rows": 0,
+    "label_extreme_max_abs_raw_return": 0.08509916335820655,
+    "label_winsor_clipped_rows": 0,
+    "label_winsorize_zscore": null,
+    "max_abs_forward_return": null,
+    "purged_train_gap_dates": 4,
+    "target_horizon": 5,
+    "target_kind": "forward_return",
+    "target_price_column": "close",
+    "walk_forward_purged_training": true
+  },
+  "model_family": "ridge",
+  "model_params": {
+    "alpha": 1.0
+  },
+  "model_selection": {
+    "candidates": [],
+    "embargo_pct": 0.05,
+    "enabled": false,
+    "metric": "rank_ic",
+    "n_splits": 4,
+    "turnover_bucket_quantile": 0.2,
+    "turnover_penalty_lambda": 0.0
+  },
+  "model_selection_outcome": {
+    "enabled": false,
+    "latest_selected_candidate_family": null,
+    "latest_selected_candidate_id": null,
+    "latest_selected_candidate_params": null,
+    "latest_selected_candidate_score": null,
+    "latest_selected_candidate_turnover": null,
+    "latest_selection_score_date": null,
+    "n_fit_events": 28,
+    "n_reuse_events": 108,
+    "n_selection_events": 0,
+    "n_skip_events": 24,
+    "selection_metric": null
+  },
+  "resolved_model_params": {
+    "configured_model": {
+      "family": "ridge",
+      "params": {
+        "alpha": 1.0,
+        "copy_X": false
+      }
+    },
+    "selection_candidates": [
+      {
+        "candidate_id": "candidate_1_ridge",
+        "family": "ridge",
+        "params": {
+          "alpha": 1.0,
+          "copy_X": false
+        }
+      }
+    ],
+    "selection_candidates_count": 1
+  },
+  "schema_version": "1.0.0",
+  "source_artifacts": {
+    "feature_importance_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/feature_importance.csv",
+    "feature_oos_ic_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/feature_oos_ic.csv",
+    "metrics_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/metrics.json",
+    "model_selection_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/model_selection.json",
+    "training_log_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/training_log.csv",
+    "training_metrics_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/training_metrics.csv"
+  },
+  "training": {
+    "min_score_assets": 5,
+    "min_train_dates": 20,
+    "min_train_rows": 120,
+    "retrain_every_n_dates": 5,
+    "train_window_n_dates": 45,
+    "window_type": "rolling"
+  }
+}

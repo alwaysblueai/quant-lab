@@ -75,8 +75,39 @@ def test_demo_model_factor_spec_fixture_is_loadable(tmp_path: Path) -> None:
     spec = load_model_factor_case_spec(spec_path)
     assert spec.factor_name == "ml_score"
     assert spec.target.horizon == 5
+    assert spec.target.price_column == "close"
+    assert spec.target.max_abs_forward_return is None
     assert spec.n_quantiles == 5
     assert spec.model.family == "ridge"
+
+
+def test_model_factor_spec_parses_target_price_and_forward_return_filter() -> None:
+    payload = {
+        "name": "target_price_case",
+        "factor_name": "ml_score",
+        "features_path": "features.csv",
+        "feature_columns": ["x1", "x2"],
+        "prices_path": "prices.csv",
+        "rebalance_frequency": "W",
+        "target": {
+            "kind": "forward_return",
+            "horizon": 5,
+            "price_column": "close_qfq",
+            "max_abs_forward_return": 1.0,
+        },
+        "model": {"family": "ridge"},
+        "training": {
+            "window_type": "rolling",
+            "train_window_n_dates": 20,
+            "min_train_dates": 10,
+            "min_train_rows": 30,
+            "retrain_every_n_dates": 2,
+            "min_score_assets": 5,
+        },
+    }
+    spec = model_factor_case_spec_from_mapping(payload)
+    assert spec.target.price_column == "close_qfq"
+    assert spec.target.max_abs_forward_return == 1.0
 
 
 def test_model_factor_spec_parses_feature_availability_and_model_selection() -> None:
@@ -88,7 +119,27 @@ def test_model_factor_spec_parses_feature_availability_and_model_selection() -> 
         "prices_path": "prices.csv",
         "rebalance_frequency": "W",
         "feature_availability": {"mode": "safety_lag", "safety_lag_days": 1},
-        "feature_importance": {"mode": "disabled", "permutation_max_rows": 17},
+        "feature_importance": {
+            "enabled": True,
+            "method": "auto",
+            "save_ledger": True,
+            "mode": "disabled",
+            "permutation_max_rows": 17,
+            "over_time": {
+                "enabled": True,
+                "top_k": 5,
+                "source": "cheap_ledger_only",
+            },
+            "permutation": {
+                "enabled": False,
+                "latest_only": True,
+                "sample_rows": 50_000,
+                "n_repeats": 3,
+                "top_k_features": 20,
+                "random_state": 42,
+                "force": False,
+            },
+        },
         "model": {"family": "ridge", "params": {"alpha": 1.0}},
         "model_selection": {
             "enabled": True,
@@ -113,7 +164,23 @@ def test_model_factor_spec_parses_feature_availability_and_model_selection() -> 
     assert spec.feature_availability.mode == "safety_lag"
     assert spec.feature_availability.safety_lag_days == 1
     assert spec.feature_importance.mode == "disabled"
+    assert spec.feature_importance.method == "auto"
+    assert spec.feature_importance.save_ledger is True
     assert spec.feature_importance.permutation_max_rows == 17
+    assert spec.feature_importance.over_time == {
+        "enabled": True,
+        "top_k": 5,
+        "source": "cheap_ledger_only",
+    }
+    assert spec.feature_importance.permutation == {
+        "enabled": False,
+        "latest_only": True,
+        "sample_rows": 50_000,
+        "n_repeats": 3,
+        "top_k_features": 20,
+        "random_state": 42,
+        "force": False,
+    }
     assert spec.model_selection.enabled is True
     assert spec.model_selection.metric == "rank_ic"
     assert len(spec.model_selection.candidates) == 2

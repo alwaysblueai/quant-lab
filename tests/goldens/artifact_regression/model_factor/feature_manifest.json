@@ -1,0 +1,46 @@
+{
+  "artifact_type": "alpha_lab_feature_manifest",
+  "case_name": "demo_model_alpha_model_factor",
+  "factor_name": "model_alpha",
+  "feature_availability": {
+    "dropped_rows": 0,
+    "known_at_column": "known_at",
+    "mode": "required_timestamp",
+    "requested_column": null,
+    "safety_lag_days": null,
+    "shifted_rows": 0,
+    "source_column": "known_at"
+  },
+  "feature_columns": [
+    "feature_momentum",
+    "feature_quality",
+    "feature_noise"
+  ],
+  "features": [
+    {
+      "feature": "feature_momentum",
+      "mean": -0.027207845353259624,
+      "non_null_ratio": 1.0,
+      "std": 0.9757038472435996
+    },
+    {
+      "feature": "feature_quality",
+      "mean": -0.004794476624923729,
+      "non_null_ratio": 1.0,
+      "std": 1.0200494090143162
+    },
+    {
+      "feature": "feature_noise",
+      "mean": 0.016258016516842902,
+      "non_null_ratio": 1.0,
+      "std": 0.9848994198659936
+    }
+  ],
+  "known_at_column": "known_at",
+  "manifest_source": "features",
+  "model_family": "ridge",
+  "n_assets": 12,
+  "n_dates": 160,
+  "n_rows": 1915,
+  "schema_version": "1.0.0"
+}

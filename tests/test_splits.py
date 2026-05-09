@@ -4,7 +4,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alpha_lab.splits import time_split, walk_forward_split
+from alpha_lab.splits import (
+    infer_default_time_series_split_contract,
+    preflight_split_contract,
+    rebalance_frequency_to_step,
+    time_split,
+    walk_forward_split,
+)
 
 
 def _dates(start: str, n: int) -> pd.Series:
@@ -304,3 +310,57 @@ def test_walk_forward_rejects_nat_in_dates():
     dates = pd.Series([pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02"), pd.NaT])
     with pytest.raises(ValueError, match="NaT"):
         walk_forward_split(dates, train_size=2, test_size=1, step=1)
+
+
+def test_default_split_contract_uses_oos_tail_and_embargo():
+    dates = _dates("2020-01-01", 252)
+    contract = infer_default_time_series_split_contract(
+        dates,
+        target_horizon=5,
+        rebalance_frequency="W",
+    )
+    assert contract.n_oos_dates >= 65
+    assert contract.embargo_days == 5
+    assert contract.is_end < contract.oos_start
+    assert contract.oos_end == dates.max()
+    assert contract.n_is_dates + contract.embargo_days + contract.n_oos_dates == len(dates)
+
+
+def test_default_split_contract_bounds_long_history_oos_window():
+    dates = _dates("2010-01-01", 2520)
+    contract = infer_default_time_series_split_contract(
+        dates,
+        target_horizon=10,
+        rebalance_frequency="M",
+    )
+    assert contract.n_oos_dates == 504
+    assert contract.embargo_days == 21
+    assert contract.n_is_dates == 2520 - 504 - 21
+
+
+def test_default_split_contract_requires_minimum_oos_after_embargo():
+    dates = _dates("2024-01-01", 90)
+    with pytest.raises(ValueError, match="not enough unique dates"):
+        infer_default_time_series_split_contract(
+            dates,
+            target_horizon=5,
+            rebalance_frequency="W",
+        )
+
+
+def test_split_preflight_returns_actionable_remediation_for_short_history():
+    contract, remediations = preflight_split_contract(
+        _dates("2024-01-01", 90),
+        target_horizon=5,
+        rebalance_frequency="W",
+    )
+    assert contract is None
+    assert any("strict IS/OOS split preflight failed" in item for item in remediations)
+    assert any("扩充 prices 数据时间范围" in item for item in remediations)
+
+
+def test_rebalance_frequency_to_step_parses_common_labels():
+    assert rebalance_frequency_to_step("D") == 1
+    assert rebalance_frequency_to_step("W") == 5
+    assert rebalance_frequency_to_step("M") == 21
+    assert rebalance_frequency_to_step("2W") == 10

@@ -248,6 +248,8 @@ def load_prices(
     prices = _apply_optional_dividend_adjustment(prices)
     prices = mark_sorted(prices, ("asset", "date"))
     validate_prices_table(prices)
+    if prices["asset"].dtype == object:
+        prices["asset"] = prices["asset"].astype("category")
     return prices
 
 
@@ -313,6 +315,8 @@ def load_universe_mask(universe_spec: UniverseSpec) -> pd.DataFrame | None:
     if out.duplicated(subset=["date", "asset"]).any():
         raise AlphaLabDataError("universe file contains duplicate (date, asset) rows")
     out["in_universe"] = _coerce_in_universe_flags(out["in_universe"])
+    if out["asset"].dtype == object:
+        out["asset"] = out["asset"].astype("category")
     return out
 
 
@@ -377,6 +381,8 @@ def apply_universe_to_prices(prices: pd.DataFrame, universe_mask: pd.DataFrame) 
     out = prices.merge(active, on=["date", "asset"], how="inner", validate="many_to_one")
     if out.empty:
         raise AlphaLabDataError("prices became empty after universe filtering")
+    if out["asset"].dtype == object:
+        out["asset"] = out["asset"].astype("category")
     return ensure_sorted(out, by=("asset", "date"))
 
 
@@ -392,4 +398,6 @@ def apply_universe_to_factor(factor_df: pd.DataFrame, universe_mask: pd.DataFram
     out = factor_df.merge(active, on=["date", "asset"], how="inner", validate="many_to_one")
     if out.empty:
         raise AlphaLabDataError("factor data became empty after universe filtering")
+    if out["asset"].dtype == object:
+        out["asset"] = out["asset"].astype("category")
     return ensure_sorted(out, by=("date", "asset"))

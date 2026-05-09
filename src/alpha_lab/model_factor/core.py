@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import weakref
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast, get_args
 
@@ -16,6 +17,12 @@ from sklearn.preprocessing import StandardScaler
 
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import forward_return
+from alpha_lab.model_factor._memory import release_unused_memory
+from alpha_lab.model_factor.dataset_cache import (
+    PreparedInputsNumpyCacheEntry,
+    load_prepared_inputs_cache,
+    write_prepared_inputs_cache,
+)
 from alpha_lab.model_factor.diagnostics import (
     ModelFactorDiagnosticsObserver,
     compute_data_health_snapshot,
@@ -38,18 +45,21 @@ ModelFamily = Literal[
     "mlp",
 ]
 
-_PERMUTATION_IMPORTANCE_MAX_ROWS = 1024
+_PERMUTATION_IMPORTANCE_MAX_ROWS = 50_000
 _PERMUTATION_IMPORTANCE_RANDOM_SEED = 20260423
+_PERMUTATION_IMPORTANCE_MAX_PREDICT_CALLS = 100
+_MODEL_FEATURE_DTYPE = "float32"
 _TREE_MODEL_FAMILIES: frozenset[str] = frozenset({"gbdt", "xgboost", "lightgbm"})
+_RowSelection = slice | np.ndarray
 _MODEL_FAMILY_IMPORTANCE_EXTRACTORS: dict[str, tuple[str, ...]] = {
-    "linear": ("coef", "permutation"),
-    "ridge": ("coef", "permutation"),
-    "lasso": ("coef", "permutation"),
-    "elastic_net": ("coef", "permutation"),
-    "gbdt": ("permutation",),
-    "xgboost": ("feature_importances", "permutation"),
-    "lightgbm": ("feature_importances", "permutation"),
-    "mlp": ("permutation",),
+    "linear": ("coef",),
+    "ridge": ("coef",),
+    "lasso": ("coef",),
+    "elastic_net": ("coef",),
+    "gbdt": ("feature_importances",),
+    "xgboost": ("feature_importances",),
+    "lightgbm": ("feature_importances",),
+    "mlp": (),
 }
 
 MissingPolicy = Literal["median_impute"]
@@ -62,6 +72,7 @@ ModelSelectionMetric = Literal[
     "ic_minus_turnover_penalty",
 ]
 FeatureImportanceMode = Literal["disabled", "latest_only", "every_fit"]
+FeatureImportanceMethod = Literal["auto", "cheap", "permutation"]
 CrossSectionalTransform = Literal[
     "none",
     "zscore",
@@ -82,6 +93,38 @@ _RESERVED_FEATURE_COLUMNS: frozenset[str] = frozenset(
     }
 )
 
+TRAINING_METRICS_COLUMNS: tuple[str, ...] = (
+    "model_version",
+    "model_family",
+    "train_start",
+    "train_end",
+    "oos_start",
+    "oos_end",
+    "train_ic",
+    "train_rank_ic",
+    "train_loss",
+    "oos_ic",
+    "oos_rank_ic",
+    "oos_loss",
+    "n_train_obs",
+    "n_train_dates",
+    "n_oos_obs",
+    "n_oos_dates",
+    "selected_candidate_id",
+    "selected_candidate_score",
+)
+
+FEATURE_OOS_IC_COLUMNS: tuple[str, ...] = (
+    "feature",
+    "window_start",
+    "window_end",
+    "model_version",
+    "ic",
+    "rank_ic",
+    "n_obs",
+    "n_dates",
+)
+
 
 def list_model_contracts() -> dict[str, object]:
     """Return model-factor contract literals for explorer/CLI consumers."""
@@ -100,8 +143,18 @@ def list_model_contracts() -> dict[str, object]:
         "supported_selection_metrics": list(get_args(ModelSelectionMetric)),
         "supported_feature_importance": {
             "mode": list(get_args(FeatureImportanceMode)),
+            "method": list(get_args(FeatureImportanceMethod)),
             "default_mode": FeatureImportanceConfig().mode,
+            "default_method": FeatureImportanceConfig().method,
+            "default_save_ledger": FeatureImportanceConfig().save_ledger,
+            "over_time_source": "cheap_ledger_only",
+            "permutation_default_enabled": False,
             "default_permutation_max_rows": _PERMUTATION_IMPORTANCE_MAX_ROWS,
+        },
+        "supported_diagnostics": {
+            "training_metrics": "training_metrics.csv",
+            "feature_oos_ic": "feature_oos_ic.csv",
+            "feature_oos_ic_default_enabled": True,
         },
     }
 
@@ -265,14 +318,130 @@ class TrainingSpec:
             raise ValueError("training.min_score_assets must be > 0")
 
 
+def _mapping_bool(mapping: Mapping[str, object] | None, key: str, default: bool) -> bool:
+    if not isinstance(mapping, Mapping) or key not in mapping:
+        return default
+    value = mapping.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
+def _mapping_int(mapping: Mapping[str, object] | None, key: str, default: int) -> int:
+    if not isinstance(mapping, Mapping) or key not in mapping:
+        return int(default)
+    value = mapping.get(key)
+    if isinstance(value, bool):
+        return int(default)
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _mapping_text(mapping: Mapping[str, object] | None, key: str, default: str) -> str:
+    if not isinstance(mapping, Mapping) or key not in mapping:
+        return default
+    return str(mapping.get(key) or default).strip() or default
+
+
+def _feature_importance_enabled(config: object) -> bool:
+    return bool(getattr(config, "enabled", True)) and str(getattr(config, "mode", "")) != "disabled"
+
+
+def _feature_importance_over_time_enabled(config: object) -> bool:
+    over_time = cast(Mapping[str, object] | None, getattr(config, "over_time", None))
+    return _mapping_bool(over_time, "enabled", True)
+
+
+def _feature_importance_over_time_top_k(config: object) -> int:
+    over_time = cast(Mapping[str, object] | None, getattr(config, "over_time", None))
+    return max(1, _mapping_int(over_time, "top_k", 5))
+
+
+def _feature_importance_over_time_source(config: object) -> str:
+    over_time = cast(Mapping[str, object] | None, getattr(config, "over_time", None))
+    return _mapping_text(over_time, "source", "cheap_ledger_only")
+
+
+def _feature_importance_permutation_enabled(config: object) -> bool:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    return _mapping_bool(permutation, "enabled", False)
+
+
+def _feature_importance_permutation_latest_only(config: object) -> bool:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    return _mapping_bool(permutation, "latest_only", True)
+
+
+def _feature_importance_permutation_sample_rows(config: object) -> int:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    legacy = int(getattr(config, "permutation_max_rows", _PERMUTATION_IMPORTANCE_MAX_ROWS))
+    return max(1, _mapping_int(permutation, "sample_rows", legacy))
+
+
+def _feature_importance_permutation_sample_rows_configured(config: object) -> bool:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    if not isinstance(permutation, Mapping) or "sample_rows" not in permutation:
+        return False
+    value = permutation.get("sample_rows")
+    return value is not None and str(value).strip() != ""
+
+
+def _feature_importance_permutation_n_repeats(config: object) -> int:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    return max(1, _mapping_int(permutation, "n_repeats", 3))
+
+
+def _feature_importance_permutation_top_k_features(config: object) -> int | None:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    if not isinstance(permutation, Mapping) or "top_k_features" not in permutation:
+        return 20
+    value = permutation.get("top_k_features")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 20
+    return int(value)
+
+
+def _feature_importance_permutation_random_state(config: object) -> int:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    return _mapping_int(permutation, "random_state", 42)
+
+
+def _feature_importance_permutation_force(config: object) -> bool:
+    permutation = cast(Mapping[str, object] | None, getattr(config, "permutation", None))
+    return _mapping_bool(permutation, "force", False)
+
+
 @dataclass(frozen=True)
 class FeatureImportanceConfig:
     """Controls for model feature importance diagnostics."""
 
-    mode: FeatureImportanceMode = "latest_only"
+    enabled: bool = True
+    method: FeatureImportanceMethod = "auto"
+    save_ledger: bool = True
+    mode: FeatureImportanceMode = "every_fit"
     permutation_max_rows: int = _PERMUTATION_IMPORTANCE_MAX_ROWS
+    over_time: Mapping[str, object] | None = None
+    permutation: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("feature_importance.enabled must be a boolean")
+        if self.method not in {"auto", "cheap", "permutation"}:
+            raise ValueError(
+                "feature_importance.method must be one of ['auto', 'cheap', 'permutation']"
+            )
+        if not isinstance(self.save_ledger, bool):
+            raise ValueError("feature_importance.save_ledger must be a boolean")
         if self.mode not in {"disabled", "latest_only", "every_fit"}:
             raise ValueError(
                 "feature_importance.mode must be one of "
@@ -285,6 +454,19 @@ class FeatureImportanceConfig:
             raise ValueError("feature_importance.permutation_max_rows must be an integer")
         if self.permutation_max_rows <= 0:
             raise ValueError("feature_importance.permutation_max_rows must be > 0")
+        if self.over_time is not None and not isinstance(self.over_time, Mapping):
+            raise ValueError("feature_importance.over_time must be an object when provided")
+        if self.permutation is not None and not isinstance(self.permutation, Mapping):
+            raise ValueError("feature_importance.permutation must be an object when provided")
+        repeats = _feature_importance_permutation_n_repeats(self)
+        if repeats <= 0:
+            raise ValueError("feature_importance.permutation.n_repeats must be > 0")
+        top_k = _feature_importance_permutation_top_k_features(self)
+        if top_k is not None and top_k <= 0:
+            raise ValueError("feature_importance.permutation.top_k_features must be > 0")
+        sample_rows = _feature_importance_permutation_sample_rows(self)
+        if sample_rows <= 0:
+            raise ValueError("feature_importance.permutation.sample_rows must be > 0")
 
 
 @dataclass(frozen=True)
@@ -300,7 +482,12 @@ class ModelFactorBuildConfig:
     training: TrainingSpec = TrainingSpec()
     feature_importance: FeatureImportanceConfig = FeatureImportanceConfig()
     known_at_col: str | None = None
+    target_price_column: str = "close"
+    max_abs_forward_return: float | None = None
     label_winsorize_zscore: float | None = None
+    preparation_cache_dir: str | None = None
+    preparation_cache_key: str | None = None
+    compute_feature_oos_ic: bool = True
 
     def __post_init__(self) -> None:
         if not self.factor_name.strip():
@@ -320,8 +507,18 @@ class ModelFactorBuildConfig:
             raise ValueError("target_horizon must be > 0")
         if self.known_at_col is not None and not self.known_at_col.strip():
             raise ValueError("known_at_col must be non-empty when provided")
+        if not self.target_price_column.strip():
+            raise ValueError("target_price_column must be non-empty")
+        if self.max_abs_forward_return is not None and self.max_abs_forward_return <= 0:
+            raise ValueError("max_abs_forward_return must be > 0 when provided")
         if self.label_winsorize_zscore is not None and self.label_winsorize_zscore <= 0:
             raise ValueError("label_winsorize_zscore must be > 0 when provided")
+        if self.preparation_cache_dir is not None and not self.preparation_cache_dir.strip():
+            raise ValueError("preparation_cache_dir must be non-empty when provided")
+        if self.preparation_cache_key is not None and not self.preparation_cache_key.strip():
+            raise ValueError("preparation_cache_key must be non-empty when provided")
+        if not isinstance(self.compute_feature_oos_ic, bool):
+            raise ValueError("compute_feature_oos_ic must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -330,11 +527,16 @@ class ModelFactorBuildResult:
 
     factor_df: pd.DataFrame
     training_log_df: pd.DataFrame
+    training_metrics_df: pd.DataFrame
     feature_importance_df: pd.DataFrame
     model_diagnostics: dict[str, object]
+    feature_importance_ledger_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    coverage_base_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    feature_oos_ic_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     forward_label_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     model_selection_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     integrity_checks: tuple[IntegrityCheckResult, ...] = ()
+    target_diagnostics: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -360,6 +562,7 @@ class _FeatureImportanceRequest:
     feature_columns: tuple[str, ...]
     model_family: str
     model_version: int
+    fit_date: pd.Timestamp
     trained_until: pd.Timestamp
 
 
@@ -380,6 +583,17 @@ class _DateIndexedRows:
     row_indices_by_pos: tuple[np.ndarray, ...]
 
 
+@dataclass(frozen=True)
+class _PreparedModelArrays:
+    feature_values: np.ndarray
+    labels: np.ndarray
+    dates: np.ndarray
+    assets: pd.Categorical
+    training_feature_values: np.ndarray | None = None
+    training_labels: np.ndarray | None = None
+    training_dates: np.ndarray | None = None
+
+
 @dataclass
 class _TrainingWindowCache:
     row_indices_by_date_pos: tuple[np.ndarray, ...]
@@ -390,11 +604,33 @@ class _TrainingWindowCache:
     n_labeled_rows_by_pos: np.ndarray
     _labeled_window_rows: dict[int, np.ndarray] = field(default_factory=dict)
 
-    def labeled_row_indices(self, score_idx: int) -> np.ndarray:
-        cached = self._labeled_window_rows.get(int(score_idx))
-        if cached is not None:
-            return cached
+    def labeled_row_selection(self, score_idx: int) -> _RowSelection:
+        window_start = int(self.window_start_by_pos[score_idx])
+        eligible_end = int(self.eligible_end_by_pos[score_idx])
+        if window_start >= eligible_end:
+            return np.empty(0, dtype=np.intp)
 
+        start: int | None = None
+        end: int | None = None
+        for indices in self.labeled_row_indices_by_date_pos[window_start:eligible_end]:
+            if len(indices) == 0:
+                continue
+            date_slice = _indices_as_contiguous_slice(indices)
+            if date_slice is None:
+                return self.labeled_row_indices(score_idx)
+            if start is None:
+                start = int(date_slice.start)
+                end = int(date_slice.stop)
+                continue
+            if int(date_slice.start) != end:
+                return self.labeled_row_indices(score_idx)
+            end = int(date_slice.stop)
+
+        if start is None or end is None:
+            return np.empty(0, dtype=np.intp)
+        return slice(start, end)
+
+    def labeled_row_indices(self, score_idx: int) -> np.ndarray:
         window_start = int(self.window_start_by_pos[score_idx])
         eligible_end = int(self.eligible_end_by_pos[score_idx])
         if window_start >= eligible_end:
@@ -407,7 +643,6 @@ class _TrainingWindowCache:
                 if non_empty
                 else np.empty(0, dtype=np.intp)
             )
-        self._labeled_window_rows[int(score_idx)] = row_idx
         return row_idx
 
     def labeled_slice(self, merged: pd.DataFrame, score_idx: int) -> pd.DataFrame:
@@ -440,48 +675,73 @@ def build_model_factor(
             n_assets=int(prices["asset"].nunique()),
             n_dates=int(prices["date"].nunique()),
         )
+    prepared_cache = load_prepared_inputs_cache(
+        cache_dir=config.preparation_cache_dir,
+        cache_key=config.preparation_cache_key,
+    )
+    if (
+        prepared_cache is not None
+        and prepared_cache.numpy_entry is not None
+        and config.model_selection.enabled
+    ):
+        prepared_cache = None
     with diagnostics.stage(
         "feature_validate",
         payload={"feature_count": len(config.feature_columns)},
     ) as feature_stage:
-        features = _normalize_features(features_df, config=config)
-        if (
-            config.feature_preprocess.cross_sectional_group_scope == "date_and_industry"
-            and config.feature_preprocess.industry_group_column is not None
-        ):
-            industry_profile = _industry_group_temporal_profile(
+        if prepared_cache is not None and prepared_cache.numpy_entry is not None:
+            features = prepared_cache.numpy_entry.index_df.copy()
+            cross_mode = config.feature_preprocess.cross_sectional_transform
+            feature_stage.attach(
+                cache_hit=True,
+                cache_layout="numpy_v2",
+                row_order=prepared_cache.metadata.get("row_order"),
+                feature_dtype=prepared_cache.metadata.get("feature_dtype"),
+            )
+        elif prepared_cache is not None:
+            features = prepared_cache.features
+            cross_mode = config.feature_preprocess.cross_sectional_transform
+            feature_stage.attach(cache_hit=True, cache_layout="dataframe_v1")
+        else:
+            features = _normalize_features(features_df, config=config)
+            if (
+                config.feature_preprocess.cross_sectional_group_scope == "date_and_industry"
+                and config.feature_preprocess.industry_group_column is not None
+            ):
+                industry_profile = _industry_group_temporal_profile(
+                    features,
+                    industry_group_column=config.feature_preprocess.industry_group_column,
+                )
+                feature_stage.attach(
+                    industry_group_assets_total=industry_profile["n_assets_total"],
+                    industry_group_assets_eligible=industry_profile["n_assets_eligible"],
+                    industry_group_static_assets=industry_profile["n_assets_static"],
+                    industry_group_static_asset_ratio=industry_profile["static_ratio"],
+                )
+                if bool(industry_profile["all_assets_static"]):
+                    diagnostics.warning(
+                        title="行业分组列疑似静态映射",
+                        severity="warning",
+                        stage="feature_validate",
+                        description=(
+                            "cross_sectional_group_scope='date_and_industry' 下检测到 "
+                            "asset->industry 在样本期内全部不变。该行业列可能来自静态快照，"
+                            "存在将未来重分类回填到历史截面的风险。"
+                        ),
+                        suggested_action=(
+                            "优先使用带生效时间的行业历史映射表；若暂时无法提供，请在报告中标注 "
+                            "industry 分组的 PIT 假设边界。"
+                        ),
+                    )
+            cross_mode = config.feature_preprocess.cross_sectional_transform
+            features = _apply_cross_sectional_transform(
                 features,
+                feature_columns=config.feature_columns,
+                mode=cross_mode,
+                group_scope=config.feature_preprocess.cross_sectional_group_scope,
                 industry_group_column=config.feature_preprocess.industry_group_column,
             )
-            feature_stage.attach(
-                industry_group_assets_total=industry_profile["n_assets_total"],
-                industry_group_assets_eligible=industry_profile["n_assets_eligible"],
-                industry_group_static_assets=industry_profile["n_assets_static"],
-                industry_group_static_asset_ratio=industry_profile["static_ratio"],
-            )
-            if bool(industry_profile["all_assets_static"]):
-                diagnostics.warning(
-                    title="行业分组列疑似静态映射",
-                    severity="warning",
-                    stage="feature_validate",
-                    description=(
-                        "cross_sectional_group_scope='date_and_industry' 下检测到 "
-                        "asset->industry 在样本期内全部不变。该行业列可能来自静态快照，"
-                        "存在将未来重分类回填到历史截面的风险。"
-                    ),
-                    suggested_action=(
-                        "优先使用带生效时间的行业历史映射表；若暂时无法提供，请在报告中标注 "
-                        "industry 分组的 PIT 假设边界。"
-                    ),
-                )
-        cross_mode = config.feature_preprocess.cross_sectional_transform
-        features = _apply_cross_sectional_transform(
-            features,
-            feature_columns=config.feature_columns,
-            mode=cross_mode,
-            group_scope=config.feature_preprocess.cross_sectional_group_scope,
-            industry_group_column=config.feature_preprocess.industry_group_column,
-        )
+            feature_stage.attach(cache_hit=False)
         feature_stage.attach(
             n_rows=int(len(features)),
             n_assets=int(features["asset"].nunique()),
@@ -521,25 +781,90 @@ def build_model_factor(
         "target_build",
         payload={"target_horizon": int(config.target_horizon)},
     ) as target_stage:
-        label_df = forward_return(prices, horizon=config.target_horizon)
-        label_name = f"forward_return_{config.target_horizon}"
-        forward_label_df = (
-            label_df[label_df["factor"] == label_name][["date", "asset", "factor", "value"]]
-            .copy()
-            .reset_index(drop=True)
-        )
-        labels = forward_label_df[["date", "asset", "value"]].rename(
-            columns={"value": "label"}
-        )
-        winsor_z = config.label_winsorize_zscore
-        winsor_clip_count = 0
-        if winsor_z is not None and not labels.empty:
-            labels, winsor_clip_count = _winsorize_labels_per_date(labels, z=float(winsor_z))
-        data_health = compute_data_health_snapshot(
-            features=features,
-            labels=labels,
-            feature_columns=config.feature_columns,
-        )
+        price_universe_counts = prices.groupby("date", sort=True)["asset"].nunique()
+        if prepared_cache is not None:
+            forward_label_df = prepared_cache.forward_label_df
+            labels = prepared_cache.labels
+            data_health = dict(prepared_cache.data_health)
+            target_diagnostics = _target_diagnostics_from_data_health(data_health)
+            winsor_clip_count = int(prepared_cache.winsor_clip_count)
+            winsor_z = config.label_winsorize_zscore
+            target_stage.attach(cache_hit=True)
+        else:
+            label_prices = _prices_for_target_labels(
+                prices,
+                price_column=config.target_price_column,
+            )
+            label_df = forward_return(label_prices, horizon=config.target_horizon)
+            label_name = f"forward_return_{config.target_horizon}"
+            forward_label_df = (
+                label_df[label_df["factor"] == label_name][["date", "asset", "factor", "value"]]
+                .copy()
+                .reset_index(drop=True)
+            )
+            labels = forward_label_df[["date", "asset", "value"]].rename(
+                columns={"value": "label"}
+            )
+            forward_label_df, labels, target_diagnostics = _apply_forward_return_extreme_filter(
+                forward_label_df,
+                labels,
+                label_prices=label_prices,
+                target_price_column=config.target_price_column,
+                horizon=int(config.target_horizon),
+                max_abs_forward_return=config.max_abs_forward_return,
+            )
+            del label_prices
+            del label_df
+            winsor_z = config.label_winsorize_zscore
+            winsor_clip_count = 0
+            if winsor_z is not None and not labels.empty:
+                labels, winsor_clip_count = _winsorize_labels_per_date(labels, z=float(winsor_z))
+            data_health = compute_data_health_snapshot(
+                features=features,
+                labels=labels,
+                feature_columns=config.feature_columns,
+            )
+            data_health.update(target_diagnostics)
+            cache_write_succeeded = write_prepared_inputs_cache(
+                cache_dir=config.preparation_cache_dir,
+                cache_key=config.preparation_cache_key,
+                features=features,
+                labels=labels,
+                forward_label_df=forward_label_df,
+                data_health=data_health,
+                winsor_clip_count=winsor_clip_count,
+                feature_columns=config.feature_columns,
+            )
+            prepared_cache_adopted_for_run = False
+            if cache_write_succeeded and not config.model_selection.enabled:
+                written_prepared_cache = load_prepared_inputs_cache(
+                    cache_dir=config.preparation_cache_dir,
+                    cache_key=config.preparation_cache_key,
+                )
+                if (
+                    written_prepared_cache is not None
+                    and written_prepared_cache.numpy_entry is not None
+                ):
+                    prepared_cache = written_prepared_cache
+                    features = written_prepared_cache.numpy_entry.index_df.copy()
+                    labels = written_prepared_cache.labels
+                    forward_label_df = written_prepared_cache.forward_label_df
+                    prepared_cache_adopted_for_run = True
+                    diagnostics.event(
+                        level="info",
+                        stage="target_build",
+                        message="prepared input cache adopted for cold run",
+                        payload={
+                            "preparation_cache_key": config.preparation_cache_key,
+                            "cache_layout": written_prepared_cache.metadata.get("layout"),
+                        },
+                    )
+                    release_unused_memory()
+            target_stage.attach(
+                cache_hit=False,
+                prepared_cache_write_succeeded=bool(cache_write_succeeded),
+                prepared_cache_adopted_for_run=bool(prepared_cache_adopted_for_run),
+            )
         diagnostics.set_data_health(data_health)
         warnings_emitted = 0
         for warning in derive_data_health_warnings(data_health):
@@ -548,6 +873,12 @@ def build_model_factor(
         target_stage.attach(
             n_label_rows=int(len(labels)),
             n_forward_label_cache_rows=int(len(forward_label_df)),
+            target_price_column=config.target_price_column,
+            max_abs_forward_return=config.max_abs_forward_return,
+            label_extreme_filtered_rows=target_diagnostics.get("label_extreme_filtered_rows"),
+            label_extreme_max_abs_raw_return=target_diagnostics.get(
+                "label_extreme_max_abs_raw_return"
+            ),
             target_mean=data_health.get("target_mean"),
             target_std=data_health.get("target_std"),
             outlier_ratio=data_health.get("outlier_ratio"),
@@ -556,13 +887,64 @@ def build_model_factor(
             label_winsorize_zscore=winsor_z if winsor_z is not None else "none",
             label_winsor_clipped_rows=winsor_clip_count,
         )
+        if _object_to_int(target_diagnostics.get("label_extreme_filtered_rows")) > 0:
+            diagnostics.warning(
+                title="目标收益存在极端值",
+                severity="warning",
+                stage="target_build",
+                description=(
+                    "forward return 中检测到超过 target.max_abs_forward_return 的样本，"
+                    "这些 label 已置为 NaN 并从训练/评估中排除。"
+                ),
+                suggested_action=(
+                    "优先检查复权价格列和异常停复牌/占位价格；必要时重建输入价格面板。"
+                ),
+            )
+            diagnostics.event(
+                level="warning",
+                stage="target_build",
+                message="extreme forward-return labels filtered",
+                payload={
+                    "target_price_column": config.target_price_column,
+                    "max_abs_forward_return": config.max_abs_forward_return,
+                    "filtered_rows": target_diagnostics.get("label_extreme_filtered_rows"),
+                    "max_abs_raw_return": target_diagnostics.get(
+                        "label_extreme_max_abs_raw_return"
+                    ),
+                    "top_samples": target_diagnostics.get("label_extreme_top_samples"),
+                },
+            )
+    prepared_numpy_entry = prepared_cache.numpy_entry if prepared_cache is not None else None
+    prepared_cache = None
+    prices = pd.DataFrame()
+    release_unused_memory()
 
     with diagnostics.stage("preprocess", payload={"step": "merge_labels"}) as merge_stage:
-        merged = features.merge(labels, on=["date", "asset"], how="left", validate="one_to_one")
+        if prepared_numpy_entry is not None:
+            if "label" not in features.columns:
+                raise ValueError("prepared numpy cache index is missing label column")
+            label_source = "prepared_numpy_index"
+        else:
+            features = features.merge(
+                labels,
+                on=["date", "asset"],
+                how="left",
+                validate="one_to_one",
+            )
+            label_source = "label_merge"
         merge_stage.attach(
-            n_rows=int(len(merged)),
-            n_labeled_rows=int(merged["label"].notna().sum()),
+            n_rows=int(len(features)),
+            n_labeled_rows=int(features["label"].notna().sum()),
+            label_source=label_source,
         )
+    coverage_base_df = _build_score_coverage_base_frame(
+        features,
+        feature_columns=config.feature_columns,
+        price_universe_counts=price_universe_counts,
+    )
+    labels = pd.DataFrame()
+    price_universe_counts = pd.Series(dtype="int64")
+    release_unused_memory()
     score_dates = list(
         pd.Index(features["date"].drop_duplicates()).sort_values().to_pydatetime().tolist()
     )
@@ -573,13 +955,27 @@ def build_model_factor(
         payload={"n_score_dates": total_score_dates},
     ) as window_stage:
         feature_date_index = _build_date_indexed_rows(features, score_date_index)
-        merged_date_index = _build_date_indexed_rows(merged, score_date_index)
-        training_window_cache = _build_training_window_cache(
-            date_index=merged_date_index,
-            merged=merged,
-            training=config.training,
-            target_horizon=config.target_horizon,
-        )
+        if prepared_numpy_entry is not None and not config.model_selection.enabled:
+            labeled_date_index = _build_date_indexed_rows(
+                prepared_numpy_entry.labeled_index_df,
+                score_date_index,
+                allow_missing=True,
+            )
+            training_window_cache = _build_training_window_cache(
+                date_index=labeled_date_index,
+                merged=prepared_numpy_entry.labeled_index_df,
+                training=config.training,
+                target_horizon=config.target_horizon,
+            )
+            row_index_cache_mode = "compact_labeled_numpy_windows_no_retention"
+        else:
+            training_window_cache = _build_training_window_cache(
+                date_index=feature_date_index,
+                merged=features,
+                training=config.training,
+                target_horizon=config.target_horizon,
+            )
+            row_index_cache_mode = "on_demand_fit_windows_no_retention"
         n_train_dates_values = training_window_cache.n_train_dates_by_pos
         n_labeled_rows_values = training_window_cache.n_labeled_rows_by_pos
         window_stage.attach(
@@ -609,11 +1005,50 @@ def build_model_factor(
                 if len(n_labeled_rows_values) > 0
                 else float("nan")
             ),
-            row_index_cache_mode="lazy_materialize_fit_windows",
+            row_index_cache_mode=row_index_cache_mode,
         )
 
-    factor_rows: list[dict[str, object]] = []
+    prepared_arrays: _PreparedModelArrays | None = None
+    if not config.model_selection.enabled:
+        with diagnostics.stage(
+            "preprocess",
+            payload={
+                "step": "prepare_model_arrays",
+                "feature_count": len(config.feature_columns),
+            },
+        ) as array_stage:
+            if prepared_numpy_entry is not None:
+                source_features_ref = None
+                prepared_arrays = _prepare_model_arrays_from_numpy_cache(prepared_numpy_entry)
+                cache_layout = "numpy_v2_mmap"
+            else:
+                source_features_ref = _weakref_or_none(features)
+                prepared_arrays = _prepare_model_arrays(
+                    features,
+                    feature_columns=config.feature_columns,
+                )
+                cache_layout = "runtime_dataframe_to_numpy"
+                features = pd.DataFrame()
+                release_unused_memory()
+            array_stage.attach(
+                model_matrix_mode="numpy_arrays_after_window_index",
+                cache_layout=cache_layout,
+                n_rows=int(len(prepared_arrays.labels)),
+                n_features=int(prepared_arrays.feature_values.shape[1]),
+                feature_dtype=str(prepared_arrays.feature_values.dtype),
+                label_dtype=str(prepared_arrays.labels.dtype),
+                asset_categories=int(len(prepared_arrays.assets.categories)),
+                has_compact_training_matrix=prepared_arrays.training_feature_values is not None,
+                source_dataframe_released=(
+                    None if source_features_ref is None else source_features_ref() is None
+                ),
+            )
+
+    factor_frames: list[pd.DataFrame] = []
     training_log_rows: list[dict[str, object]] = []
+    training_metrics_rows: list[dict[str, object]] = []
+    oos_metrics_rows: list[dict[str, object]] = []
+    feature_oos_ic_rows: list[dict[str, object]] = []
     per_fit_importance_frames: list[pd.DataFrame] = []
     latest_importance_request: _FeatureImportanceRequest | None = None
     model_selection_rows: list[dict[str, object]] = []
@@ -637,32 +1072,86 @@ def build_model_factor(
             return
 
         row_idx = np.concatenate(pending_prediction_indices)
-        score_slice = features.take(row_idx).copy()
         score_dates_text = [date.date().isoformat() for date in pending_prediction_dates]
         payload: dict[str, object] = {
             "score_date_start": score_dates_text[0],
             "score_date_end": score_dates_text[-1],
             "model_version": pending_prediction_bundle.model_version,
             "n_score_dates": len(pending_prediction_dates),
-            "n_score_rows": int(len(score_slice)),
+            "n_score_rows": int(len(row_idx)),
         }
         with diagnostics.stage("predict", payload=payload) as predict_stage:
-            score_features = score_slice.loc[:, list(config.feature_columns)]
-            predictions = pending_prediction_bundle.pipeline.predict(score_features)
-            for date_value, asset, value in zip(
-                score_slice["date"],
-                score_slice["asset"],
-                predictions,
-                strict=True,
-            ):
-                factor_rows.append(
-                    {
-                        "date": pd.Timestamp(date_value),
-                        "asset": str(asset),
-                        "factor": config.factor_name,
-                        "value": float(value),
-                    }
+            if prepared_arrays is not None:
+                score_features = prepared_arrays.feature_values[row_idx]
+                predictions = pending_prediction_bundle.pipeline.predict(score_features)
+                factor_dates = prepared_arrays.dates[row_idx]
+                labels = prepared_arrays.labels[row_idx]
+                oos_metrics_rows.append(
+                    _oos_training_metrics_row(
+                        model_version=pending_prediction_bundle.model_version,
+                        dates=factor_dates,
+                        labels=labels,
+                        predictions=np.asarray(predictions, dtype=float),
+                    )
                 )
+                if config.compute_feature_oos_ic:
+                    feature_oos_ic_rows.extend(
+                        _feature_oos_ic_rows(
+                            model_version=pending_prediction_bundle.model_version,
+                            feature_columns=config.feature_columns,
+                            dates=factor_dates,
+                            labels=labels,
+                            feature_values=score_features,
+                        )
+                    )
+                factor_assets = np.asarray(
+                    prepared_arrays.assets.take(row_idx).astype(str),
+                    dtype=object,
+                )
+                factor_frames.append(
+                    pd.DataFrame(
+                        {
+                            "date": pd.to_datetime(factor_dates),
+                            "asset": factor_assets,
+                            "factor": config.factor_name,
+                            "value": np.asarray(predictions, dtype=float),
+                        }
+                    )
+                )
+                del score_features, predictions, factor_dates, factor_assets, labels
+            else:
+                score_slice = features.take(row_idx)
+                score_features = score_slice.loc[:, list(config.feature_columns)]
+                predictions = pending_prediction_bundle.pipeline.predict(score_features)
+                oos_metrics_rows.append(
+                    _oos_training_metrics_row(
+                        model_version=pending_prediction_bundle.model_version,
+                        dates=score_slice["date"].to_numpy(),
+                        labels=score_slice["label"].to_numpy(),
+                        predictions=np.asarray(predictions, dtype=float),
+                    )
+                )
+                if config.compute_feature_oos_ic:
+                    feature_oos_ic_rows.extend(
+                        _feature_oos_ic_rows(
+                            model_version=pending_prediction_bundle.model_version,
+                            feature_columns=config.feature_columns,
+                            dates=score_slice["date"].to_numpy(),
+                            labels=score_slice["label"].to_numpy(),
+                            feature_values=score_features,
+                        )
+                    )
+                factor_frames.append(
+                    pd.DataFrame(
+                        {
+                            "date": pd.to_datetime(score_slice["date"]).to_numpy(),
+                            "asset": score_slice["asset"].astype(str).to_numpy(),
+                            "factor": config.factor_name,
+                            "value": np.asarray(predictions, dtype=float),
+                        }
+                    )
+                )
+                del score_slice, score_features, predictions
             predict_stage.attach(
                 score_date_start=score_dates_text[0],
                 score_date_end=score_dates_text[-1],
@@ -670,7 +1159,12 @@ def build_model_factor(
                 score_date_last_values=score_dates_text[-3:],
                 model_version=pending_prediction_bundle.model_version,
                 n_score_dates=len(pending_prediction_dates),
-                n_score_rows=int(len(score_slice)),
+                n_score_rows=int(len(row_idx)),
+                model_matrix_mode=(
+                    "numpy_arrays_after_window_index"
+                    if prepared_arrays is not None
+                    else "dataframe"
+                ),
                 statuses=sorted(set(pending_prediction_statuses)),
                 status="batch_scored",
             )
@@ -679,13 +1173,40 @@ def build_model_factor(
         pending_prediction_indices.clear()
         pending_prediction_dates.clear()
         pending_prediction_statuses.clear()
+        del row_idx
 
     def append_feature_importance(request: _FeatureImportanceRequest) -> None:
+        sample_rows = _feature_importance_permutation_sample_rows(config.feature_importance)
+        permutation_guardrail = _permutation_importance_guardrail_reason(
+            config.feature_importance,
+            model_family=request.model_family,
+            n_versions_for_estimate=(
+                1
+                if _feature_importance_permutation_latest_only(config.feature_importance)
+                else max(1, request.model_version)
+            ),
+            n_features=len(request.feature_columns),
+        )
         payload = {
             "model_version": request.model_version,
             "model_family": request.model_family,
             "mode": config.feature_importance.mode,
-            "permutation_max_rows": config.feature_importance.permutation_max_rows,
+            "method": config.feature_importance.method,
+            "save_ledger": config.feature_importance.save_ledger,
+            "over_time_source": _feature_importance_over_time_source(
+                config.feature_importance
+            ),
+            "permutation_enabled": _feature_importance_permutation_enabled(
+                config.feature_importance
+            ),
+            "permutation_latest_only": _feature_importance_permutation_latest_only(
+                config.feature_importance
+            ),
+            "permutation_sample_rows": sample_rows,
+            "permutation_n_repeats": _feature_importance_permutation_n_repeats(
+                config.feature_importance
+            ),
+            "permutation_guardrail_reason": permutation_guardrail,
             "n_train_rows": int(len(request.train_slice)),
         }
         with diagnostics.stage("feature_importance", payload=payload) as importance_stage:
@@ -695,15 +1216,49 @@ def build_model_factor(
                 feature_columns=request.feature_columns,
                 model_family=request.model_family,
                 model_version=request.model_version,
+                fit_date=request.fit_date,
                 trained_until=request.trained_until,
-                permutation_max_rows=config.feature_importance.permutation_max_rows,
+                config=config.feature_importance,
+                permutation_guardrail_reason=permutation_guardrail,
             )
             per_fit_importance_frames.append(frame)
             importance_stage.attach(
                 model_version=request.model_version,
                 model_family=request.model_family,
                 mode=config.feature_importance.mode,
-                permutation_max_rows=config.feature_importance.permutation_max_rows,
+                method=config.feature_importance.method,
+                save_ledger=config.feature_importance.save_ledger,
+                over_time_enabled=_feature_importance_over_time_enabled(
+                    config.feature_importance
+                ),
+                over_time_top_k=_feature_importance_over_time_top_k(
+                    config.feature_importance
+                ),
+                over_time_source=_feature_importance_over_time_source(
+                    config.feature_importance
+                ),
+                permutation_enabled=_feature_importance_permutation_enabled(
+                    config.feature_importance
+                ),
+                permutation_sample_rows=sample_rows,
+                permutation_n_repeats=_feature_importance_permutation_n_repeats(
+                    config.feature_importance
+                ),
+                permutation_top_k_features=_feature_importance_permutation_top_k_features(
+                    config.feature_importance
+                ),
+                estimated_predict_calls=_estimated_permutation_predict_calls(
+                    config.feature_importance,
+                    n_versions_for_estimate=(
+                        1
+                        if _feature_importance_permutation_latest_only(
+                            config.feature_importance
+                        )
+                        else max(1, request.model_version)
+                    ),
+                    n_features=len(request.feature_columns),
+                ),
+                permutation_guardrail_reason=permutation_guardrail,
                 n_features=int(len(request.feature_columns)),
                 n_train_rows=int(len(request.train_slice)),
                 importance_sources=sorted(
@@ -774,11 +1329,17 @@ def build_model_factor(
             and n_train_rows >= config.training.min_train_rows
         ):
             flush_pending_predictions()
-            train_labeled = training_window_cache.labeled_slice(merged, score_idx)
+            train_labeled: pd.DataFrame | None = None
+            train_row_selection: _RowSelection | None = None
+            if prepared_arrays is not None:
+                train_row_selection = training_window_cache.labeled_row_selection(score_idx)
+            else:
+                train_labeled = training_window_cache.labeled_slice(features, score_idx)
             model_version += 1
             selected_model = config.model
             n_selection_splits = 0
             if config.model_selection.enabled:
+                assert train_labeled is not None
                 selection_metric = config.model_selection.metric
                 with diagnostics.stage(
                     "model_selection",
@@ -822,15 +1383,46 @@ def build_model_factor(
                     "n_train_dates": n_train_dates,
                 },
             ) as fit_stage:
-                fitted = _fit_model_bundle(
-                    train_slice=train_labeled,
-                    config=config,
-                    model_version=model_version,
-                    model_spec=selected_model,
-                    selected_candidate_id=selected_candidate_id,
-                    selection_score=selected_candidate_score,
-                    selected_candidate_turnover=selected_candidate_turnover,
-                )
+                if prepared_arrays is not None and train_row_selection is not None:
+                    fitted = _fit_model_bundle_from_arrays(
+                        prepared_arrays=prepared_arrays,
+                        row_selection=train_row_selection,
+                        config=config,
+                        model_version=model_version,
+                        model_spec=selected_model,
+                        selected_candidate_id=selected_candidate_id,
+                        selection_score=selected_candidate_score,
+                        selected_candidate_turnover=selected_candidate_turnover,
+                    )
+                else:
+                    assert train_labeled is not None
+                    fitted = _fit_model_bundle(
+                        train_slice=train_labeled,
+                        config=config,
+                        model_version=model_version,
+                        model_spec=selected_model,
+                        selected_candidate_id=selected_candidate_id,
+                        selection_score=selected_candidate_score,
+                        selected_candidate_turnover=selected_candidate_turnover,
+                    )
+                if prepared_arrays is not None and train_row_selection is not None:
+                    train_metrics_row = _training_metrics_row_from_arrays(
+                        fitted=fitted,
+                        prepared_arrays=prepared_arrays,
+                        row_selection=train_row_selection,
+                        selected_candidate_id=selected_candidate_id,
+                        selected_candidate_score=selected_candidate_score,
+                    )
+                else:
+                    assert train_labeled is not None
+                    train_metrics_row = _training_metrics_row_from_frame(
+                        fitted=fitted,
+                        train_slice=train_labeled,
+                        feature_columns=config.feature_columns,
+                        selected_candidate_id=selected_candidate_id,
+                        selected_candidate_score=selected_candidate_score,
+                    )
+                training_metrics_rows.append(train_metrics_row)
                 fit_stage.attach(
                     score_date=score_date.date().isoformat(),
                     model_version=fitted.model_version,
@@ -838,6 +1430,16 @@ def build_model_factor(
                     n_train_dates=fitted.n_train_dates,
                     scale_mode=fitted.scale_mode,
                     model_family=fitted.model_family,
+                    model_matrix_mode=(
+                        "numpy_arrays_after_window_index"
+                        if prepared_arrays is not None
+                        else "dataframe"
+                    ),
+                    model_matrix_selection=(
+                        _row_selection_mode(train_row_selection)
+                        if train_row_selection is not None
+                        else "dataframe"
+                    ),
                     train_start=fitted.train_start.date().isoformat(),
                     train_end=fitted.train_end.date().isoformat(),
                     selection_status=selection_status,
@@ -845,22 +1447,53 @@ def build_model_factor(
                     selected_candidate_score=selected_candidate_score,
                     selected_candidate_turnover=selected_candidate_turnover,
                     n_selection_splits=n_selection_splits,
+                    train_ic=train_metrics_row.get("train_ic"),
+                    train_rank_ic=train_metrics_row.get("train_rank_ic"),
+                    train_loss=train_metrics_row.get("train_loss"),
                 )
             current_bundle = fitted
             last_fit_score_idx = score_idx
             status = "fit_scored"
-            importance_request = _FeatureImportanceRequest(
-                pipeline=fitted.pipeline,
-                train_slice=train_labeled,
-                feature_columns=config.feature_columns,
-                model_family=fitted.model_family,
-                model_version=fitted.model_version,
-                trained_until=fitted.train_end,
-            )
-            if config.feature_importance.mode == "every_fit":
-                append_feature_importance(importance_request)
-            elif config.feature_importance.mode == "latest_only":
-                latest_importance_request = importance_request
+            if _feature_importance_enabled(config.feature_importance):
+                if _feature_importance_permutation_enabled(config.feature_importance):
+                    if prepared_arrays is not None and train_row_selection is not None:
+                        importance_train_slice = _feature_importance_training_slice_from_arrays(
+                            prepared_arrays,
+                            row_selection=train_row_selection,
+                            feature_columns=config.feature_columns,
+                            model_version=fitted.model_version,
+                            max_rows=_feature_importance_permutation_sample_rows(
+                                config.feature_importance
+                            ),
+                        )
+                    else:
+                        assert train_labeled is not None
+                        importance_train_slice = _feature_importance_training_slice(
+                            train_labeled,
+                            feature_columns=config.feature_columns,
+                            model_version=fitted.model_version,
+                            max_rows=_feature_importance_permutation_sample_rows(
+                                config.feature_importance
+                            ),
+                        )
+                else:
+                    importance_train_slice = pd.DataFrame(
+                        columns=[*config.feature_columns, "label"]
+                    )
+                importance_request = _FeatureImportanceRequest(
+                    pipeline=fitted.pipeline,
+                    train_slice=importance_train_slice,
+                    feature_columns=config.feature_columns,
+                    model_family=fitted.model_family,
+                    model_version=fitted.model_version,
+                    fit_date=score_date,
+                    trained_until=fitted.train_end,
+                )
+                if config.feature_importance.mode == "every_fit":
+                    append_feature_importance(importance_request)
+                elif config.feature_importance.mode == "latest_only":
+                    latest_importance_request = importance_request
+            del train_labeled, train_row_selection
         elif current_bundle is None:
             status = "skipped"
             skip_reason = "model_not_ready"
@@ -960,19 +1593,29 @@ def build_model_factor(
             },
         )
     if (
-        config.feature_importance.mode == "latest_only"
+        _feature_importance_enabled(config.feature_importance)
+        and config.feature_importance.mode == "latest_only"
         and latest_importance_request is not None
     ):
         _emit_progress("训练模型生成因子：正在计算最后一个模型版本的特征重要性", 99)
         append_feature_importance(latest_importance_request)
     if total_score_dates:
         _emit_progress(f"训练模型生成因子：全部 {total_score_dates} 个评分日已完成", 100)
+    prepared_arrays = None
+    release_unused_memory()
 
-    factor_df = pd.DataFrame(factor_rows, columns=["date", "asset", "factor", "value"])
+    factor_df = (
+        pd.concat(factor_frames, ignore_index=True)
+        if factor_frames
+        else pd.DataFrame(columns=["date", "asset", "factor", "value"])
+    )
     if factor_df.empty:
         raise ValueError("model factor build produced no scored rows")
     factor_df = factor_df.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True)
     validate_factor_output(factor_df)
+    factor_frames.clear()
+    features = pd.DataFrame()
+    release_unused_memory()
 
     training_log_df = (
         pd.DataFrame(
@@ -1026,15 +1669,29 @@ def build_model_factor(
             ["score_date", "candidate_id"],
             kind="mergesort",
         ).reset_index(drop=True)
+    training_metrics_df = _build_training_metrics_frame(
+        training_metrics_rows=training_metrics_rows,
+        oos_metrics_rows=oos_metrics_rows,
+    )
+    feature_oos_ic_df = _build_feature_oos_ic_frame(feature_oos_ic_rows)
     feature_importance_df = _combine_feature_importance_frames(
         per_fit_importance_frames,
         feature_columns=config.feature_columns,
-        disabled=config.feature_importance.mode == "disabled",
+        disabled=not _feature_importance_enabled(config.feature_importance),
+    )
+    feature_importance_ledger_df = _combine_feature_importance_ledger_frames(
+        per_fit_importance_frames,
+        save_ledger=(
+            _feature_importance_enabled(config.feature_importance)
+            and config.feature_importance.save_ledger
+        ),
     )
     model_diagnostics = _build_model_diagnostics(
         config=config,
         training_log_df=training_log_df,
+        training_metrics_df=training_metrics_df,
         feature_importance_df=feature_importance_df,
+        feature_oos_ic_df=feature_oos_ic_df,
         model_selection_df=model_selection_df,
         label_winsorize_zscore=config.label_winsorize_zscore,
         label_winsor_clipped_rows=winsor_clip_count,
@@ -1043,11 +1700,16 @@ def build_model_factor(
     return ModelFactorBuildResult(
         factor_df=factor_df,
         training_log_df=training_log_df,
+        training_metrics_df=training_metrics_df,
         feature_importance_df=feature_importance_df,
+        feature_importance_ledger_df=feature_importance_ledger_df,
+        coverage_base_df=coverage_base_df,
+        feature_oos_ic_df=feature_oos_ic_df,
         forward_label_df=forward_label_df,
         model_selection_df=model_selection_df,
         model_diagnostics=model_diagnostics,
         integrity_checks=tuple(integrity_checks),
+        target_diagnostics=dict(target_diagnostics),
     )
 
 
@@ -1057,6 +1719,84 @@ def _normalize_prices(prices_df: pd.DataFrame) -> pd.DataFrame:
     prices = prices.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
     validate_prices_table(prices)
     return prices
+
+
+def _build_score_coverage_base_frame(
+    features: pd.DataFrame,
+    *,
+    feature_columns: tuple[str, ...],
+    price_universe_counts: pd.Series,
+) -> pd.DataFrame:
+    columns = [
+        "date",
+        "universe_count",
+        "feature_row_count",
+        "complete_feature_count",
+        "feature_nan_row_count",
+        "label_available_count",
+        "eligible_count",
+        "missing_feature_count",
+        "missing_label_count",
+        "filtered_count",
+    ]
+    if features.empty or "date" not in features.columns or "asset" not in features.columns:
+        return pd.DataFrame(columns=columns)
+
+    frame = features[["date", "asset"]].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    label_available = (
+        pd.to_numeric(features["label"], errors="coerce").notna()
+        if "label" in features.columns
+        else pd.Series(False, index=features.index)
+    )
+    frame["_label_available"] = label_available.to_numpy(dtype=bool)
+    grouped = frame.groupby("date", sort=True)
+    summary = grouped.agg(
+        feature_row_count=("asset", "nunique"),
+        label_available_count=("_label_available", "sum"),
+    )
+
+    complete_feature_count: pd.Series | None = None
+    if feature_columns and set(feature_columns).issubset(features.columns):
+        complete_mask = features.loc[:, list(feature_columns)].notna().all(axis=1)
+        complete_frame = pd.DataFrame(
+            {
+                "date": frame["date"].to_numpy(),
+                "_complete_feature": complete_mask.to_numpy(dtype=bool),
+            }
+        )
+        complete_feature_count = complete_frame.groupby("date", sort=True)[
+            "_complete_feature"
+        ].sum()
+
+    if complete_feature_count is not None:
+        summary["complete_feature_count"] = complete_feature_count.reindex(summary.index).fillna(0)
+        summary["feature_nan_row_count"] = (
+            summary["feature_row_count"] - summary["complete_feature_count"]
+        ).clip(lower=0)
+    else:
+        summary["complete_feature_count"] = pd.NA
+        summary["feature_nan_row_count"] = pd.NA
+
+    price_counts = price_universe_counts.copy()
+    price_counts.index = pd.to_datetime(price_counts.index, errors="coerce")
+    summary["universe_count"] = price_counts.reindex(summary.index)
+    summary["universe_count"] = summary["universe_count"].fillna(summary["feature_row_count"])
+    summary["eligible_count"] = summary["label_available_count"]
+    summary["missing_feature_count"] = (
+        summary["universe_count"] - summary["feature_row_count"]
+    ).clip(lower=0)
+    summary["missing_label_count"] = (
+        summary["feature_row_count"] - summary["label_available_count"]
+    ).clip(lower=0)
+    summary["filtered_count"] = (
+        summary["universe_count"] - summary["eligible_count"]
+    ).clip(lower=0)
+    summary = summary.reset_index()
+    for column in columns:
+        if column not in summary.columns:
+            summary[column] = pd.NA
+    return summary[columns]
 
 
 def _apply_cross_sectional_transform(
@@ -1075,17 +1815,23 @@ def _apply_cross_sectional_transform(
     cols = list(feature_columns)
     if not cols:
         return features
-    frame = features.copy()
+    frame = features
     if group_scope == "date_and_industry" and industry_group_column is not None:
-        grouped = frame.groupby(["date", industry_group_column], sort=False)[cols]
+        group_keys: str | list[str] = ["date", industry_group_column]
     else:
-        grouped = frame.groupby("date", sort=False)[cols]
+        group_keys = "date"
+    transform_fn: Callable[[pd.Series], pd.Series]
     if mode == "zscore":
-        frame[cols] = grouped.transform(_zscore_finite)
+        transform_fn = _zscore_finite
     elif mode == "rank":
-        frame[cols] = grouped.transform(_rank_centered)
+        transform_fn = _rank_centered
     elif mode == "winsorize_zscore":
-        frame[cols] = grouped.transform(_winsorize_then_zscore)
+        transform_fn = _winsorize_then_zscore
+    else:
+        return frame
+    for column in cols:
+        transformed = frame.groupby(group_keys, sort=False)[column].transform(transform_fn)
+        frame[column] = pd.to_numeric(transformed, errors="coerce").astype(_MODEL_FEATURE_DTYPE)
     return frame
 
 
@@ -1179,6 +1925,129 @@ def _winsorize_labels_per_date(labels: pd.DataFrame, *, z: float) -> tuple[pd.Da
     return frame, n_clipped
 
 
+def _prices_for_target_labels(prices: pd.DataFrame, *, price_column: str) -> pd.DataFrame:
+    column = str(price_column or "").strip()
+    if not column:
+        raise ValueError("target_price_column must be non-empty")
+    if column not in prices.columns:
+        raise ValueError(f"target price column {column!r} is missing from prices")
+    required = ["date", "asset", column]
+    frame = prices.loc[:, required].copy()
+    if column != "close":
+        frame = frame.rename(columns={column: "close"})
+    return frame.loc[:, ["date", "asset", "close"]]
+
+
+def _apply_forward_return_extreme_filter(
+    forward_label_df: pd.DataFrame,
+    labels: pd.DataFrame,
+    *,
+    label_prices: pd.DataFrame,
+    target_price_column: str,
+    horizon: int,
+    max_abs_forward_return: float | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    values = pd.to_numeric(forward_label_df["value"], errors="coerce")
+    finite_values = values[np.isfinite(values)]
+    max_abs_raw = (
+        float(finite_values.abs().max())
+        if not finite_values.empty and finite_values.notna().any()
+        else None
+    )
+    diagnostics: dict[str, object] = {
+        "target_price_column": str(target_price_column),
+        "label_extreme_max_abs_raw_return": max_abs_raw,
+        "label_extreme_filter_threshold": (
+            float(max_abs_forward_return) if max_abs_forward_return is not None else None
+        ),
+        "label_extreme_filtered_rows": 0,
+        "label_extreme_top_samples": [],
+    }
+    if max_abs_forward_return is None:
+        return forward_label_df, labels, diagnostics
+
+    threshold = float(max_abs_forward_return)
+    mask = values.abs() > threshold
+    filtered_rows = int(mask.sum())
+    diagnostics["label_extreme_filtered_rows"] = filtered_rows
+    if filtered_rows <= 0:
+        return forward_label_df, labels, diagnostics
+
+    samples = _forward_return_extreme_samples(
+        forward_label_df.loc[mask, ["date", "asset", "value"]],
+        label_prices=label_prices,
+        horizon=int(horizon),
+        limit=20,
+    )
+    diagnostics["label_extreme_top_samples"] = samples
+    filtered_label_df = forward_label_df.copy()
+    filtered_labels = labels.copy()
+    filtered_label_df.loc[mask, "value"] = np.nan
+    filtered_labels.loc[mask, "label"] = np.nan
+    return filtered_label_df, filtered_labels, diagnostics
+
+
+def _forward_return_extreme_samples(
+    outlier_rows: pd.DataFrame,
+    *,
+    label_prices: pd.DataFrame,
+    horizon: int,
+    limit: int,
+) -> list[dict[str, object]]:
+    if outlier_rows.empty:
+        return []
+    price_frame = label_prices.loc[:, ["date", "asset", "close"]].copy()
+    price_frame["date"] = pd.to_datetime(price_frame["date"])
+    price_frame = price_frame.sort_values(["asset", "date"], kind="mergesort")
+    price_frame["entry_price"] = pd.to_numeric(price_frame["close"], errors="coerce")
+    price_frame["exit_price"] = price_frame.groupby("asset", sort=False)["entry_price"].shift(
+        -int(horizon)
+    )
+    sidecar = price_frame.loc[:, ["date", "asset", "entry_price", "exit_price"]]
+    frame = outlier_rows.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame["raw_return"] = pd.to_numeric(frame["value"], errors="coerce")
+    frame = frame.merge(sidecar, on=["date", "asset"], how="left", validate="one_to_one")
+    frame["_abs"] = frame["raw_return"].abs()
+    frame = frame.sort_values("_abs", ascending=False, kind="mergesort").head(int(limit))
+    samples: list[dict[str, object]] = []
+    for row in frame.itertuples(index=False):
+        samples.append(
+            {
+                "date": pd.Timestamp(row.date).date().isoformat(),
+                "asset": str(row.asset),
+                "raw_return": _sample_float_or_none(row.raw_return),
+                "entry_price": _sample_float_or_none(row.entry_price),
+                "exit_price": _sample_float_or_none(row.exit_price),
+            }
+        )
+    return samples
+
+
+def _sample_float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+    return _finite_or_none(number)
+
+
+def _target_diagnostics_from_data_health(data_health: dict[str, object]) -> dict[str, object]:
+    keys = (
+        "target_price_column",
+        "label_extreme_max_abs_raw_return",
+        "label_extreme_filter_threshold",
+        "label_extreme_filtered_rows",
+        "label_extreme_top_samples",
+    )
+    out = {key: data_health.get(key) for key in keys if key in data_health}
+    out.setdefault("label_extreme_filtered_rows", 0)
+    out.setdefault("label_extreme_top_samples", [])
+    return out
+
+
 def _winsorize_then_zscore(series: pd.Series) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce")
     if not values.notna().any():
@@ -1236,7 +2105,7 @@ def _normalize_features(
     if frame.duplicated(subset=["date", "asset"]).any():
         raise ValueError("features_df contains duplicate (date, asset) rows")
     for column in config.feature_columns:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype(_MODEL_FEATURE_DTYPE)
         if frame[column].notna().sum() == 0:
             raise ValueError(f"feature column {column!r} contains no numeric observations")
     if config.known_at_col is not None:
@@ -1255,6 +2124,8 @@ def _normalize_features(
 def _build_date_indexed_rows(
     frame: pd.DataFrame,
     ordered_dates: pd.DatetimeIndex,
+    *,
+    allow_missing: bool = False,
 ) -> _DateIndexedRows:
     grouped = {
         pd.Timestamp(date): np.asarray(indices, dtype=np.intp)
@@ -1266,7 +2137,10 @@ def _build_date_indexed_rows(
         date = pd.Timestamp(raw_date)
         indices = grouped.get(date)
         if indices is None:
-            missing_dates.append(date.date().isoformat())
+            if allow_missing:
+                row_indices_by_pos.append(np.empty(0, dtype=np.intp))
+            else:
+                missing_dates.append(date.date().isoformat())
             continue
         row_indices_by_pos.append(indices)
     if missing_dates:
@@ -1317,6 +2191,147 @@ def _build_training_window_cache(
         n_train_dates_by_pos=n_train_dates_by_pos,
         n_labeled_rows_by_pos=n_labeled_rows_by_pos,
     )
+
+
+def _prepare_model_arrays(
+    merged: pd.DataFrame,
+    *,
+    feature_columns: tuple[str, ...],
+) -> _PreparedModelArrays:
+    feature_frame = merged.loc[:, list(feature_columns)]
+    feature_values = feature_frame.to_numpy(dtype=np.float32, copy=False)
+    if not feature_values.flags.c_contiguous:
+        feature_values = np.ascontiguousarray(feature_values, dtype=np.float32)
+    labels = pd.to_numeric(merged["label"], errors="coerce").to_numpy(
+        dtype=np.float32,
+        copy=True,
+    )
+    dates = pd.to_datetime(merged["date"]).to_numpy(copy=True)
+    assets = pd.Categorical(merged["asset"])
+    return _PreparedModelArrays(
+        feature_values=feature_values,
+        labels=labels,
+        dates=dates,
+        assets=assets,
+    )
+
+
+def _prepare_model_arrays_from_numpy_cache(
+    entry: PreparedInputsNumpyCacheEntry,
+) -> _PreparedModelArrays:
+    index_df = entry.index_df
+    labeled_index_df = entry.labeled_index_df
+    return _PreparedModelArrays(
+        feature_values=entry.feature_values,
+        labels=pd.to_numeric(index_df["label"], errors="coerce").to_numpy(
+            dtype=np.float32,
+            copy=True,
+        ),
+        dates=pd.to_datetime(index_df["date"]).to_numpy(copy=True),
+        assets=pd.Categorical(index_df["asset"]),
+        training_feature_values=entry.labeled_feature_values,
+        training_labels=pd.to_numeric(labeled_index_df["label"], errors="coerce").to_numpy(
+            dtype=np.float32,
+            copy=True,
+        ),
+        training_dates=pd.to_datetime(labeled_index_df["date"]).to_numpy(copy=True),
+    )
+
+
+def _weakref_or_none(value: object) -> weakref.ReferenceType[object] | None:
+    try:
+        return weakref.ref(value)
+    except TypeError:
+        return None
+
+
+def _indices_as_contiguous_slice(indices: np.ndarray) -> slice | None:
+    if len(indices) == 0:
+        return slice(0, 0)
+    first = int(indices[0])
+    last = int(indices[-1])
+    if last < first:
+        return None
+    if last - first + 1 != len(indices):
+        return None
+    expected = np.arange(first, last + 1, dtype=np.intp)
+    if not np.array_equal(indices, expected):
+        return None
+    return slice(first, last + 1)
+
+
+def _row_selection_mode(selection: _RowSelection) -> str:
+    return "contiguous_slice" if isinstance(selection, slice) else "advanced_index"
+
+
+def _row_selection_length(selection: _RowSelection, *, n_rows: int) -> int:
+    if isinstance(selection, slice):
+        start, stop, step = selection.indices(n_rows)
+        if step <= 0:
+            return 0
+        return max((stop - start + step - 1) // step, 0)
+    return int(len(selection))
+
+
+def _row_selection_to_indices(selection: _RowSelection, *, n_rows: int) -> np.ndarray:
+    if isinstance(selection, slice):
+        start, stop, step = selection.indices(n_rows)
+        return np.arange(start, stop, step, dtype=np.intp)
+    return selection.astype(np.intp, copy=False)
+
+
+def _training_matrix_from_selection(
+    feature_values: np.ndarray,
+    selection: _RowSelection,
+) -> np.ndarray:
+    selected = feature_values[selection]
+    if isinstance(selection, slice):
+        return np.array(selected, dtype=np.float32, order="C", copy=True)
+    return np.asarray(selected, dtype=np.float32, order="C")
+
+
+def _feature_importance_training_slice_from_arrays(
+    prepared_arrays: _PreparedModelArrays,
+    *,
+    row_selection: _RowSelection,
+    feature_columns: tuple[str, ...],
+    model_version: int,
+    max_rows: int,
+) -> pd.DataFrame:
+    columns = [*feature_columns, "label"]
+    feature_values = (
+        prepared_arrays.training_feature_values
+        if prepared_arrays.training_feature_values is not None
+        else prepared_arrays.feature_values
+    )
+    labels_array = (
+        prepared_arrays.training_labels
+        if prepared_arrays.training_labels is not None
+        else prepared_arrays.labels
+    )
+    row_indices = _row_selection_to_indices(
+        row_selection,
+        n_rows=len(labels_array),
+    )
+    if len(row_indices) == 0:
+        return pd.DataFrame(columns=columns)
+
+    labels = labels_array[row_indices]
+    valid_pos = np.flatnonzero(np.isfinite(labels))
+    if valid_pos.size < 2:
+        return pd.DataFrame(columns=columns)
+    selected_rows = row_indices[valid_pos]
+    if len(selected_rows) > max_rows:
+        rng = np.random.default_rng(_PERMUTATION_IMPORTANCE_RANDOM_SEED + model_version)
+        sample_pos = np.sort(rng.choice(len(selected_rows), size=max_rows, replace=False))
+        selected_rows = selected_rows[sample_pos]
+
+    data: dict[str, object] = {
+        column: feature_values[selected_rows, idx]
+        for idx, column in enumerate(feature_columns)
+    }
+    data["label"] = labels_array[selected_rows].astype(float, copy=False)
+    return pd.DataFrame(data, columns=columns)
 
 
 def _build_labeled_date_indexed_rows(
@@ -1645,6 +2660,309 @@ def _score_prediction_cross_sections(
     )
 
 
+def _training_metrics_row_from_frame(
+    *,
+    fitted: _FittedModelBundle,
+    train_slice: pd.DataFrame,
+    feature_columns: tuple[str, ...],
+    selected_candidate_id: str | None,
+    selected_candidate_score: float | None,
+) -> dict[str, object]:
+    train_features = _prepare_training_matrix(
+        train_slice,
+        feature_columns=feature_columns,
+        model_family=fitted.model_family,
+    )
+    predictions = fitted.pipeline.predict(train_features)
+    metrics = _prediction_diagnostics_by_date(
+        dates=train_slice["date"].to_numpy(),
+        labels=train_slice["label"].to_numpy(),
+        predictions=np.asarray(predictions, dtype=float),
+    )
+    return _training_metrics_base_row(
+        fitted=fitted,
+        metrics=metrics,
+        selected_candidate_id=selected_candidate_id,
+        selected_candidate_score=selected_candidate_score,
+    )
+
+
+def _training_metrics_row_from_arrays(
+    *,
+    fitted: _FittedModelBundle,
+    prepared_arrays: _PreparedModelArrays,
+    row_selection: _RowSelection,
+    selected_candidate_id: str | None,
+    selected_candidate_score: float | None,
+) -> dict[str, object]:
+    feature_values = (
+        prepared_arrays.training_feature_values
+        if prepared_arrays.training_feature_values is not None
+        else prepared_arrays.feature_values
+    )
+    labels_array = (
+        prepared_arrays.training_labels
+        if prepared_arrays.training_labels is not None
+        else prepared_arrays.labels
+    )
+    dates_array = (
+        prepared_arrays.training_dates
+        if prepared_arrays.training_dates is not None
+        else prepared_arrays.dates
+    )
+    train_features = _training_matrix_from_selection(feature_values, row_selection)
+    predictions = fitted.pipeline.predict(train_features)
+    row_indices = _row_selection_to_indices(row_selection, n_rows=len(labels_array))
+    metrics = _prediction_diagnostics_by_date(
+        dates=dates_array[row_indices],
+        labels=labels_array[row_indices],
+        predictions=np.asarray(predictions, dtype=float),
+    )
+    return _training_metrics_base_row(
+        fitted=fitted,
+        metrics=metrics,
+        selected_candidate_id=selected_candidate_id,
+        selected_candidate_score=selected_candidate_score,
+    )
+
+
+def _training_metrics_base_row(
+    *,
+    fitted: _FittedModelBundle,
+    metrics: dict[str, object],
+    selected_candidate_id: str | None,
+    selected_candidate_score: float | None,
+) -> dict[str, object]:
+    return {
+        "model_version": int(fitted.model_version),
+        "model_family": fitted.model_family,
+        "train_start": fitted.train_start.date().isoformat(),
+        "train_end": fitted.train_end.date().isoformat(),
+        "train_ic": metrics.get("ic"),
+        "train_rank_ic": metrics.get("rank_ic"),
+        "train_loss": metrics.get("loss"),
+        "n_train_obs": metrics.get("n_obs"),
+        "n_train_dates": metrics.get("n_dates"),
+        "selected_candidate_id": selected_candidate_id,
+        "selected_candidate_score": _finite_or_none(selected_candidate_score),
+    }
+
+
+def _oos_training_metrics_row(
+    *,
+    model_version: int,
+    dates: object,
+    labels: object,
+    predictions: np.ndarray,
+) -> dict[str, object]:
+    metrics = _prediction_diagnostics_by_date(
+        dates=dates,
+        labels=labels,
+        predictions=predictions,
+    )
+    return {
+        "model_version": int(model_version),
+        "oos_start": metrics.get("start"),
+        "oos_end": metrics.get("end"),
+        "oos_ic": metrics.get("ic"),
+        "oos_rank_ic": metrics.get("rank_ic"),
+        "oos_loss": metrics.get("loss"),
+        "n_oos_obs": metrics.get("n_obs"),
+        "n_oos_dates": metrics.get("n_dates"),
+    }
+
+
+def _prediction_diagnostics_by_date(
+    *,
+    dates: object,
+    labels: object,
+    predictions: object,
+) -> dict[str, object]:
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(pd.Series(dates), errors="coerce"),
+            "label": pd.to_numeric(pd.Series(labels), errors="coerce"),
+            "prediction": pd.to_numeric(pd.Series(predictions), errors="coerce"),
+        }
+    )
+    frame = frame.dropna(subset=["date"])
+    finite_mask = np.isfinite(frame["label"].to_numpy(dtype=float)) & np.isfinite(
+        frame["prediction"].to_numpy(dtype=float)
+    )
+    valid = frame.loc[finite_mask, ["date", "label", "prediction"]].copy()
+    if valid.empty:
+        return {
+            "start": None,
+            "end": None,
+            "ic": None,
+            "rank_ic": None,
+            "loss": None,
+            "n_obs": 0,
+            "n_dates": 0,
+        }
+
+    per_date_ic: list[float] = []
+    per_date_rank_ic: list[float] = []
+    for _, group in valid.groupby("date", sort=True):
+        if len(group) < 3:
+            continue
+        if (
+            group["prediction"].nunique(dropna=True) < 2
+            or group["label"].nunique(dropna=True) < 2
+        ):
+            continue
+        ic = float(group["prediction"].corr(group["label"], method="pearson"))
+        rank_ic = float(group["prediction"].corr(group["label"], method="spearman"))
+        if np.isfinite(ic):
+            per_date_ic.append(ic)
+        if np.isfinite(rank_ic):
+            per_date_rank_ic.append(rank_ic)
+    residual = valid["prediction"].to_numpy(dtype=float) - valid["label"].to_numpy(dtype=float)
+    dates_index = pd.DatetimeIndex(valid["date"])
+    return {
+        "start": dates_index.min().date().isoformat(),
+        "end": dates_index.max().date().isoformat(),
+        "ic": _finite_or_none(float(np.mean(per_date_ic))) if per_date_ic else None,
+        "rank_ic": (
+            _finite_or_none(float(np.mean(per_date_rank_ic))) if per_date_rank_ic else None
+        ),
+        "loss": _finite_or_none(float(np.mean(np.square(residual)))),
+        "n_obs": int(len(valid)),
+        "n_dates": int(valid["date"].nunique()),
+    }
+
+
+def _feature_oos_ic_rows(
+    *,
+    model_version: int,
+    feature_columns: tuple[str, ...],
+    dates: object,
+    labels: object,
+    feature_values: object,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if isinstance(feature_values, pd.DataFrame):
+        feature_frame = feature_values.loc[:, list(feature_columns)]
+    else:
+        feature_frame = pd.DataFrame(np.asarray(feature_values), columns=list(feature_columns))
+    for feature in feature_columns:
+        metrics = _prediction_diagnostics_by_date(
+            dates=dates,
+            labels=labels,
+            predictions=feature_frame[feature].to_numpy(),
+        )
+        rows.append(
+            {
+                "feature": feature,
+                "window_start": metrics.get("start"),
+                "window_end": metrics.get("end"),
+                "model_version": int(model_version),
+                "ic": metrics.get("ic"),
+                "rank_ic": metrics.get("rank_ic"),
+                "n_obs": metrics.get("n_obs"),
+                "n_dates": metrics.get("n_dates"),
+            }
+        )
+    return rows
+
+
+def _build_training_metrics_frame(
+    *,
+    training_metrics_rows: list[dict[str, object]],
+    oos_metrics_rows: list[dict[str, object]],
+) -> pd.DataFrame:
+    if not training_metrics_rows:
+        return pd.DataFrame(columns=TRAINING_METRICS_COLUMNS)
+    oos_by_version: dict[int, dict[str, object]] = {}
+    for row in oos_metrics_rows:
+        raw_version = row.get("model_version")
+        if raw_version is None or pd.isna(raw_version):
+            continue
+        version = _object_to_int(raw_version)
+        existing = oos_by_version.get(version)
+        if existing is None:
+            oos_by_version[version] = dict(row)
+            continue
+        oos_by_version[version] = _merge_oos_metric_rows(existing, row)
+    merged_rows: list[dict[str, object]] = []
+    for row in training_metrics_rows:
+        version = _object_to_int(row["model_version"])
+        merged = dict(row)
+        merged.update(
+            {
+                "oos_start": None,
+                "oos_end": None,
+                "oos_ic": None,
+                "oos_rank_ic": None,
+                "oos_loss": None,
+                "n_oos_obs": 0,
+                "n_oos_dates": 0,
+            }
+        )
+        merged.update(oos_by_version.get(version, {}))
+        merged_rows.append(merged)
+    return (
+        pd.DataFrame(merged_rows, columns=list(TRAINING_METRICS_COLUMNS))
+        .sort_values("model_version", kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+
+def _merge_oos_metric_rows(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> dict[str, object]:
+    # Defensive path for unusual future batching; current pipeline flushes once per model version.
+    return {
+        "model_version": left.get("model_version"),
+        "oos_start": min(
+            str(left.get("oos_start") or right.get("oos_start")),
+            str(right.get("oos_start") or left.get("oos_start")),
+        ),
+        "oos_end": max(
+            str(left.get("oos_end") or right.get("oos_end")),
+            str(right.get("oos_end") or left.get("oos_end")),
+        ),
+        "oos_ic": _finite_weighted_average(left, right, "oos_ic", "n_oos_dates"),
+        "oos_rank_ic": _finite_weighted_average(left, right, "oos_rank_ic", "n_oos_dates"),
+        "oos_loss": _finite_weighted_average(left, right, "oos_loss", "n_oos_obs"),
+        "n_oos_obs": _object_to_int(left.get("n_oos_obs"))
+        + _object_to_int(right.get("n_oos_obs")),
+        "n_oos_dates": _object_to_int(left.get("n_oos_dates"))
+        + _object_to_int(right.get("n_oos_dates")),
+    }
+
+
+def _finite_weighted_average(
+    left: dict[str, object],
+    right: dict[str, object],
+    value_key: str,
+    weight_key: str,
+) -> float | None:
+    values: list[tuple[float, float]] = []
+    for row in (left, right):
+        value = _finite_or_none(_object_to_float(row.get(value_key)))
+        weight = _finite_or_none(_object_to_float(row.get(weight_key)))
+        if value is not None and weight is not None and weight > 0:
+            values.append((value, weight))
+    if not values:
+        return None
+    total_weight = sum(weight for _, weight in values)
+    if total_weight <= 0:
+        return None
+    return _finite_or_none(sum(value * weight for value, weight in values) / total_weight)
+
+
+def _build_feature_oos_ic_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=FEATURE_OOS_IC_COLUMNS)
+    return (
+        pd.DataFrame(rows, columns=list(FEATURE_OOS_IC_COLUMNS))
+        .sort_values(["model_version", "feature"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+
 def _selection_score(
     *,
     metric: ModelSelectionMetric,
@@ -1689,18 +3007,10 @@ def _fit_model_bundle(
         raise ValueError("feature_columns_override is required when config is None")
     feature_columns = list(feature_columns_override or (config.feature_columns if config else ()))
     scale_features = config.feature_preprocess.scale_features if config is not None else "auto"
-    estimator = _build_estimator(model_spec)
-    scale_mode = _resolve_scale_mode(scale_features, model_spec.family)
-    steps: list[tuple[str, object]] = [
-        (
-            "imputer",
-            SimpleImputer(strategy="median", keep_empty_features=True),
-        )
-    ]
-    if scale_mode == "standard":
-        steps.append(("scaler", StandardScaler()))
-    steps.append(("model", estimator))
-    pipeline = Pipeline(steps=steps)
+    pipeline, scale_mode = _build_model_pipeline(
+        model_spec=model_spec,
+        scale_features=scale_features,
+    )
     train_features = _prepare_training_matrix(
         train_slice,
         feature_columns=tuple(feature_columns),
@@ -1722,6 +3032,82 @@ def _fit_model_bundle(
         selection_score=selection_score,
         selected_candidate_turnover=selected_candidate_turnover,
     )
+
+
+def _fit_model_bundle_from_arrays(
+    *,
+    prepared_arrays: _PreparedModelArrays,
+    row_selection: _RowSelection,
+    config: ModelFactorBuildConfig,
+    model_version: int,
+    model_spec: ModelSpec,
+    selected_candidate_id: str | None = None,
+    selection_score: float | None = None,
+    selected_candidate_turnover: float | None = None,
+) -> _FittedModelBundle:
+    pipeline, scale_mode = _build_model_pipeline(
+        model_spec=model_spec,
+        scale_features=config.feature_preprocess.scale_features,
+    )
+    feature_values = (
+        prepared_arrays.training_feature_values
+        if prepared_arrays.training_feature_values is not None
+        else prepared_arrays.feature_values
+    )
+    labels_array = (
+        prepared_arrays.training_labels
+        if prepared_arrays.training_labels is not None
+        else prepared_arrays.labels
+    )
+    dates_array = (
+        prepared_arrays.training_dates
+        if prepared_arrays.training_dates is not None
+        else prepared_arrays.dates
+    )
+    train_features = _training_matrix_from_selection(
+        feature_values,
+        row_selection,
+    )
+    train_labels = labels_array[row_selection]
+    pipeline.fit(train_features, train_labels)
+    train_dates = pd.DatetimeIndex(pd.to_datetime(dates_array[row_selection]))
+    unique_train_dates = train_dates.unique().sort_values()
+    return _FittedModelBundle(
+        pipeline=pipeline,
+        model_version=model_version,
+        train_start=pd.Timestamp(unique_train_dates.min()),
+        train_end=pd.Timestamp(unique_train_dates.max()),
+        n_train_dates=int(len(unique_train_dates)),
+        n_train_rows=_row_selection_length(
+            row_selection,
+            n_rows=len(labels_array),
+        ),
+        scale_mode=scale_mode,
+        model_family=model_spec.family,
+        model_params=resolve_model_spec_params(model_spec),
+        selected_candidate_id=selected_candidate_id,
+        selection_score=selection_score,
+        selected_candidate_turnover=selected_candidate_turnover,
+    )
+
+
+def _build_model_pipeline(
+    *,
+    model_spec: ModelSpec,
+    scale_features: ScaleFeatures,
+) -> tuple[Pipeline, str]:
+    estimator = _build_estimator(model_spec)
+    scale_mode = _resolve_scale_mode(scale_features, model_spec.family)
+    steps: list[tuple[str, object]] = [
+        (
+            "imputer",
+            SimpleImputer(strategy="median", keep_empty_features=True, copy=False),
+        )
+    ]
+    if scale_mode == "standard":
+        steps.append(("scaler", StandardScaler(copy=False)))
+    steps.append(("model", estimator))
+    return Pipeline(steps=steps), scale_mode
 
 
 def _build_estimator(spec: ModelSpec) -> object:
@@ -1787,6 +3173,8 @@ def resolve_model_spec_params(spec: ModelSpec) -> dict[str, object]:
     # standardize/winsorize defaults harden the feature side.
     params = dict(spec.params)
     family = spec.family
+    if family in {"linear", "ridge", "lasso", "elastic_net"}:
+        params.setdefault("copy_X", False)
     if family == "lasso":
         params.setdefault("random_state", 0)
         params.setdefault("max_iter", 5000)
@@ -1847,7 +3235,7 @@ def _feature_importance_extractors_for_family(model_family: str) -> tuple[str, .
             f"{model_family!r}. "
             "Please update _MODEL_FAMILY_IMPORTANCE_EXTRACTORS."
         )
-    return extractors
+    return extractors or ("unsupported",)
 
 
 def _extract_coef_importance(estimator: object, *, n_features: int) -> np.ndarray | None:
@@ -1884,6 +3272,8 @@ def _estimate_permutation_importance(
     feature_columns: tuple[str, ...],
     seed: int,
     max_rows: int,
+    n_repeats: int = 3,
+    top_k_features: int | None = None,
 ) -> np.ndarray | None:
     if not feature_columns or "label" not in train_slice.columns:
         return None
@@ -1912,7 +3302,10 @@ def _estimate_permutation_importance(
         return None
 
     try:
-        baseline_pred = np.asarray(pipeline.predict(features), dtype=float).reshape(-1)
+        baseline_pred = np.asarray(
+            _predict_feature_frame(pipeline, features),
+            dtype=float,
+        ).reshape(-1)
     except Exception:
         return None
     if baseline_pred.size != target.size or not np.isfinite(baseline_pred).all():
@@ -1924,25 +3317,126 @@ def _estimate_permutation_importance(
 
     rng = np.random.default_rng(seed + 1_000_003)
     permuted = features.copy()
-    importances = np.zeros(len(feature_columns), dtype=float)
-    for idx, feature in enumerate(feature_columns):
+    importances = np.full(len(feature_columns), np.nan, dtype=float)
+    feature_indices = np.arange(len(feature_columns), dtype=int)
+    if top_k_features is not None and top_k_features < len(feature_indices):
+        feature_indices = feature_indices[: max(1, int(top_k_features))]
+    for idx in feature_indices:
+        feature = feature_columns[int(idx)]
         original_values = permuted[feature].to_numpy(copy=True)
-        shuffled_values = original_values.copy()
-        rng.shuffle(shuffled_values)
-        permuted.loc[:, feature] = shuffled_values
-        try:
-            permuted_pred = np.asarray(pipeline.predict(permuted), dtype=float).reshape(-1)
-        except Exception:
+        losses: list[float] = []
+        for _ in range(max(1, int(n_repeats))):
+            shuffled_values = original_values.copy()
+            rng.shuffle(shuffled_values)
+            permuted.loc[:, feature] = shuffled_values
+            try:
+                permuted_pred = np.asarray(
+                    _predict_feature_frame(pipeline, permuted),
+                    dtype=float,
+                ).reshape(-1)
+            except Exception:
+                permuted.loc[:, feature] = original_values
+                return None
             permuted.loc[:, feature] = original_values
-            return None
-        permuted.loc[:, feature] = original_values
-        if permuted_pred.size != target.size or not np.isfinite(permuted_pred).all():
-            return None
-        permuted_loss = float(np.mean((permuted_pred - target) ** 2))
-        if not np.isfinite(permuted_loss):
-            return None
-        importances[idx] = max(0.0, permuted_loss - baseline_loss)
+            if permuted_pred.size != target.size or not np.isfinite(permuted_pred).all():
+                return None
+            permuted_loss = float(np.mean((permuted_pred - target) ** 2))
+            if not np.isfinite(permuted_loss):
+                return None
+            losses.append(max(0.0, permuted_loss - baseline_loss))
+        importances[int(idx)] = float(np.mean(losses)) if losses else np.nan
     return importances
+
+
+def _predict_feature_frame(pipeline: Pipeline, features: pd.DataFrame) -> np.ndarray:
+    imputer = pipeline.named_steps.get("imputer")
+    if hasattr(imputer, "feature_names_in_"):
+        return np.asarray(pipeline.predict(features.copy()))
+    return np.asarray(
+        pipeline.predict(features.to_numpy(dtype=np.float32, copy=True)),
+    )
+
+
+def _feature_importance_training_slice(
+    train_slice: pd.DataFrame,
+    *,
+    feature_columns: tuple[str, ...],
+    model_version: int,
+    max_rows: int,
+) -> pd.DataFrame:
+    """Keep only the rows/columns feature importance can inspect.
+
+    The permutation extractor already caps itself with the same deterministic sample.
+    Sampling here avoids retaining a full walk-forward training window until the end
+    of latest-only runs while preserving the rows the extractor would have used.
+    """
+
+    columns = [*feature_columns, "label"]
+    slim = train_slice.loc[:, columns]
+    labels = pd.to_numeric(slim["label"], errors="coerce")
+    valid_mask = labels.notna()
+    if int(valid_mask.sum()) < 2:
+        return slim.iloc[0:0].copy()
+    slim = slim.loc[valid_mask]
+    if len(slim) > max_rows:
+        rng = np.random.default_rng(_PERMUTATION_IMPORTANCE_RANDOM_SEED + model_version)
+        sample_idx = np.sort(rng.choice(len(slim), size=max_rows, replace=False))
+        slim = slim.iloc[sample_idx]
+    return slim.reset_index(drop=True).copy()
+
+
+def _estimated_permutation_predict_calls(
+    config: FeatureImportanceConfig,
+    *,
+    n_versions_for_estimate: int,
+    n_features: int,
+) -> int:
+    top_k = _feature_importance_permutation_top_k_features(config)
+    n_features_used = int(n_features if top_k is None else min(n_features, top_k))
+    return (
+        max(1, int(n_versions_for_estimate))
+        * max(1, n_features_used)
+        * max(1, _feature_importance_permutation_n_repeats(config))
+    )
+
+
+def _permutation_importance_guardrail_reason(
+    config: FeatureImportanceConfig,
+    *,
+    model_family: str,
+    n_versions_for_estimate: int,
+    n_features: int,
+) -> str:
+    if not _feature_importance_permutation_enabled(config):
+        return ""
+    if _feature_importance_permutation_force(config):
+        return ""
+    latest_only = _feature_importance_permutation_latest_only(config)
+    sample_rows_configured = _feature_importance_permutation_sample_rows_configured(config)
+    n_repeats = _feature_importance_permutation_n_repeats(config)
+    estimated_calls = _estimated_permutation_predict_calls(
+        config,
+        n_versions_for_estimate=n_versions_for_estimate,
+        n_features=n_features,
+    )
+    if n_versions_for_estimate > 5 and not latest_only:
+        return (
+            "Permutation importance over all versions is expensive and disabled by "
+            "default. Use latest_only=true, reduce sample_rows, reduce n_repeats, "
+            "or persist cheap importance ledger."
+        )
+    if n_features > 50 and not sample_rows_configured:
+        return "Permutation importance skipped: n_features > 50 and sample_rows is not set."
+    if n_repeats > 5 and n_versions_for_estimate > 1:
+        return "Permutation importance skipped: n_repeats > 5 across multiple versions."
+    if str(model_family).lower() == "mlp" and not latest_only:
+        return "Permutation importance for MLP over multiple versions is disabled by default."
+    if estimated_calls > _PERMUTATION_IMPORTANCE_MAX_PREDICT_CALLS:
+        return (
+            "Permutation importance estimated_predict_calls exceeds guardrail "
+            f"({_PERMUTATION_IMPORTANCE_MAX_PREDICT_CALLS})."
+        )
+    return ""
 
 
 def _feature_importance_frame(
@@ -1952,46 +3446,111 @@ def _feature_importance_frame(
     feature_columns: tuple[str, ...],
     model_family: str,
     model_version: int,
+    fit_date: pd.Timestamp,
     trained_until: pd.Timestamp,
-    permutation_max_rows: int,
+    config: FeatureImportanceConfig,
+    permutation_guardrail_reason: str = "",
 ) -> pd.DataFrame:
     estimator = pipeline.named_steps["model"]
     importance_source = "unsupported"
     signed: np.ndarray | None = None
+    abs_importance: np.ndarray | None = None
 
-    for extractor in _feature_importance_extractors_for_family(model_family):
+    extractors = list(_feature_importance_extractors_for_family(model_family))
+    if config.method == "permutation":
+        extractors = ["permutation"] if _feature_importance_permutation_enabled(config) else []
+    elif (
+        config.method == "auto"
+        and _feature_importance_permutation_enabled(config)
+        and "permutation" not in extractors
+    ):
+        extractors.append("permutation")
+    for extractor in extractors:
+        if extractor == "unsupported":
+            continue
         if extractor == "coef":
             signed = _extract_coef_importance(estimator, n_features=len(feature_columns))
+            if signed is not None:
+                abs_importance = np.abs(signed)
+                importance_source = "coefficient"
         elif extractor == "feature_importances":
-            signed = _extract_tree_importance(estimator, n_features=len(feature_columns))
+            tree_importance = _extract_tree_importance(estimator, n_features=len(feature_columns))
+            if tree_importance is not None:
+                signed = np.full(len(feature_columns), np.nan, dtype=float)
+                abs_importance = np.abs(tree_importance)
+                importance_source = "built_in"
         elif extractor == "permutation":
+            if permutation_guardrail_reason:
+                importance_source = "permutation_skipped_guardrail"
+                continue
             signed = _estimate_permutation_importance(
                 pipeline,
                 train_slice=train_slice,
                 feature_columns=feature_columns,
-                seed=_PERMUTATION_IMPORTANCE_RANDOM_SEED + model_version,
-                max_rows=permutation_max_rows,
+                seed=_feature_importance_permutation_random_state(config) + model_version,
+                max_rows=_feature_importance_permutation_sample_rows(config),
+                n_repeats=_feature_importance_permutation_n_repeats(config),
+                top_k_features=_feature_importance_permutation_top_k_features(config),
             )
+            if signed is not None:
+                abs_importance = np.abs(signed)
+                signed = np.full(len(feature_columns), np.nan, dtype=float)
+                importance_source = "permutation_sampled"
         else:
             raise ValueError(
                 f"unknown feature importance extractor {extractor!r} for {model_family!r}"
             )
-        if signed is not None:
-            importance_source = extractor
+        if abs_importance is not None:
             break
 
+    if abs_importance is None or abs_importance.size != len(feature_columns):
+        abs_importance = np.full(len(feature_columns), np.nan, dtype=float)
     if signed is None or signed.size != len(feature_columns):
         signed = np.full(len(feature_columns), np.nan, dtype=float)
-        importance_source = "unsupported"
+    if not np.isfinite(abs_importance).any() and importance_source == "unsupported":
+        if str(model_family).lower() == "mlp":
+            importance_source = "unsupported_mlp_default"
+        elif str(model_family).lower() == "gbdt":
+            importance_source = "built_in_unavailable"
+
+    total_abs = float(np.nansum(abs_importance))
+    if not np.isfinite(total_abs) or total_abs <= 0:
+        normalized = np.full(len(feature_columns), np.nan, dtype=float)
+        ranks = np.full(len(feature_columns), np.nan, dtype=float)
+    else:
+        normalized = abs_importance / total_abs
+        ranks = (
+            pd.Series(abs_importance)
+            .rank(method="first", ascending=False, na_option="bottom")
+            .to_numpy(dtype=float)
+        )
+    legacy_importance = np.where(np.isfinite(signed), signed, abs_importance)
 
     frame = pd.DataFrame(
         {
             "model_version": model_version,
+            "fit_date": fit_date,
             "trained_until": trained_until,
+            "model_family": model_family,
             "feature": list(feature_columns),
-            "importance": signed,
-            "abs_importance": np.abs(signed),
+            "signed_importance": signed,
+            "importance": legacy_importance,
+            "abs_importance": abs_importance,
+            "normalized_share": normalized,
+            "rank": ranks,
             "importance_source": importance_source,
+            "permutation_sampled": importance_source == "permutation_sampled",
+            "permutation_sample_rows": (
+                _feature_importance_permutation_sample_rows(config)
+                if importance_source == "permutation_sampled"
+                else np.nan
+            ),
+            "permutation_n_repeats": (
+                _feature_importance_permutation_n_repeats(config)
+                if importance_source == "permutation_sampled"
+                else np.nan
+            ),
+            "permutation_guardrail_reason": permutation_guardrail_reason,
         }
     )
     return frame
@@ -2010,6 +3569,12 @@ def _combine_feature_importance_frames(
                 "feature": list(feature_columns),
                 "mean_abs_importance": [float("nan")] * len(feature_columns),
                 "latest_importance": [float("nan")] * len(feature_columns),
+                "mean_signed_importance": [float("nan")] * len(feature_columns),
+                "latest_abs_importance": [float("nan")] * len(feature_columns),
+                "positive_version_count": [0] * len(feature_columns),
+                "negative_version_count": [0] * len(feature_columns),
+                "zero_version_count": [0] * len(feature_columns),
+                "sign_stability": [float("nan")] * len(feature_columns),
                 "importance_source": [importance_source] * len(feature_columns),
                 "n_model_versions": [0] * len(feature_columns),
             }
@@ -2018,25 +3583,116 @@ def _combine_feature_importance_frames(
     combined = pd.concat(frames, ignore_index=True)
     latest_version = int(combined["model_version"].max())
     latest = combined[combined["model_version"] == latest_version][
-        ["feature", "importance", "importance_source"]
-    ].rename(columns={"importance": "latest_importance"})
+        [
+            "feature",
+            "signed_importance",
+            "abs_importance",
+            "importance_source",
+        ]
+    ].rename(
+        columns={
+            "signed_importance": "latest_importance",
+            "abs_importance": "latest_abs_importance",
+        }
+    )
+    signed_values = pd.to_numeric(combined.get("signed_importance"), errors="coerce")
+    combined = combined.assign(_signed_importance=signed_values)
+    sign_summary = (
+        combined.assign(
+            _positive=combined["_signed_importance"] > 0,
+            _negative=combined["_signed_importance"] < 0,
+            _zero=combined["_signed_importance"] == 0,
+            _signed_available=combined["_signed_importance"].notna(),
+        )
+        .groupby("feature", sort=False)
+        .agg(
+            positive_version_count=("_positive", "sum"),
+            negative_version_count=("_negative", "sum"),
+            zero_version_count=("_zero", "sum"),
+            signed_available_count=("_signed_available", "sum"),
+        )
+        .reset_index()
+    )
     summary = (
         combined.groupby("feature", sort=False)
         .agg(
             mean_abs_importance=("abs_importance", "mean"),
+            mean_signed_importance=("_signed_importance", "mean"),
             n_model_versions=("model_version", "nunique"),
         )
         .reset_index()
     )
     summary = summary.merge(latest, on="feature", how="left", validate="one_to_one")
+    summary = summary.merge(sign_summary, on="feature", how="left", validate="one_to_one")
+    sources = (
+        combined.groupby("feature", sort=False)["importance_source"]
+        .apply(lambda values: "|".join(sorted({str(v) for v in values if str(v).strip()})))
+        .reset_index()
+    )
+    summary = summary.drop(columns=["importance_source"], errors="ignore").merge(
+        sources,
+        on="feature",
+        how="left",
+        validate="one_to_one",
+    )
+    signed_available = pd.to_numeric(summary["signed_available_count"], errors="coerce").fillna(0)
+    max_signed_side = pd.concat(
+        [
+            pd.to_numeric(summary["positive_version_count"], errors="coerce").fillna(0),
+            pd.to_numeric(summary["negative_version_count"], errors="coerce").fillna(0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    summary["sign_stability"] = np.where(
+        signed_available > 0,
+        max_signed_side / signed_available,
+        np.nan,
+    )
+    summary = summary.drop(columns=["signed_available_count"], errors="ignore")
     return summary.sort_values("feature", kind="mergesort").reset_index(drop=True)
+
+
+def _combine_feature_importance_ledger_frames(
+    frames: list[pd.DataFrame],
+    *,
+    save_ledger: bool,
+) -> pd.DataFrame:
+    columns = [
+        "model_family",
+        "model_version",
+        "fit_date",
+        "trained_until",
+        "feature",
+        "signed_importance",
+        "abs_importance",
+        "normalized_share",
+        "rank",
+        "importance_source",
+        "permutation_sampled",
+        "permutation_sample_rows",
+        "permutation_n_repeats",
+        "permutation_guardrail_reason",
+    ]
+    if not save_ledger or not frames:
+        return pd.DataFrame(columns=columns)
+    ledger = pd.concat(frames, ignore_index=True)
+    for column in columns:
+        if column not in ledger.columns:
+            ledger[column] = pd.NA
+    return (
+        ledger.loc[:, columns]
+        .sort_values(["model_version", "rank", "feature"], kind="mergesort")
+        .reset_index(drop=True)
+    )
 
 
 def _build_model_diagnostics(
     *,
     config: ModelFactorBuildConfig,
     training_log_df: pd.DataFrame,
+    training_metrics_df: pd.DataFrame,
     feature_importance_df: pd.DataFrame,
+    feature_oos_ic_df: pd.DataFrame,
     model_selection_df: pd.DataFrame,
     label_winsorize_zscore: float | None,
     label_winsor_clipped_rows: int,
@@ -2103,12 +3759,21 @@ def _build_model_diagnostics(
         "feature_columns": list(config.feature_columns),
         "feature_count": len(config.feature_columns),
         "target_horizon": config.target_horizon,
+        "target_price_column": config.target_price_column,
+        "max_abs_forward_return": (
+            float(config.max_abs_forward_return)
+            if config.max_abs_forward_return is not None
+            else None
+        ),
         "purged_train_gap_dates": max(int(config.target_horizon) - 1, 0),
         "label_winsorize_zscore": (
             float(label_winsorize_zscore) if label_winsorize_zscore is not None else None
         ),
         "label_winsor_clipped_rows": int(label_winsor_clipped_rows),
         "trained_model_versions": int(training_log_df["model_version"].dropna().nunique()),
+        "training_metrics_rows": int(len(training_metrics_df)),
+        "feature_oos_ic_rows": int(len(feature_oos_ic_df)),
+        "feature_oos_ic_enabled": bool(config.compute_feature_oos_ic),
         "n_score_dates_total": int(len(training_log_df)),
         "n_score_dates_scored": int(len(trained_rows)),
         "mean_train_rows": _finite_or_none(
@@ -2135,8 +3800,43 @@ def _build_model_diagnostics(
             ),
         },
         "feature_importance": {
+            "enabled": bool(_feature_importance_enabled(config.feature_importance)),
             "mode": config.feature_importance.mode,
-            "permutation_max_rows": int(config.feature_importance.permutation_max_rows),
+            "method": config.feature_importance.method,
+            "save_ledger": bool(config.feature_importance.save_ledger),
+            "over_time": {
+                "enabled": bool(
+                    _feature_importance_over_time_enabled(config.feature_importance)
+                ),
+                "top_k": int(_feature_importance_over_time_top_k(config.feature_importance)),
+                "source": _feature_importance_over_time_source(config.feature_importance),
+            },
+            "permutation": {
+                "enabled": bool(
+                    _feature_importance_permutation_enabled(config.feature_importance)
+                ),
+                "latest_only": bool(
+                    _feature_importance_permutation_latest_only(config.feature_importance)
+                ),
+                "sample_rows": int(
+                    _feature_importance_permutation_sample_rows(config.feature_importance)
+                ),
+                "n_repeats": int(
+                    _feature_importance_permutation_n_repeats(config.feature_importance)
+                ),
+                "top_k_features": _feature_importance_permutation_top_k_features(
+                    config.feature_importance
+                ),
+                "random_state": int(
+                    _feature_importance_permutation_random_state(config.feature_importance)
+                ),
+                "force": bool(
+                    _feature_importance_permutation_force(config.feature_importance)
+                ),
+            },
+            "permutation_max_rows": int(
+                _feature_importance_permutation_sample_rows(config.feature_importance)
+            ),
             "n_importance_model_versions": importance_model_versions,
             "importance_source_counts": dict(importance_source_counts),
         },
@@ -2155,6 +3855,24 @@ def _finite_or_none(value: float | None) -> float | None:
     if value is None:
         return None
     return float(value) if np.isfinite(value) else None
+
+
+def _object_to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _object_to_int(value: object, *, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _check_feature_known_at_not_after_signal_date(

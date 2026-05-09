@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import math
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -12,6 +13,7 @@ import pandas as pd
 
 DiagnosticsSeverity = str
 DiagnosticsLevel = str
+StageLifecycleCallback = Callable[[str, str, int], None]
 
 _DEFAULT_TOP_MISSING_FEATURES = 10
 _NEAR_CONSTANT_THRESHOLD = 0.995
@@ -177,7 +179,11 @@ class _StageContext:
 class ModelFactorDiagnosticsRecorder:
     """Collect run diagnostics with stage timing, events, warnings, and health stats."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        stage_lifecycle_callback: StageLifecycleCallback | None = None,
+    ) -> None:
         self._next_stage_id = 1
         self._stages: list[dict[str, object]] = []
         self._stage_index: dict[int, int] = {}
@@ -185,6 +191,7 @@ class ModelFactorDiagnosticsRecorder:
         self._events: list[dict[str, object]] = []
         self._warnings: list[dict[str, object]] = []
         self._data_health: dict[str, object] = {}
+        self._stage_lifecycle_callback = stage_lifecycle_callback
 
     @contextmanager
     def stage(
@@ -232,6 +239,7 @@ class ModelFactorDiagnosticsRecorder:
             stage_id=stage_id,
             started_perf_counter=started_perf_counter,
         )
+        self._notify_stage_lifecycle("begin", stage_name, stage_id)
         self.event(level="info", stage=stage_name, message="stage started", payload=payload)
         return self._open_stages[stage_id]
 
@@ -255,9 +263,18 @@ class ModelFactorDiagnosticsRecorder:
         if payload:
             row["result"] = _to_jsonable(payload)
         stage_name = str(row.get("name") or "unknown")
+        self._notify_stage_lifecycle("end", stage_name, handle.stage_id)
         level = "error" if status == "failed" else "info"
         self.event(level=level, stage=stage_name, message=f"stage {status}", payload=payload)
         self._open_stages.pop(handle.stage_id, None)
+
+    def _notify_stage_lifecycle(self, event: str, stage_name: str, stage_id: int) -> None:
+        if self._stage_lifecycle_callback is None:
+            return
+        try:
+            self._stage_lifecycle_callback(event, stage_name, stage_id)
+        except Exception:
+            return
 
     def event(
         self,
@@ -320,6 +337,7 @@ class ModelFactorDiagnosticsRecorder:
             "generated_at_utc": _utc_now_iso(),
             "run_meta": _to_jsonable(run_meta or {}),
             "stages": _to_jsonable(self._stages),
+            "stage_timings": _to_jsonable(self.stage_timings_summary()),
             "events": _to_jsonable(self._events),
             "warnings": _to_jsonable(self._warnings),
             "data_health": _to_jsonable(self._data_health),
@@ -328,6 +346,39 @@ class ModelFactorDiagnosticsRecorder:
         if ref_text:
             payload["raw_log_ref"] = ref_text
         return payload
+
+    def stage_timings_summary(self) -> dict[str, float]:
+        """Return flat timing totals/counts/means/p95 values by stage name."""
+        durations_by_stage: dict[str, list[float]] = {}
+        for row in self._stages:
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            duration_ms = row.get("duration_ms")
+            if duration_ms is None:
+                continue
+            if not isinstance(duration_ms, (int, float, np.number)):
+                continue
+            duration_seconds = max(float(duration_ms) / 1000.0, 0.0)
+            durations_by_stage.setdefault(name, []).append(duration_seconds)
+
+        summary: dict[str, float] = {}
+        for name, values in sorted(durations_by_stage.items()):
+            if not values:
+                continue
+            arr = np.asarray(values, dtype=float)
+            total = float(arr.sum())
+            count = int(arr.size)
+            summary[name] = total
+            summary[f"{name}_count"] = float(count)
+            summary[f"{name}_mean"] = total / count if count else 0.0
+            summary[f"{name}_p95"] = float(np.percentile(arr, 95)) if count else 0.0
+        for name in ("model_selection", "model_fit", "predict"):
+            summary.setdefault(name, 0.0)
+            summary.setdefault(f"{name}_count", 0.0)
+            summary.setdefault(f"{name}_mean", 0.0)
+            summary.setdefault(f"{name}_p95", 0.0)
+        return summary
 
 
 def diagnostics_observer_or_null(

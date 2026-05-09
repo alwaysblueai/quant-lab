@@ -15,9 +15,11 @@ from alpha_lab.data_quality.survivorship import (
     build_delisting_calendar,
     validate_universe_survivorship,
 )
+from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.grouped_evaluation import (
     compute_ic_by_group,
     compute_ic_by_size_bucket,
+    conditional_ic_by_bucket,
     conditional_ic_by_cross_section_size,
     conditional_ic_by_factor_magnitude,
 )
@@ -245,6 +247,68 @@ def test_grouped_ic_and_size_bucket_ic() -> None:
     assert "size_bucket" in by_size.columns
 
 
+def test_grouped_ic_rejects_duplicate_group_rows() -> None:
+    date = pd.Timestamp("2024-01-01")
+    factor = pd.DataFrame(
+        {
+            "date": [date] * 2,
+            "asset": ["A", "B"],
+            "factor": ["f"] * 2,
+            "value": [1.0, 2.0],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "date": [date] * 2,
+            "asset": ["A", "B"],
+            "factor": ["ret"] * 2,
+            "value": [1.0, 2.0],
+        }
+    )
+    groups = pd.DataFrame(
+        {
+            "date": [date, date, date],
+            "asset": ["A", "A", "B"],
+            "sector": ["G1", "G1", "G1"],
+        }
+    )
+
+    with pytest.raises(AlphaLabDataError, match="duplicate"):
+        compute_ic_by_group(factor, labels, groups, group_col="sector")
+
+
+def test_size_bucket_ic_drops_unassigned_small_cross_sections() -> None:
+    date = pd.Timestamp("2024-01-01")
+    factor = pd.DataFrame(
+        {
+            "date": [date] * 2,
+            "asset": ["A", "B"],
+            "factor": ["f"] * 2,
+            "value": [1.0, 2.0],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "date": [date] * 2,
+            "asset": ["A", "B"],
+            "factor": ["ret"] * 2,
+            "value": [1.0, 2.0],
+        }
+    )
+    market_cap = pd.DataFrame(
+        {
+            "date": [date] * 2,
+            "asset": ["A", "B"],
+            "circ_mv": [100.0, 50.0],
+        }
+    )
+
+    out = compute_ic_by_size_bucket(factor, labels, market_cap, n_buckets=3)
+
+    assert out.empty
+    assert list(out.columns) == ["date", "size_bucket", "factor", "label", "ic"]
+
+
 def test_conditional_ic_summaries_cover_magnitude_and_cross_section() -> None:
     dates = pd.to_datetime(
         [
@@ -322,6 +386,36 @@ def test_conditional_ic_summaries_cover_magnitude_and_cross_section() -> None:
         "large_cross_section",
     ]
     assert cross_section["median_valid_assets_threshold"].notna().all()
+
+
+def test_conditional_ic_by_bucket_supports_date_level_research_buckets() -> None:
+    dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+    factor_rows: list[dict[str, object]] = []
+    for date_idx, date in enumerate(dates):
+        for asset_idx in range(6):
+            asset = f"A{asset_idx + 1}"
+            value = float(asset_idx)
+            factor_rows.append(
+                {
+                    "date": date,
+                    "asset": asset,
+                    "factor": "f",
+                    "value": value,
+                    "label": value + float(date_idx) * 0.01,
+                }
+            )
+
+    factor = pd.DataFrame(factor_rows)[["date", "asset", "factor", "value"]]
+    labels = pd.DataFrame(factor_rows)[["date", "asset"]].copy()
+    labels["factor"] = "ret"
+    labels["value"] = pd.DataFrame(factor_rows)["label"]
+
+    buckets = pd.DataFrame({"date": dates, "market_regime": ["low", "mid", "high"]})
+    out = conditional_ic_by_bucket(factor, labels, buckets, group_col="market_regime")
+
+    assert list(out.columns) == ["date", "bucket", "ic", "rank_ic", "n"]
+    assert out["bucket"].tolist() == ["low", "mid", "high"]
+    assert out["n"].min() == 6
 
 
 def test_extract_pure_alpha_near_zero_for_size_explained_signal() -> None:

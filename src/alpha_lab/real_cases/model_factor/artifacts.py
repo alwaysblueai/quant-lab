@@ -16,6 +16,7 @@ from alpha_lab.key_metrics_contracts import project_level12_transition_summary
 from alpha_lab.model_factor import ModelFactorBuildResult, ModelSpec, resolve_model_spec_params
 from alpha_lab.real_cases.artifact_enrichment import (
     build_backtest_summary_payload,
+    build_group_nav_table,
     build_portfolio_recipe_controls,
 )
 from alpha_lab.real_cases.common_spec import parse_mapping_payload
@@ -25,6 +26,10 @@ from alpha_lab.reporting.level2_portfolio_validation import (
     export_level2_portfolio_validation_bundle,
 )
 from alpha_lab.reporting.purged_kfold_diagnostics import build_purged_kfold_diagnostics
+from alpha_lab.reporting.research_tearsheet import (
+    build_research_tearsheet_payload,
+    export_research_tearsheet_pdf,
+)
 from alpha_lab.research_evaluation_config import (
     ResearchEvaluationConfig,
     research_evaluation_audit_snapshot,
@@ -51,16 +56,23 @@ REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
     "backtest_result.json",
     "purged_kfold_summary.json",
     "purged_kfold_folds.csv",
+    "purged_kfold_fold_daily.csv",
     "model_selection.json",
     "model_definition.json",
     "feature_manifest.json",
     "diagnostics.json",
+    "research_tearsheet.json",
+    "research_tearsheet.pdf",
     "training_log.csv",
+    "training_metrics.csv",
     "feature_importance.csv",
+    "feature_importance_ledger.csv",
+    "feature_oos_ic.csv",
     "ic_timeseries.csv",
     "ic_decay.csv",
     "rolling_stability.csv",
     "group_returns.csv",
+    "group_nav.csv",
     "turnover.csv",
     "coverage.csv",
     "model_factor_definition.yaml",
@@ -84,16 +96,23 @@ class ModelFactorArtifactPaths(TypedDict):
     backtest_result_json: Path
     purged_kfold_summary: Path
     purged_kfold_folds: Path
+    purged_kfold_fold_daily: Path
     model_selection_json: Path
     model_definition_json: Path
     feature_manifest_json: Path
     diagnostics: Path
+    research_tearsheet: Path
+    research_tearsheet_pdf: Path
     training_log: Path
+    training_metrics: Path
     feature_importance: Path
+    feature_importance_ledger: Path
+    feature_oos_ic: Path
     ic_timeseries: Path
     ic_decay: Path
     rolling_stability: Path
     group_returns: Path
+    group_nav: Path
     turnover: Path
     coverage: Path
     factor_definition: Path
@@ -120,6 +139,7 @@ def export_artifact_bundle(
     spec_path: str | Path | None = None,
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
+    draft_model_source: Mapping[str, object] | None = None,
 ) -> ModelFactorArtifactPaths:
     """Write standardized artifact bundle for one model-factor case run."""
 
@@ -135,16 +155,23 @@ def export_artifact_bundle(
         "backtest_result_json": out_dir / "backtest_result.json",
         "purged_kfold_summary": out_dir / "purged_kfold_summary.json",
         "purged_kfold_folds": out_dir / "purged_kfold_folds.csv",
+        "purged_kfold_fold_daily": out_dir / "purged_kfold_fold_daily.csv",
         "model_selection_json": out_dir / "model_selection.json",
         "model_definition_json": out_dir / "model_definition.json",
         "feature_manifest_json": out_dir / "feature_manifest.json",
         "diagnostics": out_dir / "diagnostics.json",
+        "research_tearsheet": out_dir / "research_tearsheet.json",
+        "research_tearsheet_pdf": out_dir / "research_tearsheet.pdf",
         "training_log": out_dir / "training_log.csv",
+        "training_metrics": out_dir / "training_metrics.csv",
         "feature_importance": out_dir / "feature_importance.csv",
+        "feature_importance_ledger": out_dir / "feature_importance_ledger.csv",
+        "feature_oos_ic": out_dir / "feature_oos_ic.csv",
         "ic_timeseries": out_dir / "ic_timeseries.csv",
         "ic_decay": out_dir / "ic_decay.csv",
         "rolling_stability": out_dir / "rolling_stability.csv",
         "group_returns": out_dir / "group_returns.csv",
+        "group_nav": out_dir / "group_nav.csv",
         "turnover": out_dir / "turnover.csv",
         "coverage": out_dir / "coverage.csv",
         "factor_definition": out_dir / "model_factor_definition.yaml",
@@ -170,6 +197,14 @@ def export_artifact_bundle(
     _write_csv(paths["ic_decay"], evaluation_result.ic_decay)
     _write_csv(paths["rolling_stability"], evaluation_result.rolling_stability)
     _write_csv(paths["group_returns"], evaluation_result.group_returns)
+    _write_csv(
+        paths["group_nav"],
+        build_group_nav_table(
+            evaluation_result.group_returns,
+            rebalance_frequency=spec.rebalance_frequency,
+            label_horizon=int(spec.target.horizon),
+        ),
+    )
     _write_csv(paths["turnover"], evaluation_result.turnover)
     _write_csv(paths["coverage"], evaluation_result.coverage)
     write_diagnostics_artifact(
@@ -194,7 +229,16 @@ def export_artifact_bundle(
         model_family=spec.model.family,
     )
     _write_csv(paths["training_log"], training_log_df)
+    _write_csv(paths["training_metrics"], model_factor_result.training_metrics_df)
     _write_csv(paths["feature_importance"], feature_importance_df)
+    _write_csv(
+        paths["feature_importance_ledger"],
+        _prepare_feature_importance_ledger_for_export(
+            model_factor_result.feature_importance_ledger_df,
+            spec=spec,
+        ),
+    )
+    _write_csv(paths["feature_oos_ic"], model_factor_result.feature_oos_ic_df)
     missing_value_notes = [*training_log_notes, *feature_importance_notes]
     feature_preprocess_payload = _feature_preprocess_payload_for_artifacts(
         spec=spec,
@@ -282,6 +326,8 @@ def export_artifact_bundle(
         {
             "model_family": spec.model.family,
             "feature_count": len(spec.feature_columns),
+            "split_semantics": "model_training_prediction_holdout",
+            "split_semantics_label": "Model-Lab: IS=训练样本，OOS=预测样本",
             "trained_model_versions": model_factor_result.model_diagnostics.get(
                 "trained_model_versions"
             ),
@@ -290,6 +336,22 @@ def export_artifact_bundle(
             "mean_score_assets": model_factor_result.model_diagnostics.get("mean_score_assets"),
         }
     )
+    retrain_every = int(spec.training.retrain_every_n_dates)
+    retrain_warning_threshold = (
+        evaluation_config.model_factor_overrides.min_retrain_every_n_dates
+        if evaluation_config.profile_name == "exploratory_screening"
+        else None
+    )
+    retrain_density_warning = (
+        retrain_warning_threshold is not None and retrain_every >= int(retrain_warning_threshold)
+    )
+    metrics_for_payload["retrain_density_warning"] = bool(retrain_density_warning)
+    metrics_for_payload["retrain_density_warning_reason"] = (
+        "快速筛选模式使用较低重训密度，OOS IC 可能偏乐观；晋级前应在 default/stricter 模式复核。"
+        if retrain_density_warning
+        else None
+    )
+    metrics_for_payload["training_retrain_every_n_dates_effective"] = retrain_every
     metrics_for_payload["portfolio_validation_status"] = portfolio_validation_summary.get(
         "validation_status"
     )
@@ -375,22 +437,39 @@ def export_artifact_bundle(
     metrics_for_payload["level12_transition_confirmation_note"] = level12_transition[
         "confirmation_vs_degradation_note"
     ]
+    split_contract_payload = _split_contract_payload(metrics_for_payload)
+    coverage_frame = evaluation_result.coverage
+    coverage_eval_frame = coverage_frame
+    coverage_warmup_excluded_days = 0
+    if not coverage_frame.empty and "coverage_eval_included" in coverage_frame.columns:
+        coverage_eval_mask = coverage_frame["coverage_eval_included"].fillna(True).astype(bool)
+        coverage_warmup_excluded_days = int((~coverage_eval_mask).sum())
+        coverage_eval_frame = coverage_frame.loc[coverage_eval_mask].reset_index(drop=True)
+        if coverage_eval_frame.empty:
+            coverage_eval_frame = coverage_frame
 
     metrics_payload = {
         "metrics": _to_jsonable(metrics_for_payload),
         "coverage_by_date_summary": {
-            "n_dates": int(evaluation_result.coverage["date"].nunique())
-            if not evaluation_result.coverage.empty
+            "n_dates": int(coverage_eval_frame["date"].nunique())
+            if not coverage_eval_frame.empty
             else 0,
             "mean_coverage": _finite_or_none(
-                evaluation_result.coverage["coverage"].mean()
-                if not evaluation_result.coverage.empty
+                coverage_eval_frame["coverage"].mean()
+                if not coverage_eval_frame.empty
                 else float("nan")
             ),
             "min_coverage": _finite_or_none(
-                evaluation_result.coverage["coverage"].min()
-                if not evaluation_result.coverage.empty
+                coverage_eval_frame["coverage"].min()
+                if not coverage_eval_frame.empty
                 else float("nan")
+            ),
+            "coverage_warmup_excluded_days": coverage_warmup_excluded_days,
+            "mean_coverage_raw": _finite_or_none(
+                coverage_frame["coverage"].mean() if not coverage_frame.empty else float("nan")
+            ),
+            "min_coverage_raw": _finite_or_none(
+                coverage_frame["coverage"].min() if not coverage_frame.empty else float("nan")
             ),
         },
         "neutralization_summary": _to_jsonable(
@@ -465,12 +544,41 @@ def export_artifact_bundle(
             output_paths=paths,
         ),
     )
+    tearsheet_payload = build_research_tearsheet_payload(
+        metrics_path=paths["metrics"],
+        artifact_paths={
+            "ic_decay": paths["ic_decay"],
+            "group_returns": paths["group_returns"],
+            "turnover": paths["turnover"],
+            "rolling_stability": paths["rolling_stability"],
+            "ic_timeseries": paths["ic_timeseries"],
+            "coverage": paths["coverage"],
+            "backtest_result_json": paths["backtest_result_json"],
+        },
+        meta={
+            "factor_name": spec.factor_name,
+            "model_family": spec.model.family,
+            "feature_count": len(spec.feature_columns),
+            "universe_name": spec.universe.name,
+            "target_kind": spec.target.kind,
+            "target_horizon": spec.target.horizon,
+            "split_contract": split_contract_payload,
+            "split_semantics": metrics_for_payload["split_semantics"],
+            "split_semantics_label": metrics_for_payload["split_semantics_label"],
+        },
+    )
+    _write_json(paths["research_tearsheet"], tearsheet_payload)
+    export_research_tearsheet_pdf(
+        payload=tearsheet_payload,
+        output_path=paths["research_tearsheet_pdf"],
+    )
     purged_kfold = build_purged_kfold_diagnostics(
         experiment_result=evaluation_result.experiment_result,
         label_horizon=int(spec.target.horizon),
     )
     _write_json(paths["purged_kfold_summary"], purged_kfold.summary)
     _write_csv(paths["purged_kfold_folds"], purged_kfold.folds)
+    _write_csv(paths["purged_kfold_fold_daily"], purged_kfold.fold_daily)
     _write_json(
         paths["model_selection_json"],
         _build_model_selection_payload(
@@ -508,35 +616,48 @@ def export_artifact_bundle(
             "diagnostics": _to_jsonable(model_factor_result.model_diagnostics),
             "source_artifacts": {
                 "training_log_path": str(paths["training_log"]),
+                "training_metrics_path": str(paths["training_metrics"]),
                 "feature_importance_path": str(paths["feature_importance"]),
+                "feature_oos_ic_path": str(paths["feature_oos_ic"]),
                 "model_selection_path": str(paths["model_selection_json"]),
                 "metrics_path": str(paths["metrics"]),
             },
             "artifact_missing_value_notes": _to_jsonable(missing_value_notes),
+            **(
+                {"draft_model_source": dict(draft_model_source)}
+                if draft_model_source is not None
+                else {}
+            ),
         },
     )
-    _write_json(paths["feature_manifest_json"], feature_manifest_payload)
+    feature_manifest_with_audit: dict[str, object] = dict(feature_manifest_payload)
+    if draft_model_source is not None:
+        feature_manifest_with_audit["draft_model_source"] = dict(draft_model_source)
+    _write_json(paths["feature_manifest_json"], feature_manifest_with_audit)
 
-    manifest = {
+    manifest_inputs: dict[str, object] = {
+        "prices_path": spec.prices_path,
+        "features_path": spec.features_path,
+        "factor_name": spec.factor_name,
+        "feature_columns": list(spec.feature_columns),
+        "model_family": spec.model.family,
+        "feature_availability_mode": spec.feature_availability.mode,
+        "model_selection_enabled": bool(spec.model_selection.enabled),
+        "feature_preprocess": _to_jsonable(feature_preprocess_payload),
+        "feature_importance": _to_jsonable(spec_to_dict(spec).get("feature_importance", {})),
+        "universe_path": spec.universe.path,
+        "neutralization_exposures_path": spec.neutralization.exposures_path,
+    }
+    if draft_model_source is not None:
+        manifest_inputs["draft_model_source"] = dict(draft_model_source)
+    manifest: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "real_case_single_factor_bundle",
         "workflow": "real_case_model_factor",
         "run_timestamp_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "case_name": spec.name,
         "spec_path": str(Path(spec_path).resolve()) if spec_path is not None else None,
-        "inputs": {
-            "prices_path": spec.prices_path,
-            "features_path": spec.features_path,
-            "factor_name": spec.factor_name,
-            "feature_columns": list(spec.feature_columns),
-            "model_family": spec.model.family,
-            "feature_availability_mode": spec.feature_availability.mode,
-            "model_selection_enabled": bool(spec.model_selection.enabled),
-            "feature_preprocess": _to_jsonable(feature_preprocess_payload),
-            "feature_importance": _to_jsonable(spec_to_dict(spec).get("feature_importance", {})),
-            "universe_path": spec.universe.path,
-            "neutralization_exposures_path": spec.neutralization.exposures_path,
-        },
+        "inputs": manifest_inputs,
         "spec": _to_jsonable(spec_to_dict(spec)),
         "outputs": {name: str(path) for name, path in paths.items()},
         "required_bundle_files": list(REQUIRED_BUNDLE_FILES),
@@ -544,6 +665,13 @@ def export_artifact_bundle(
         "evaluation_standard": {
             "profile_name": evaluation_config.profile_name,
             "snapshot": research_evaluation_audit_snapshot(evaluation_config),
+        },
+        "split_contract": split_contract_payload,
+        "research_tearsheet": {
+            "status": "emitted",
+            "json_path": str(paths["research_tearsheet"]),
+            "pdf_path": str(paths["research_tearsheet_pdf"]),
+            "split_contract": split_contract_payload,
         },
         "vault_export": {
             "enabled": False,
@@ -557,6 +685,8 @@ def export_artifact_bundle(
             "details": _to_jsonable(missing_value_notes),
         },
     }
+    if draft_model_source is not None:
+        manifest["draft_model_source"] = dict(draft_model_source)
     _write_json(paths["run_manifest"], manifest)
 
     resolved_vault = resolve_vault_root(vault_root)
@@ -663,13 +793,28 @@ def _build_label_temporal_contract_payload(
         clipped_rows = int(raw_clipped_rows)
     else:
         clipped_rows = 0
+    raw_extreme_filtered_rows = model_factor_result.target_diagnostics.get(
+        "label_extreme_filtered_rows"
+    )
+    if isinstance(raw_extreme_filtered_rows, (int, float)) and math.isfinite(
+        float(raw_extreme_filtered_rows)
+    ):
+        extreme_filtered_rows = int(raw_extreme_filtered_rows)
+    else:
+        extreme_filtered_rows = 0
     return {
         "target_kind": spec.target.kind,
         "target_horizon": int(spec.target.horizon),
+        "target_price_column": spec.target.price_column,
+        "max_abs_forward_return": _finite_if_number(spec.target.max_abs_forward_return),
         "purged_train_gap_dates": purge_gap,
         "walk_forward_purged_training": True,
         "label_winsorize_zscore": _finite_if_number(diagnostics.get("label_winsorize_zscore")),
         "label_winsor_clipped_rows": clipped_rows,
+        "label_extreme_filtered_rows": extreme_filtered_rows,
+        "label_extreme_max_abs_raw_return": _finite_if_number(
+            model_factor_result.target_diagnostics.get("label_extreme_max_abs_raw_return")
+        ),
     }
 
 
@@ -840,7 +985,8 @@ def _build_backtest_result_payload(
         metrics_for_payload=metrics_for_payload,
         label_horizon=int(spec.target.horizon),
     )
-    return {
+    split_contract = _split_contract_payload(metrics_for_payload)
+    payload: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_backtest_result",
         "case_name": spec.name,
@@ -850,11 +996,15 @@ def _build_backtest_result_payload(
         "summary": summary,
         "source_artifacts": {
             "group_returns_path": str(output_paths["group_returns"]),
+            "group_nav_path": str(output_paths["group_nav"]),
             "turnover_path": str(output_paths["turnover"]),
             "metrics_path": str(output_paths["metrics"]),
         },
         "fallback_derived_fields": fallback_fields,
     }
+    if split_contract:
+        payload.update(_split_contract_top_level_fields(split_contract))
+    return payload
 
 
 def _feature_preprocess_payload_for_artifacts(
@@ -946,6 +1096,12 @@ def _prepare_feature_importance_for_export(
         "feature": "N/A",
         "mean_abs_importance": "N/A",
         "latest_importance": "N/A",
+        "mean_signed_importance": "N/A",
+        "latest_abs_importance": "N/A",
+        "positive_version_count": 0,
+        "negative_version_count": 0,
+        "zero_version_count": 0,
+        "sign_stability": "N/A",
         "importance_source": "unknown",
         "n_model_versions": 0,
     }
@@ -979,7 +1135,13 @@ def _prepare_feature_importance_for_export(
         return exported, notes
 
     missing_total = 0
-    for field in ("mean_abs_importance", "latest_importance"):
+    for field in (
+        "mean_abs_importance",
+        "latest_importance",
+        "mean_signed_importance",
+        "latest_abs_importance",
+        "sign_stability",
+    ):
         values = exported[field]
         missing_mask = values.isna() | values.astype(str).str.strip().eq("")
         missing_count = int(missing_mask.sum())
@@ -1014,6 +1176,7 @@ def _prepare_feature_importance_for_export(
 def _feature_importance_missing_reason(row: pd.Series, *, model_family: str) -> str:
     mean_value = str(row.get("mean_abs_importance", "")).strip()
     latest_value = str(row.get("latest_importance", "")).strip()
+    latest_abs_value = str(row.get("latest_abs_importance", "")).strip()
     has_missing = mean_value in {"", "N/A"} or latest_value in {"", "N/A"}
     if not has_missing:
         return "无缺失"
@@ -1031,11 +1194,69 @@ def _feature_importance_missing_reason(row: pd.Series, *, model_family: str) -> 
             f"模型族 `{model_family}` 当前不暴露可解释特征重要性接口，"
             "因此 mean/latest importance 记为 N/A。"
         )
+    if source in {"built_in", "feature_importances"} and latest_abs_value not in {"", "N/A"}:
+        return (
+            "树模型内置 importance 仅提供非负重要性；"
+            "latest_importance 的方向符号不可用，请使用 latest_abs_importance。"
+        )
+    if source == "unsupported_mlp_default":
+        return (
+            "MLP 默认不生成版本级 importance；permutation importance 成本高，"
+            "需要手动开启 latest_only + sampled 诊断。"
+        )
+    if source == "built_in_unavailable":
+        return (
+            f"模型族 `{model_family}` 当前估计器未暴露 feature_importances_；"
+            "已跳过默认 permutation fallback。"
+        )
+    if source == "permutation_skipped_guardrail":
+        reason = str(row.get("permutation_guardrail_reason", "")).strip()
+        return reason or "permutation importance 被计算 guardrail 跳过。"
+    if source == "permutation_sampled" and latest_abs_value not in {"", "N/A"}:
+        return (
+            "permutation importance 为手动 sampled 诊断，仅提供非负重要性，"
+            "不表示特征方向。"
+        )
     if source == "disabled":
         return "feature_importance.mode='disabled'，本次运行按配置跳过重要性计算。"
     if versions <= 0:
         return "训练阶段未生成可用模型版本，无法汇总 mean/latest importance。"
     return "重要性统计不可用（存在非有限值或中间结果缺失）。"
+
+
+def _prepare_feature_importance_ledger_for_export(
+    frame: pd.DataFrame,
+    *,
+    spec: ModelFactorCaseSpec,
+) -> pd.DataFrame:
+    columns = [
+        "run_id",
+        "case",
+        "factor",
+        "model_family",
+        "model_version",
+        "fit_date",
+        "feature",
+        "signed_importance",
+        "abs_importance",
+        "normalized_share",
+        "rank",
+        "importance_source",
+        "permutation_sampled",
+        "permutation_sample_rows",
+        "permutation_n_repeats",
+        "permutation_guardrail_reason",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    exported = frame.copy()
+    exported.insert(0, "factor", spec.factor_name)
+    exported.insert(0, "case", spec.name)
+    exported.insert(0, "run_id", spec.name)
+    for column in columns:
+        if column not in exported.columns:
+            exported[column] = pd.NA
+    return exported.loc[:, columns]
 
 
 def write_diagnostics_artifact(
@@ -1121,6 +1342,19 @@ def _normalized_text_or_none(value: object) -> str | None:
 
 def _as_object(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _split_contract_payload(metrics: Mapping[str, object]) -> dict[str, object]:
+    raw = metrics.get("split_contract")
+    return {str(key): value for key, value in raw.items()} if isinstance(raw, Mapping) else {}
+
+
+def _split_contract_top_level_fields(split_contract: Mapping[str, object]) -> dict[str, object]:
+    fields: dict[str, object] = {"split_contract": dict(split_contract)}
+    for key in ("is_start", "is_end", "oos_start", "oos_end"):
+        if key in split_contract:
+            fields[key] = split_contract[key]
+    return fields
 
 
 def _sync_exported_manifest_copies(

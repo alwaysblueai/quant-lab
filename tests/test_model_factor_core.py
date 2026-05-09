@@ -17,8 +17,11 @@ from alpha_lab.model_factor.core import (
     ModelSpec,
     TrainingSpec,
     _build_estimator,
+    _build_model_pipeline,
     _feature_importance_extractors_for_family,
+    _indices_as_contiguous_slice,
     _normalize_features,
+    _permutation_importance_guardrail_reason,
     _prepare_training_matrix,
 )
 from alpha_lab.model_factor.diagnostics import ModelFactorDiagnosticsRecorder
@@ -54,11 +57,158 @@ def test_build_model_factor_uses_past_only_training_windows(tmp_path) -> None:
     scored = result.training_log_df[result.training_log_df["status"] != "skipped"].copy()
     assert not scored.empty
     assert (pd.to_datetime(scored["trained_date_end"]) < pd.to_datetime(scored["score_date"])).all()
+    assert not result.training_metrics_df.empty
+    assert {
+        "model_version",
+        "train_rank_ic",
+        "oos_rank_ic",
+        "train_loss",
+        "oos_loss",
+    }.issubset(set(result.training_metrics_df.columns))
+    assert result.training_metrics_df["model_version"].nunique() == int(
+        scored["model_version"].nunique()
+    )
+    assert not result.feature_oos_ic_df.empty
+    assert set(spec.feature_columns).issubset(set(result.feature_oos_ic_df["feature"]))
     assert result.feature_importance_df["feature"].tolist() == sorted(spec.feature_columns)
+    assert {
+        "date",
+        "universe_count",
+        "feature_row_count",
+        "label_available_count",
+        "eligible_count",
+    }.issubset(set(result.coverage_base_df.columns))
+    assert not result.coverage_base_df.empty
     assert set(result.forward_label_df.columns) == {"date", "asset", "factor", "value"}
     assert result.forward_label_df["factor"].eq(f"forward_return_{spec.target.horizon}").all()
     assert any("训练模型生成因子：第 " in message for message, _ in progress_events)
     assert progress_events[-1][1] == 100
+
+
+def test_build_model_factor_coverage_base_tracks_universe_and_missing_inputs(tmp_path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+
+    prices = pd.read_csv(spec.prices_path)
+    features = pd.read_csv(spec.features_path)
+    features["date"] = pd.to_datetime(features["date"])
+    drop_date = pd.Timestamp(features["date"].min())
+    drop_asset = str(features["asset"].iloc[0])
+    features = features[
+        ~((features["date"] == drop_date) & (features["asset"].astype(str) == drop_asset))
+    ].copy()
+    nan_date = pd.Timestamp(features["date"].drop_duplicates().iloc[1])
+    nan_asset = str(features.loc[features["date"] == nan_date, "asset"].iloc[0])
+    features.loc[
+        (features["date"] == nan_date) & (features["asset"].astype(str) == nan_asset),
+        spec.feature_columns[0],
+    ] = pd.NA
+
+    result = build_model_factor(
+        features,
+        prices,
+        ModelFactorBuildConfig(
+            factor_name=spec.factor_name,
+            feature_columns=spec.feature_columns,
+            target_horizon=spec.target.horizon,
+            feature_preprocess=spec.feature_preprocess,
+            model=spec.model,
+            training=spec.training,
+            known_at_col="known_at",
+        ),
+    )
+
+    coverage = result.coverage_base_df.copy()
+    coverage["date"] = pd.to_datetime(coverage["date"])
+    dropped_row = coverage.loc[coverage["date"] == drop_date].iloc[0]
+    assert int(dropped_row["universe_count"]) == int(prices["asset"].nunique())
+    assert int(dropped_row["feature_row_count"]) == int(prices["asset"].nunique()) - 1
+    assert int(dropped_row["missing_feature_count"]) == 1
+
+    nan_row = coverage.loc[coverage["date"] == nan_date].iloc[0]
+    assert int(nan_row["feature_nan_row_count"]) >= 1
+
+    last_row = coverage.sort_values("date", kind="mergesort").iloc[-1]
+    assert int(last_row["label_available_count"]) == 0
+    assert int(last_row["filtered_count"]) == int(last_row["universe_count"])
+
+
+def test_build_model_factor_uses_configured_target_price_column(tmp_path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+
+    prices = pd.read_csv(spec.prices_path)
+    features = pd.read_csv(spec.features_path)
+    prices["close_qfq"] = prices["close"]
+    first_asset = str(prices["asset"].iloc[0])
+    first_date = pd.Timestamp(prices["date"].iloc[0])
+    prices.loc[
+        (prices["asset"] == first_asset) & (pd.to_datetime(prices["date"]) == first_date),
+        "close",
+    ] = 0.01
+
+    result = build_model_factor(
+        features,
+        prices,
+        ModelFactorBuildConfig(
+            factor_name=spec.factor_name,
+            feature_columns=spec.feature_columns,
+            target_horizon=spec.target.horizon,
+            target_price_column="close_qfq",
+            feature_preprocess=spec.feature_preprocess,
+            model=spec.model,
+            training=spec.training,
+            known_at_col="known_at",
+        ),
+    )
+
+    labels = result.forward_label_df.copy()
+    labels["date"] = pd.to_datetime(labels["date"])
+    row = labels[(labels["asset"] == first_asset) & (labels["date"] == first_date)].iloc[0]
+    price_path = prices[prices["asset"] == first_asset].copy()
+    price_path["date"] = pd.to_datetime(price_path["date"])
+    price_path = price_path.sort_values("date", kind="mergesort").reset_index(drop=True)
+    expected = price_path.loc[5, "close_qfq"] / price_path.loc[0, "close_qfq"] - 1.0
+    assert row["value"] == pytest.approx(expected)
+    assert abs(float(row["value"])) < 1.0
+
+
+def test_build_model_factor_filters_extreme_forward_returns(tmp_path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+
+    prices = pd.read_csv(spec.prices_path)
+    features = pd.read_csv(spec.features_path)
+    first_asset = str(prices["asset"].iloc[0])
+    first_date = pd.Timestamp(prices["date"].iloc[0])
+    prices.loc[
+        (prices["asset"] == first_asset) & (pd.to_datetime(prices["date"]) == first_date),
+        "close",
+    ] = 0.01
+
+    result = build_model_factor(
+        features,
+        prices,
+        ModelFactorBuildConfig(
+            factor_name=spec.factor_name,
+            feature_columns=spec.feature_columns,
+            target_horizon=spec.target.horizon,
+            max_abs_forward_return=1.0,
+            feature_preprocess=spec.feature_preprocess,
+            model=spec.model,
+            training=spec.training,
+            known_at_col="known_at",
+        ),
+    )
+
+    labels = result.forward_label_df.copy()
+    labels["date"] = pd.to_datetime(labels["date"])
+    row = labels[(labels["asset"] == first_asset) & (labels["date"] == first_date)].iloc[0]
+    assert pd.isna(row["value"])
+    assert int(result.target_diagnostics["label_extreme_filtered_rows"]) >= 1
+    sample = result.target_diagnostics["label_extreme_top_samples"][0]
+    assert sample["asset"] == first_asset
+    assert sample["entry_price"] == pytest.approx(0.01)
 
 
 def test_build_model_factor_batches_predictions_for_reused_model_version(tmp_path) -> None:
@@ -101,22 +251,99 @@ def test_build_model_factor_batches_predictions_for_reused_model_version(tmp_pat
         item for item in payload["stages"] if str(item.get("name")) == "predict"
     ]
     split_stages = [item for item in payload["stages"] if str(item.get("name")) == "split"]
+    fit_stages = [item for item in payload["stages"] if str(item.get("name")) == "model_fit"]
     window_index_stages = [
         item for item in payload["stages"] if str(item.get("name")) == "training_window_index"
     ]
     assert not split_stages
+    assert fit_stages
+    assert all(
+        item["result"]["model_matrix_mode"] == "numpy_arrays_after_window_index"
+        for item in fit_stages
+    )
+    assert {item["result"]["model_matrix_selection"] for item in fit_stages} <= {
+        "contiguous_slice",
+        "advanced_index",
+    }
     assert len(window_index_stages) == 1
     assert window_index_stages[0]["result"]["row_index_cache_mode"] == (
-        "lazy_materialize_fit_windows"
+        "on_demand_fit_windows_no_retention"
     )
     assert len(predict_stages) == 1
     predict_result = predict_stages[0]["result"]
     assert predict_result["n_score_dates"] == int(len(scored))
     assert predict_result["n_score_rows"] == int(len(result.factor_df))
+    assert predict_result["model_matrix_mode"] == "numpy_arrays_after_window_index"
     assert set(predict_result["statuses"]) == {"fit_scored", "reused_scored"}
 
 
-def test_build_model_factor_defaults_feature_importance_to_latest_fit_only(tmp_path) -> None:
+def test_build_model_factor_reuses_prepared_input_cache(tmp_path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+
+    prices = pd.read_csv(spec.prices_path)
+    features = pd.read_csv(spec.features_path)
+    cache_dir = tmp_path / "prepared_cache"
+    cache_key = "demo-cache-key"
+
+    config = ModelFactorBuildConfig(
+        factor_name=spec.factor_name,
+        feature_columns=spec.feature_columns,
+        target_horizon=spec.target.horizon,
+        feature_preprocess=spec.feature_preprocess,
+        model=spec.model,
+        training=spec.training,
+        known_at_col="known_at",
+        preparation_cache_dir=str(cache_dir),
+        preparation_cache_key=cache_key,
+    )
+    first_observer = ModelFactorDiagnosticsRecorder()
+    first = build_model_factor(features, prices, config, observer=first_observer)
+    first_payload = first_observer.build_payload(run_meta={"case_name": spec.name})
+    first_stages = first_payload["stages"]
+    first_target_stage = next(
+        item for item in first_stages if str(item.get("name")) == "target_build"
+    )
+    first_window_stage = next(
+        item for item in first_stages if str(item.get("name")) == "training_window_index"
+    )
+    first_array_stage = next(
+        item
+        for item in first_stages
+        if str(item.get("name")) == "preprocess"
+        and (item.get("result") or {}).get("cache_layout") == "numpy_v2_mmap"
+    )
+    assert first_target_stage["result"]["cache_hit"] is False
+    assert first_target_stage["result"]["prepared_cache_write_succeeded"] is True
+    assert first_target_stage["result"]["prepared_cache_adopted_for_run"] is True
+    assert first_window_stage["result"]["row_index_cache_mode"] == (
+        "compact_labeled_numpy_windows_no_retention"
+    )
+    assert first_array_stage["result"]["has_compact_training_matrix"] is True
+    second_observer = ModelFactorDiagnosticsRecorder()
+    second = build_model_factor(features, prices, config, observer=second_observer)
+
+    pd.testing.assert_frame_equal(first.forward_label_df, second.forward_label_df)
+    assert len(first.factor_df) == len(second.factor_df)
+    payload = second_observer.build_payload(run_meta={"case_name": spec.name})
+    stages = payload["stages"]
+    feature_stage = next(item for item in stages if str(item.get("name")) == "feature_validate")
+    target_stage = next(item for item in stages if str(item.get("name")) == "target_build")
+    window_stage = next(
+        item for item in stages if str(item.get("name")) == "training_window_index"
+    )
+    assert feature_stage["result"]["cache_hit"] is True
+    assert feature_stage["result"]["cache_layout"] == "numpy_v2"
+    assert target_stage["result"]["cache_hit"] is True
+    assert window_stage["result"]["row_index_cache_mode"] == (
+        "compact_labeled_numpy_windows_no_retention"
+    )
+    timings = payload["stage_timings"]
+    assert timings["model_fit_count"] > 0
+    assert "model_fit_p95" in timings
+
+
+def test_build_model_factor_defaults_feature_importance_to_every_fit_cheap_ledger(tmp_path) -> None:
     spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
     spec = load_model_factor_case_spec(spec_path)
 
@@ -140,9 +367,17 @@ def test_build_model_factor_defaults_feature_importance_to_latest_fit_only(tmp_p
     fit_count = int((result.training_log_df["status"] == "fit_scored").sum())
     assert fit_count > 1
     assert result.model_diagnostics["trained_model_versions"] == fit_count
-    assert result.model_diagnostics["feature_importance"]["mode"] == "latest_only"
-    assert result.model_diagnostics["feature_importance"]["n_importance_model_versions"] == 1
-    assert result.feature_importance_df["n_model_versions"].eq(1).all()
+    assert result.model_diagnostics["feature_importance"]["mode"] == "every_fit"
+    assert result.model_diagnostics["feature_importance"]["method"] == "auto"
+    assert result.model_diagnostics["feature_importance"]["save_ledger"] is True
+    assert (
+        result.model_diagnostics["feature_importance"]["n_importance_model_versions"]
+        == fit_count
+    )
+    assert result.feature_importance_df["n_model_versions"].eq(fit_count).all()
+    assert not result.feature_importance_ledger_df.empty
+    assert result.feature_importance_ledger_df["model_version"].nunique() == fit_count
+    assert result.feature_importance_ledger_df["importance_source"].eq("coefficient").all()
 
 
 def test_build_model_factor_can_disable_feature_importance(tmp_path) -> None:
@@ -227,6 +462,40 @@ def test_feature_importance_registry_covers_all_model_families() -> None:
         assert extractors
 
 
+def test_permutation_importance_guardrail_requires_sample_rows_for_many_features() -> None:
+    config = FeatureImportanceConfig(
+        method="permutation",
+        permutation={"enabled": True, "latest_only": True},
+    )
+
+    reason = _permutation_importance_guardrail_reason(
+        config,
+        model_family="ridge",
+        n_versions_for_estimate=1,
+        n_features=75,
+    )
+
+    assert "sample_rows is not set" in reason
+
+
+def test_indices_as_contiguous_slice_detects_dense_ranges() -> None:
+    assert _indices_as_contiguous_slice(pd.Index([3, 4, 5]).to_numpy()).start == 3
+    assert _indices_as_contiguous_slice(pd.Index([3, 4, 5]).to_numpy()).stop == 6
+    assert _indices_as_contiguous_slice(pd.Index([3, 5]).to_numpy()) is None
+    assert _indices_as_contiguous_slice(pd.Index([5, 4, 3]).to_numpy()) is None
+
+
+def test_model_pipeline_uses_in_place_preprocessing_defaults() -> None:
+    pipeline, _ = _build_model_pipeline(
+        model_spec=ModelSpec(family="ridge"),
+        scale_features="standard",
+    )
+
+    assert pipeline.named_steps["imputer"].copy is False
+    assert pipeline.named_steps["scaler"].copy is False
+    assert getattr(pipeline.named_steps["model"], "copy_X", None) is False
+
+
 def test_prepare_training_matrix_uses_tree_float32_and_linear_float64() -> None:
     frame = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "f2": [4.0, 5.0, 6.0]})
 
@@ -279,7 +548,7 @@ def test_normalize_features_casts_asset_and_industry_to_category() -> None:
         ("mlp", {"max_iter": 50, "hidden_layer_sizes": (8,), "early_stopping": False}),
     ],
 )
-def test_build_model_factor_uses_permutation_importance_fallback_for_gbdt_and_mlp(
+def test_build_model_factor_does_not_default_to_permutation_for_gbdt_and_mlp(
     tmp_path,
     family: str,
     params: dict[str, object],
@@ -305,11 +574,55 @@ def test_build_model_factor_uses_permutation_importance_fallback_for_gbdt_and_ml
 
     feature_importance_df = result.feature_importance_df
     assert not feature_importance_df.empty
-    assert (feature_importance_df["importance_source"] == "permutation").all()
-    mean_importance = pd.to_numeric(feature_importance_df["mean_abs_importance"], errors="coerce")
-    latest_importance = pd.to_numeric(feature_importance_df["latest_importance"], errors="coerce")
-    assert mean_importance.notna().all()
-    assert latest_importance.notna().all()
+    expected_source = "built_in_unavailable" if family == "gbdt" else "unsupported_mlp_default"
+    assert (feature_importance_df["importance_source"] == expected_source).all()
+    assert not result.feature_importance_ledger_df.empty
+    assert result.feature_importance_ledger_df["importance_source"].eq(expected_source).all()
+    assert not feature_importance_df["importance_source"].str.contains("permutation").any()
+
+
+def test_build_model_factor_runs_sampled_permutation_only_when_enabled(tmp_path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+    prices = pd.read_csv(spec.prices_path)
+    features = pd.read_csv(spec.features_path)
+
+    result = build_model_factor(
+        features,
+        prices,
+        ModelFactorBuildConfig(
+            factor_name=spec.factor_name,
+            feature_columns=spec.feature_columns,
+            target_horizon=spec.target.horizon,
+            feature_preprocess=spec.feature_preprocess,
+            feature_importance=FeatureImportanceConfig(
+                method="permutation",
+                mode="latest_only",
+                permutation={
+                    "enabled": True,
+                    "latest_only": True,
+                    "sample_rows": 128,
+                    "n_repeats": 1,
+                    "top_k_features": 3,
+                },
+            ),
+            model=ModelSpec(
+                family="mlp",
+                params={
+                    "max_iter": 20,
+                    "hidden_layer_sizes": (8,),
+                    "early_stopping": False,
+                },
+            ),
+            training=spec.training,
+            known_at_col="known_at",
+        ),
+    )
+
+    assert result.model_diagnostics["feature_importance"]["permutation"]["enabled"] is True
+    assert result.model_diagnostics["feature_importance"]["permutation"]["latest_only"] is True
+    assert result.feature_importance_df["importance_source"].eq("permutation_sampled").all()
+    assert result.feature_importance_ledger_df["importance_source"].eq("permutation_sampled").all()
 
 
 @pytest.mark.parametrize(

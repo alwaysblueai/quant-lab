@@ -45,12 +45,12 @@ def render_summary_markdown(
         "",
         "| 指标 | 数值 |",
         "|---|---|",
-        f"| Mean IC | {_fmt(metrics.get('mean_ic'))} |",
-        f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
-        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
-        f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
-        f"| Mean Long-Short Return | {_fmt(metrics.get('mean_long_short_return'))} |",
-        f"| Long-Short IR | {_fmt(metrics.get('long_short_ir'))} |",
+        f"| Mean IC | {_fmt_dual_metric(metrics, 'mean_ic')} |",
+        f"| Mean Rank IC | {_fmt_dual_metric(metrics, 'mean_rank_ic')} |",
+        f"| Mean MI | {_fmt_dual_metric(metrics, 'mean_mutual_information')} |",
+        f"| ICIR | {_fmt_dual_metric(metrics, 'ic_ir')} |",
+        f"| Mean Long-Short Return | {_fmt_dual_metric(metrics, 'mean_long_short_return')} |",
+        f"| Long-Short IR | {_fmt_dual_metric(metrics, 'long_short_ir')} |",
         f"| 因子结论 | {_fmt(metrics.get('factor_verdict'))} |",
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
@@ -97,6 +97,8 @@ def render_experiment_card_markdown(
         "status: draft",
         f"factor: {spec.factor_name}",
         f"model_family: {spec.model.family}",
+        "emergent_moves: []",
+        "operative_claims: []",
         f"horizon: {spec.target.horizon}",
         f"quantiles: {spec.n_quantiles}",
         f"rebalance_frequency: {spec.rebalance_frequency}",
@@ -128,12 +130,12 @@ def render_experiment_card_markdown(
         "",
         "| 指标 | 数值 |",
         "|---|---|",
-        f"| Mean IC | {_fmt(metrics.get('mean_ic'))} |",
-        f"| Mean Rank IC | {_fmt(metrics.get('mean_rank_ic'))} |",
-        f"| Mean MI | {_fmt(metrics.get('mean_mutual_information'))} |",
-        f"| ICIR | {_fmt(metrics.get('ic_ir'))} |",
-        f"| Mean Long-Short Return | {_fmt(metrics.get('mean_long_short_return'))} |",
-        f"| Long-Short IR | {_fmt(metrics.get('long_short_ir'))} |",
+        f"| Mean IC | {_fmt_dual_metric(metrics, 'mean_ic')} |",
+        f"| Mean Rank IC | {_fmt_dual_metric(metrics, 'mean_rank_ic')} |",
+        f"| Mean MI | {_fmt_dual_metric(metrics, 'mean_mutual_information')} |",
+        f"| ICIR | {_fmt_dual_metric(metrics, 'ic_ir')} |",
+        f"| Mean Long-Short Return | {_fmt_dual_metric(metrics, 'mean_long_short_return')} |",
+        f"| Long-Short IR | {_fmt_dual_metric(metrics, 'long_short_ir')} |",
         f"| Factor Verdict | {_fmt(metrics.get('factor_verdict'))} |",
         f"| Campaign Triage | {_fmt(metrics.get('campaign_triage'))} |",
         f"| Level 2 Promotion | {_fmt(metrics.get('promotion_decision'))} |",
@@ -146,6 +148,11 @@ def render_experiment_card_markdown(
         "## 解释",
         "",
         "- 待补充：记录为什么这些特征和该模型族有机会生成稳定横截面排序。",
+        "",
+        "## 回灌素材",
+        "",
+        "- `emergent_moves`: 待补充：这次模型实验浮现、可被未来模型或因子复用的新 move。",
+        "- `operative_claims`: 待补充：观察到的现象 / 经验 / 边界条件；弱 hint，不作为 kill 条件。",
         "",
         "## 下一步",
         "",
@@ -174,6 +181,17 @@ def _fmt(value: object) -> str:
         return f"{value:.6f}"
     text = str(value).strip()
     return text if text else "N/A"
+
+
+def _fmt_dual_metric(metrics: dict[str, object], key: str) -> str:
+    full_value = metrics.get(f"{key}_full")
+    oos_value = metrics.get(f"{key}_oos")
+    base_value = metrics.get(key)
+    primary = _fmt(full_value if full_value is not None else base_value)
+    oos = _fmt(oos_value)
+    if oos_value is None or oos == "N/A":
+        return primary
+    return f"{primary} (OOS: {oos})"
 
 
 def _fmt_reason_list(value: object) -> str:
