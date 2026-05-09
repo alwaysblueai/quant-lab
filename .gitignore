@@ -17,8 +17,11 @@ wheels/
 .claude/
 .codex
 .codex/
+.research_bridge_cache/
 
 # Local temporary scratch files
+tmp/
+.tmp/
 tmp_*
 .tmp_*
 
@@ -30,7 +33,8 @@ tmp_*
 # OS/editor artifacts
 .DS_Store
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 
 # Coverage / profiling artifacts
 .coverage
