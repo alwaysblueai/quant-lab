@@ -1,0 +1,56 @@
+name: stock_lasso_safe_bfq_20_lean
+factor_name: stock_lasso_safe_bfq_20_lean_5d
+features_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet
+feature_columns:
+- turnover_rate_f
+- turnover_rate
+- atr_bfq
+- dv_ttm
+- topdays
+- updays
+- downdays
+- lowdays
+- total_mv
+- circ_mv
+- pe_ttm
+- macd_dea_bfq
+- macd_dif_bfq
+- trix_bfq
+- obv_bfq
+- emv_bfq
+- rsi_bfq_24
+- wr_bfq
+- dmi_adx_bfq
+- dmi_pdi_bfq
+prices_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet
+rebalance_frequency: W
+n_quantiles: 5
+direction: long
+universe:
+  name: default
+target:
+  kind: forward_return
+  horizon: 5
+  price_column: close_qfq
+  max_abs_forward_return: 1.0
+feature_preprocess:
+  missing_policy: median_impute
+  cross_sectional_transform: winsorize_zscore
+  scale_features: auto
+model:
+  family: lasso
+  params:
+    alpha: 0.001
+training:
+  window_type: rolling
+  train_window_n_dates: 120
+  min_train_dates: 60
+  min_train_rows: 50000
+  retrain_every_n_dates: 40
+  min_score_assets: 2000
+neutralization:
+  enabled: false
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: ../../../outputs/real_cases

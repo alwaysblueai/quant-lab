@@ -1,0 +1,80 @@
+name: stock_xgboost_safe_bfq_35
+factor_name: stock_xgboost_safe_bfq_35_5d
+features_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet
+feature_columns:
+- turnover_rate
+- turnover_rate_f
+- volume_ratio
+- pe_ttm
+- pb
+- ps_ttm
+- dv_ttm
+- total_mv
+- circ_mv
+- free_share
+- atr_bfq
+- bias1_bfq
+- bias2_bfq
+- bias3_bfq
+- cci_bfq
+- macd_bfq
+- macd_dea_bfq
+- macd_dif_bfq
+- mtm_bfq
+- obv_bfq
+- rsi_bfq_6
+- rsi_bfq_12
+- rsi_bfq_24
+- vr_bfq
+- wr_bfq
+- updays
+- downdays
+- topdays
+- lowdays
+- dmi_adx_bfq
+- dmi_pdi_bfq
+- dmi_mdi_bfq
+- mfi_bfq
+- emv_bfq
+- trix_bfq
+prices_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet
+rebalance_frequency: W
+n_quantiles: 5
+direction: long
+universe:
+  name: default
+target:
+  kind: forward_return
+  horizon: 5
+  price_column: close_qfq
+  max_abs_forward_return: 1.0
+feature_preprocess:
+  missing_policy: median_impute
+  cross_sectional_transform: winsorize_zscore
+  scale_features: auto
+model:
+  family: xgboost
+  params:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 5
+    min_child_weight: 10
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    tree_method: hist
+    objective: reg:squarederror
+label_winsorize_zscore: 4.0
+training:
+  window_type: rolling
+  train_window_n_dates: 120
+  min_train_dates: 60
+  min_train_rows: 50000
+  retrain_every_n_dates: 40
+  min_score_assets: 2000
+neutralization:
+  enabled: false
+transaction_cost:
+  one_way_rate: 0.001
+output:
+  root_dir: ../../../outputs/real_cases
