@@ -77,6 +77,38 @@ factor_registry.register("low_volatility", low_volatility)
 factor_registry.register("amplitude", amplitude)
 factor_registry.register("downside_volatility", downside_volatility)
 
+_PRICE_RECIPE_OPTIONAL_COLUMNS = (
+    "open",
+    "high",
+    "low",
+    "pre_close",
+    "volume",
+    "amount",
+    "vwap",
+    "turnover_rate",
+    "up_limit",
+    "down_limit",
+    "is_limit_up",
+    "is_limit_down",
+    "limit_up",
+    "limit_down",
+    "is_suspended",
+    "is_st",
+    "is_hs300",
+    "is_zz500",
+    "is_zz1000",
+    "is_sz50",
+)
+_BASE_BUILDER_RESERVED_KEYS = frozenset(
+    {
+        "method",
+        "window",
+        "lookback",
+        "skip_recent",
+        "min_periods",
+    }
+)
+
 
 class FactorRecipeError(ValueError):
     """Raised when factor-recipe payload is invalid."""
@@ -209,7 +241,7 @@ def _compute_step_signal(*, prices: pd.DataFrame, step_cfg: Mapping[str, object]
     )
     min_periods = _optional_positive_int(step_cfg.get("min_periods"), field="base.min_periods")
 
-    kwargs: dict[str, int] = {}
+    kwargs: dict[str, object] = _collect_base_builder_kwargs(step_cfg)
     if window is not None:
         kwargs["window"] = window
     if skip_recent is not None:
@@ -219,6 +251,27 @@ def _compute_step_signal(*, prices: pd.DataFrame, step_cfg: Mapping[str, object]
 
     factor_df = builder(prices, **kwargs)
     return factor_df[["date", "asset", "value"]].copy()
+
+
+def _collect_base_builder_kwargs(step_cfg: Mapping[str, object]) -> dict[str, object]:
+    """Collect custom builder kwargs from ``recipe.base``.
+
+    Built-in recipe keys are parsed explicitly in ``_compute_step_signal``.
+    Remaining base keys are passed through so research factors can expose
+    governance and mechanism switches such as ``shock_gate_mode`` or
+    ``neutralize_basic`` without requiring a core code change per parameter.
+    """
+    kwargs: dict[str, object] = {}
+    for raw_key, value in step_cfg.items():
+        if not isinstance(raw_key, str):
+            raise FactorRecipeError("base keys must be strings")
+        key = raw_key.strip()
+        if key in _BASE_BUILDER_RESERVED_KEYS or value is None:
+            continue
+        if not key:
+            raise FactorRecipeError("base keys must be non-empty strings")
+        kwargs[key] = value
+    return kwargs
 
 
 def _build_vcimom_signal(
@@ -498,22 +551,16 @@ def _normalize_prices(prices: pd.DataFrame) -> pd.DataFrame:
         raise FactorRecipeError(f"prices is missing required columns: {sorted(missing)}")
 
     keep_cols = ["date", "asset", "close"]
-    for optional_col in ("high", "low", "volume", "amount"):
+    for optional_col in _PRICE_RECIPE_OPTIONAL_COLUMNS:
         if optional_col in prices.columns:
             keep_cols.append(optional_col)
 
     out = prices[keep_cols].copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out["asset"] = out["asset"].astype(str).str.strip()
-    out["close"] = pd.to_numeric(out["close"], errors="coerce")
-    if "high" in out.columns:
-        out["high"] = pd.to_numeric(out["high"], errors="coerce")
-    if "low" in out.columns:
-        out["low"] = pd.to_numeric(out["low"], errors="coerce")
-    if "volume" in out.columns:
-        out["volume"] = pd.to_numeric(out["volume"], errors="coerce")
-    if "amount" in out.columns:
-        out["amount"] = pd.to_numeric(out["amount"], errors="coerce")
+    for column in ("close", *_PRICE_RECIPE_OPTIONAL_COLUMNS):
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
     out = out.dropna(subset=["date", "asset", "close"]).copy()
     out = out[out["asset"] != ""].copy()
     out = out.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
