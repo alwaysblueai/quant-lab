@@ -113,19 +113,19 @@ def build_backtest_summary_payload(
     summary: dict[str, object] = {
         "annualized_return": _safe_float(stats.get("annualized_return")),
         "annualized_volatility": _safe_float(stats.get("annualized_volatility")),
-        # Preserve legacy interpretation of this field while allowing canonical fallback.
-        "sharpe": _coalesce_float(
-            _safe_float(metrics_for_payload.get("long_short_ir")),
-            _safe_float(stats.get("sharpe")),
-        ),
+        "sharpe": _safe_float(stats.get("sharpe")),
         "sortino": _safe_float(stats.get("sortino")),
         "max_drawdown": _safe_float(stats.get("max_drawdown")),
         "calmar": _safe_float(stats.get("calmar")),
         "win_rate": _coalesce_float(
+            _safe_float(metrics_for_payload.get("long_short_hit_rate_full")),
             _safe_float(metrics_for_payload.get("long_short_hit_rate")),
             _safe_float(stats.get("win_rate")),
         ),
-        "turnover": _safe_float(metrics_for_payload.get("mean_long_short_turnover")),
+        "turnover": _coalesce_float(
+            _safe_float(metrics_for_payload.get("mean_long_short_turnover_full")),
+            _safe_float(metrics_for_payload.get("mean_long_short_turnover")),
+        ),
         "information_ratio": _safe_float(
             metrics_for_payload.get("portfolio_validation_benchmark_information_ratio")
         ),
@@ -135,10 +135,25 @@ def build_backtest_summary_payload(
         "tracking_error": _safe_float(
             metrics_for_payload.get("portfolio_validation_benchmark_tracking_error")
         ),
-        "pre_cost_return": _safe_float(metrics_for_payload.get("mean_long_short_return")),
-        "post_cost_return": _safe_float(
-            metrics_for_payload.get("mean_cost_adjusted_long_short_return")
+        "pre_cost_return": _coalesce_float(
+            _safe_float(metrics_for_payload.get("mean_long_short_return_full")),
+            _safe_float(metrics_for_payload.get("mean_long_short_return")),
         ),
+        "post_cost_return": _coalesce_float(
+            _safe_float(metrics_for_payload.get("mean_cost_adjusted_long_short_return_full")),
+            _safe_float(metrics_for_payload.get("mean_cost_adjusted_long_short_return")),
+        ),
+        "max_drawdown_oos": _coalesce_float(
+            _safe_float(metrics_for_payload.get("max_drawdown_oos")),
+            _safe_float(metrics_for_payload.get("ls_max_drawdown_oos")),
+        ),
+        "pre_cost_return_oos": _safe_float(
+            metrics_for_payload.get("mean_long_short_return_oos")
+        ),
+        "post_cost_return_oos": _safe_float(
+            metrics_for_payload.get("mean_cost_adjusted_long_short_return_oos")
+        ),
+        "turnover_oos": _safe_float(metrics_for_payload.get("mean_long_short_turnover_oos")),
         "rolling_sharpe": _safe_float(stats.get("rolling_sharpe")),
         "rolling_drawdown": _safe_float(stats.get("rolling_drawdown")),
         "subperiod_analysis": _safe_text(stats.get("subperiod_analysis")) or "N/A",
@@ -146,6 +161,7 @@ def build_backtest_summary_payload(
         "nav_points": _rows_to_json(nav_points),
         "monthly_return_table": _rows_to_json(stats.get("monthly_returns")),
         "drawdown_table": _rows_to_json(stats.get("drawdown_table")),
+        "nav_source": "quantile_long_short_from_group_returns",
         "nav_series_policy": (
             "non_overlapping_forward_return_path_for_chart"
             if effective_step > 1
@@ -169,6 +185,85 @@ def build_backtest_summary_payload(
     return summary, fallback_derived_fields
 
 
+def build_group_nav_table(
+    group_returns_df: pd.DataFrame,
+    *,
+    rebalance_frequency: str,
+    label_horizon: int = 1,
+) -> pd.DataFrame:
+    """Build a canonical, non-overlapping NAV table from a daily group_returns frame.
+
+    ``group_returns.csv`` stores per-(date, group) **H-day forward returns** on
+    the daily evaluation grid.  Naively compounding consecutive rows multiplies
+    each return ~H times.  This helper samples every ``max(rebalance_step,
+    label_horizon)`` trading dates so windows are non-overlapping, then runs
+    cumprod within each group.  The resulting frame is the single artifact
+    downstream consumers (notebooks, dashboards, exports) should compound.
+
+    Returned columns: ``date``, ``group``, ``period_return``, ``nav``,
+    ``sample_step``, ``rebalance_step``, ``label_horizon``.  Empty input or
+    missing required columns yield an empty frame with the same schema.
+    """
+
+    columns = [
+        "date",
+        "group",
+        "period_return",
+        "nav",
+        "sample_step",
+        "rebalance_step",
+        "label_horizon",
+    ]
+    required = {"date", "group", "group_return"}
+    if not required.issubset(set(group_returns_df.columns)):
+        return pd.DataFrame(columns=columns)
+
+    frame = group_returns_df.copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["group_return"] = pd.to_numeric(frame["group_return"], errors="coerce")
+    frame = frame.dropna(subset=["date", "group", "group_return"])
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    rebalance_step = max(1, _rebalance_step(rebalance_frequency))
+    safe_label_horizon = max(1, int(label_horizon)) if label_horizon else 1
+    sample_step = max(rebalance_step, safe_label_horizon)
+
+    rows: list[dict[str, object]] = []
+    for group, block in frame.groupby("group", sort=True):
+        per_group = (
+            block[["date", "group_return"]]
+            .groupby("date", as_index=False, sort=True)["group_return"]
+            .mean()
+            .sort_values("date", kind="mergesort")
+            .reset_index(drop=True)
+        )
+        if per_group.empty:
+            continue
+        sampled = per_group.iloc[::sample_step].reset_index(drop=True)
+        if sampled.empty:
+            continue
+        nav = (1.0 + sampled["group_return"]).cumprod()
+        for date_value, period_return, nav_value in zip(
+            sampled["date"], sampled["group_return"], nav, strict=True
+        ):
+            rows.append(
+                {
+                    "date": pd.Timestamp(date_value).strftime("%Y-%m-%d"),
+                    "group": group,
+                    "period_return": float(period_return),
+                    "nav": float(nav_value),
+                    "sample_step": sample_step,
+                    "rebalance_step": rebalance_step,
+                    "label_horizon": safe_label_horizon,
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _long_short_series(group_returns_df: pd.DataFrame) -> pd.Series:
     required = {"date", "group", "group_return"}
     if not required.issubset(set(group_returns_df.columns)):
@@ -182,13 +277,30 @@ def _long_short_series(group_returns_df: pd.DataFrame) -> pd.Series:
     if frame.empty:
         return pd.Series(dtype=float)
 
-    pivot = frame.pivot_table(index="date", columns="group", values="group_return", aggfunc="mean")
-    if pivot.shape[1] < 2:
+    per_bucket = (
+        frame.groupby(["date", "group"], sort=True, as_index=False)["group_return"]
+        .mean()
+        .sort_values(["date", "group"], kind="mergesort")
+    )
+    rows: list[tuple[pd.Timestamp, float]] = []
+    for date, block in per_bucket.groupby("date", sort=True):
+        if block["group"].nunique() < 2:
+            continue
+        bottom_row = block.iloc[0]
+        top_row = block.iloc[-1]
+        rows.append(
+            (
+                pd.Timestamp(date),
+                float(top_row["group_return"]) - float(bottom_row["group_return"]),
+            )
+        )
+    if not rows:
         return pd.Series(dtype=float)
-
-    bottom = pivot.columns.min()
-    top = pivot.columns.max()
-    long_short = (pivot[top] - pivot[bottom]).sort_index().dropna()
+    long_short = pd.Series(
+        [value for _, value in rows],
+        index=pd.DatetimeIndex([date for date, _ in rows]),
+        dtype=float,
+    ).sort_index()
     if long_short.empty:
         return pd.Series(dtype=float)
     return long_short
@@ -377,10 +489,11 @@ def _is_unresolved_backtest_field(field: str, value: object) -> bool:
     return value is None
 
 
-def _coalesce_float(primary: float | None, secondary: float | None) -> float | None:
-    if primary is not None:
-        return primary
-    return secondary
+def _coalesce_float(*values: float | None) -> float | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def _safe_float(value: object) -> float | None:

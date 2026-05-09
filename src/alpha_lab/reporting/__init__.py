@@ -172,6 +172,7 @@ def summarise_experiment_result(
         "label_name": label_name,
         "n_quantiles": result.n_quantiles,
         "split_description": _split_description(result.train_end, result.test_start),
+        **_split_contract_fields(result),
         "mean_ic": s.mean_ic,
         "mean_ic_ci_lower": uncertainty.mean_ic_ci_lower,
         "mean_ic_ci_upper": uncertainty.mean_ic_ci_upper,
@@ -593,6 +594,8 @@ def _render_experiment_card(
         f"tags: {tag_str}",
         "status: draft",
         f"factor: {factor_name}",
+        "emergent_moves: []",
+        "operative_claims: []",
         f"horizon: {prov.horizon}",
         f"quantiles: {prov.n_quantiles}",
         f"split: {split_desc}",
@@ -701,6 +704,11 @@ def _render_experiment_card(
         "",
         "<!-- Add interpretation here -->",
         "",
+        "## 回灌素材",
+        "",
+        "- `emergent_moves`: <!-- 这次实践浮现、可被未来因子借用的新 move -->",
+        "- `operative_claims`: <!-- 观察到的现象 / 经验 / 边界条件；弱 hint，不作为 kill 条件 -->",
+        "",
         "## 下一步",
         "",
         "<!-- Add next steps here -->",
@@ -738,6 +746,30 @@ def _split_description(
     if train_end is not None and test_start is not None:
         return f"train<={train_end.date()} / test>={test_start.date()}"
     return "full_sample"
+
+
+def _split_contract_fields(result: ExperimentResult) -> dict[str, object]:
+    contract = result.split_contract
+    if contract is None:
+        return {}
+    metadata = contract.to_metadata()
+    return {
+        "split_contract": metadata,
+        "split_policy": metadata["policy"],
+        "split_source": metadata["source"],
+        "is_start": metadata["is_start"],
+        "is_end": metadata["is_end"],
+        "oos_start": metadata["oos_start"],
+        "oos_end": metadata["oos_end"],
+        "split_embargo_days": metadata["embargo_days"],
+        "split_min_oos_dates": metadata["min_oos_dates"],
+        "split_min_is_dates": metadata["min_is_dates"],
+        "split_n_dates": metadata["n_dates"],
+        "split_n_is_dates": metadata["n_is_dates"],
+        "split_n_oos_dates": metadata["n_oos_dates"],
+        "split_target_horizon": metadata["target_horizon"],
+        "split_rebalance_step": metadata["rebalance_step"],
+    }
 
 
 def _fmt_float(value: float, precision: int = 4) -> str:

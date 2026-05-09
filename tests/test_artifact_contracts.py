@@ -4,7 +4,10 @@ import copy
 
 import pytest
 
-from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+from alpha_lab.artifact_contracts import (
+    MODEL_FACTOR_DIAGNOSTIC_ARTIFACT_CONTRACTS,
+    validate_level12_artifact_payload,
+)
 
 
 def _valid_portfolio_summary() -> dict[str, object]:
@@ -915,6 +918,35 @@ def test_research_artifact_manifest_validator_rejects_invalid_layer() -> None:
             payload,
             artifact_name="research_artifact_manifest.json",
         )
+
+
+def test_research_artifact_manifest_accepts_diagnostic_contract_entry() -> None:
+    payload = _valid_research_artifact_manifest_payload()
+    entries = payload["artifact_entries"]
+    assert isinstance(entries, list)
+    contract = MODEL_FACTOR_DIAGNOSTIC_ARTIFACT_CONTRACTS[0]
+    entries.append(
+        {
+            "artifact_name": contract["artifact_name"],
+            "artifact_type": contract["artifact_type"],
+            "artifact_layer": contract["artifact_layer"],
+            "path": "/tmp/runs/default_research/case_a/feature_oos_ic.csv",
+            "scope": contract["scope"],
+            "case_name": None,
+            "profile_name": "default_research",
+            "producer_hint": contract["producer_hint"],
+            "validation_status": "valid",
+            "required_in_strict_mode": False,
+            "lineage_role": contract["lineage_role"],
+            "contract_status": contract["contract_status"],
+            "required_columns": list(contract["required_columns"]),
+        }
+    )
+
+    validate_level12_artifact_payload(
+        payload,
+        artifact_name="research_artifact_manifest.json",
+    )
 
 
 def test_portfolio_recipe_validator_rejects_invalid_recipe_control_shape() -> None:

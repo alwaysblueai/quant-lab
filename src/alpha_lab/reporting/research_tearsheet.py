@@ -1200,7 +1200,11 @@ def _build_setup_section(
     meta: Mapping[str, object],
 ) -> dict[str, object]:
     ic_df = _as_df(artifacts.get("ic_timeseries"))
-    split_description = safe_text(metrics.get("split_description"))
+    split_contract = _resolve_split_contract(metrics=metrics, meta=meta)
+    split_description = (
+        _format_split_contract_description(split_contract)
+        or safe_text(metrics.get("split_description"))
+    )
     sample_window = _resolve_sample_window(
         ic_df=ic_df,
         split_description=split_description,
@@ -1269,7 +1273,10 @@ def _build_signal_section(
     chart = _build_ic_timeseries_with_cumulative_chart(artifacts=artifacts)
     if chart is not None:
         charts.append(chart)
-    chart = _build_quantile_cumulative_returns_chart(artifacts=artifacts)
+    chart = _build_quantile_cumulative_returns_chart(
+        artifacts=artifacts,
+        metrics=metrics,
+    )
     if chart is not None:
         charts.append(chart)
     chart = _build_group_mean_return_chart(artifacts=artifacts)
@@ -1502,6 +1509,8 @@ def _resolve_alias_source(
     numeric = to_finite_float(value)
     if numeric is not None:
         return numeric
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return None
     return value
 
 
@@ -1578,23 +1587,35 @@ def _build_ic_timeseries_with_cumulative_chart(
     if ic_df.empty:
         return None
     date_col = _pick_col(ic_df, "date", "trade_date", "trading_date", "dt")
-    value_col = _pick_col(ic_df, "rank_ic", "ic")
-    if date_col is None or value_col is None:
+    if date_col is None:
         return None
 
+    value_col = None
     points: list[list[object]] = []
-    cumulative: list[list[object]] = []
-    acc = 0.0
-    for _, row in ic_df.iterrows():
-        date = _normalize_date_token(row.get(date_col))
-        value = to_finite_float(row.get(value_col))
-        if date is None or value is None:
+    for candidate in ("rank_ic", "ic"):
+        candidate_col = _pick_col(ic_df, candidate)
+        if candidate_col is None:
             continue
-        acc += value
-        points.append([date, value])
-        cumulative.append([date, acc])
+        candidate_points = _time_series_points(
+            ic_df,
+            date_col=date_col,
+            value_col=candidate_col,
+        )
+        if candidate_points:
+            value_col = candidate_col
+            points = candidate_points
+            break
     if not points:
         return None
+
+    cumulative: list[list[object]] = []
+    acc = 0.0
+    for date, value in points:
+        numeric = to_finite_float(value)
+        if numeric is None:
+            continue
+        acc += numeric
+        cumulative.append([date, acc])
 
     return {
         "title": "IC Time Series + Cumulative IC",
@@ -1609,13 +1630,15 @@ def _build_ic_timeseries_with_cumulative_chart(
 def _build_quantile_cumulative_returns_chart(
     *,
     artifacts: Mapping[str, object],
+    metrics: Mapping[str, object],
 ) -> dict[str, object] | None:
     group_df = _as_df(artifacts.get("group_returns"))
-    series = _group_cumulative_series(group_df)
+    sample_step = _resolve_group_return_sample_step(artifacts=artifacts, metrics=metrics)
+    series = _group_cumulative_series(group_df, sample_step=sample_step)
     if not series:
         return None
     return {
-        "title": "Quantile Cumulative Returns",
+        "title": f"Quantile Cumulative NAV (non-overlapping {sample_step}D)",
         "type": "line",
         "series": series,
     }
@@ -1734,13 +1757,22 @@ def _build_ic_distribution_chart(
     ic_df = _as_df(artifacts.get("ic_timeseries"))
     if ic_df.empty:
         return None
-    value_col = _pick_col(ic_df, "rank_ic", "ic")
-    if value_col is None:
+
+    value_col = None
+    finite: list[float] = []
+    for candidate in ("rank_ic", "ic"):
+        candidate_col = _pick_col(ic_df, candidate)
+        if candidate_col is None:
+            continue
+        values = [to_finite_float(item) for item in ic_df[candidate_col].tolist()]
+        candidate_finite = [item for item in values if item is not None]
+        if len(candidate_finite) >= 3:
+            value_col = candidate_col
+            finite = candidate_finite
+            break
+    if not finite:
         return None
-    values = [to_finite_float(item) for item in ic_df[value_col].tolist()]
-    finite = [item for item in values if item is not None]
-    if len(finite) < 3:
-        return None
+
     bins = _histogram(finite, n_bins=12)
     if not bins:
         return None
@@ -1858,7 +1890,83 @@ def _resolve_sample_window(
     return split_description
 
 
-def _group_cumulative_series(group_df: pd.DataFrame) -> list[dict[str, object]]:
+def _resolve_split_contract(
+    *,
+    metrics: Mapping[str, object],
+    meta: Mapping[str, object],
+) -> Mapping[str, object]:
+    raw = metrics.get("split_contract")
+    if isinstance(raw, Mapping):
+        return raw
+    raw = meta.get("split_contract")
+    if isinstance(raw, Mapping):
+        return raw
+    return {}
+
+
+def _format_split_contract_description(contract: Mapping[str, object]) -> str | None:
+    if not contract:
+        return None
+    is_start = safe_text(contract.get("is_start"))
+    is_end = safe_text(contract.get("is_end"))
+    oos_start = safe_text(contract.get("oos_start"))
+    oos_end = safe_text(contract.get("oos_end"))
+    if not (is_start and is_end and oos_start and oos_end):
+        return None
+    embargo = safe_text(contract.get("embargo_days"))
+    suffix = f" / embargo={embargo}" if embargo else ""
+    return f"IS {is_start} -> {is_end} / OOS {oos_start} -> {oos_end}{suffix}"
+
+
+def _resolve_rebalance_step(value: object) -> int:
+    numeric = to_finite_float(value)
+    if numeric is not None and numeric > 0:
+        return max(1, int(numeric))
+    text = str(value or "").strip().lower()
+    if not text or text in {"d", "daily", "1d"}:
+        return 1
+    if "week" in text or text == "w":
+        return 5
+    if "month" in text or text == "m":
+        return 21
+    if "quarter" in text or text == "q":
+        return 63
+    match = re.search(r"(\d+)", text)
+    return max(1, int(match.group(1))) if match else 1
+
+
+def _resolve_group_return_sample_step(
+    *,
+    artifacts: Mapping[str, object],
+    metrics: Mapping[str, object],
+) -> int:
+    backtest = _as_mapping(artifacts.get("backtest_result_json"))
+    summary = _as_mapping(backtest.get("summary"))
+    horizon_candidates = [
+        backtest.get("target_horizon"),
+        summary.get("target_horizon"),
+        summary.get("label_horizon"),
+        metrics.get("target_horizon"),
+    ]
+    horizon = 1
+    for raw in horizon_candidates:
+        value = to_finite_float(raw)
+        if value is not None and value > 0:
+            horizon = max(1, int(value))
+            break
+    rebalance_step = _resolve_rebalance_step(
+        backtest.get("rebalance_frequency")
+        or summary.get("rebalance_frequency")
+        or metrics.get("rebalance_frequency")
+    )
+    return max(1, horizon, rebalance_step)
+
+
+def _group_cumulative_series(
+    group_df: pd.DataFrame,
+    *,
+    sample_step: int = 1,
+) -> list[dict[str, object]]:
     if group_df.empty:
         return []
     date_col = _pick_col(group_df, "date", "trade_date", "trading_date", "dt")
@@ -1877,11 +1985,14 @@ def _group_cumulative_series(group_df: pd.DataFrame) -> list[dict[str, object]]:
         grouped[group].append((date, value))
 
     series: list[dict[str, object]] = []
+    step = max(1, int(sample_step))
     for group in sorted(grouped.keys(), key=_group_sort_key):
         rows = sorted(grouped[group], key=lambda item: item[0])
         acc = 1.0
         points: list[list[object]] = []
-        for date, value in rows:
+        for idx, (date, value) in enumerate(rows):
+            if idx % step != 0:
+                continue
             acc *= 1.0 + value
             points.append([date, acc])
         if points:
@@ -1951,7 +2062,14 @@ def _histogram(values: list[float], *, n_bins: int) -> list[dict[str, object]]:
     if not math.isfinite(v_min) or not math.isfinite(v_max):
         return []
     if v_min == v_max:
-        return [{"left": v_min, "right": v_max, "count": len(values)}]
+        width = max(abs(v_min) * 0.01, 1e-6)
+        return [
+            {
+                "left": v_min - width / 2.0,
+                "right": v_min + width / 2.0,
+                "count": len(values),
+            }
+        ]
 
     width = (v_max - v_min) / float(n_bins)
     counts = [0] * n_bins

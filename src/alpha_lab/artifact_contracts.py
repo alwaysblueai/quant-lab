@@ -19,6 +19,84 @@ _NEXT_STEP_RECOMMENDATIONS_TYPE = "alpha_lab_next_step_recommendations"
 _ARTIFACT_LOAD_DIAGNOSTICS_TYPE = "alpha_lab_artifact_load_diagnostics"
 _RESEARCH_ARTIFACT_MANIFEST_TYPE = "alpha_lab_research_artifact_manifest"
 
+MODEL_FACTOR_DIAGNOSTIC_ARTIFACT_CONTRACTS: tuple[dict[str, object], ...] = (
+    {
+        "artifact_name": "feature_oos_ic.csv",
+        "artifact_type": "alpha_lab_feature_oos_ic",
+        "artifact_layer": "diagnostic_contract",
+        "scope": "case",
+        "lineage_role": "feature_oos_ic",
+        "contract_status": "emitted_v1",
+        "row_grain": "feature_retrain_window",
+        "required_columns": (
+            "feature",
+            "window_start",
+            "window_end",
+            "ic",
+            "rank_ic",
+            "n_obs",
+        ),
+        "description_zh": "每个特征在样本外窗口内的 IC/RankIC，用于识别高权重但无 OOS 信号的特征。",
+        "producer_hint": (
+            "alpha_lab.real_cases.model_factor.pipeline should emit per-feature OOS IC."
+        ),
+    },
+    {
+        "artifact_name": "training_metrics.csv",
+        "artifact_type": "alpha_lab_model_training_metrics",
+        "artifact_layer": "diagnostic_contract",
+        "scope": "case",
+        "lineage_role": "training_metrics",
+        "contract_status": "emitted_v1",
+        "row_grain": "model_training_event",
+        "alternative_artifact_names": ("training_log.csv",),
+        "required_columns": (
+            "model_version",
+            "train_start",
+            "train_end",
+            "oos_start",
+            "oos_end",
+            "train_ic",
+            "train_rank_ic",
+            "train_loss",
+            "oos_ic",
+            "oos_rank_ic",
+            "oos_loss",
+            "n_train_obs",
+            "n_oos_obs",
+        ),
+        "description_zh": "训练窗口 IS 指标与对应 OOS 指标，用于展示 train-vs-OOS 过拟合诊断。",
+        "producer_hint": (
+            "alpha_lab.real_cases.model_factor.pipeline should emit train/OOS metrics "
+            "per training event."
+        ),
+    },
+    {
+        "artifact_name": "purged_kfold_fold_daily.csv",
+        "artifact_type": "alpha_lab_purged_kfold_fold_daily",
+        "artifact_layer": "diagnostic_contract",
+        "scope": "case",
+        "lineage_role": "purged_kfold_fold_daily_ic",
+        "contract_status": "emitted_v1",
+        "row_grain": "fold_date",
+        "required_columns": ("fold", "date", "ic", "rank_ic"),
+        "optional_columns": ("n_obs",),
+        "description_zh": (
+            "Purged KFold 每个 fold 的日级 IC/RankIC 序列，用于绘制 per-fold IC 箱线图。"
+        ),
+        "producer_hint": (
+            "alpha_lab.real_cases.model_factor.pipeline should emit daily per-fold IC "
+            "when purged KFold runs."
+        ),
+    },
+)
+
+MODEL_FACTOR_DEFERRED_DIAGNOSTIC_CONTRACTS: tuple[dict[str, object], ...] = tuple(
+    contract
+    for contract in MODEL_FACTOR_DIAGNOSTIC_ARTIFACT_CONTRACTS
+    if contract.get("contract_status") == "not_emitted_v1"
+)
+
 _KNOWN_RUN_ARTIFACT_TYPES: frozenset[str] = frozenset(
     {
         "real_case_single_factor_bundle",
@@ -131,6 +209,7 @@ def validate_run_manifest_payload(
         "snapshot",
         f"{label}.evaluation_standard",
     )
+    _validate_split_contract_if_present(payload, "split_contract", label)
 
 
 def validate_metrics_payload(
@@ -161,6 +240,7 @@ def validate_metrics_payload(
     _validate_finite_number_or_none_if_present(metrics, "dsr_pvalue", f"{label}.metrics")
     if "split_description" in metrics:
         _require_non_empty_string(metrics, "split_description", f"{label}.metrics")
+    _validate_split_contract_if_present(metrics, "split_contract", f"{label}.metrics")
     if "data_quality_status" in metrics:
         status = _require_non_empty_string(metrics, "data_quality_status", f"{label}.metrics")
         if status not in {"pass", "warn", "fail"}:
@@ -323,6 +403,7 @@ def validate_signal_validation_payload(
         source=f"{label}.legacy_metrics_shape",
     )
     _require_object(payload, "source_artifacts", label)
+    _validate_split_contract_if_present(payload, "split_contract", label)
     _validate_string_list_if_present(payload, "fallback_derived_fields", label)
 
 
@@ -421,6 +502,7 @@ def validate_backtest_result_payload(
         f"{label}.summary.drawdown_table",
     )
     _require_object(payload, "source_artifacts", label)
+    _validate_split_contract_if_present(payload, "split_contract", label)
     _validate_string_list_if_present(payload, "fallback_derived_fields", label)
 
 
@@ -1240,10 +1322,10 @@ def validate_research_artifact_manifest_payload(
         _require_non_empty_string(item, "artifact_name", item_label)
         _require_non_empty_string(item, "artifact_type", item_label)
         artifact_layer = _require_non_empty_string(item, "artifact_layer", item_label)
-        if artifact_layer not in {"canonical", "workflow", "governance"}:
+        if artifact_layer not in {"canonical", "workflow", "governance", "diagnostic_contract"}:
             _raise(
                 f"{item_label}.artifact_layer",
-                "must be one of `canonical`, `workflow`, `governance`",
+                "must be one of `canonical`, `workflow`, `governance`, `diagnostic_contract`",
             )
         scope = _require_non_empty_string(item, "scope", item_label)
         if scope not in {"campaign", "profile", "case", "comparison"}:
@@ -1266,10 +1348,14 @@ def validate_research_artifact_manifest_payload(
             "missing",
             "unresolved",
             "unchecked",
+            "not_emitted_v1",
         }:
             _raise(
                 f"{item_label}.validation_status",
-                ("must be one of `valid`, `invalid`, `missing`, `unresolved`, `unchecked`"),
+                (
+                    "must be one of `valid`, `invalid`, `missing`, `unresolved`, "
+                    "`unchecked`, `not_emitted_v1`"
+                ),
             )
 
         for key in ("path", "case_name", "profile_name", "lineage_role"):
@@ -1392,6 +1478,38 @@ def _validate_string_list_or_none_if_present(
     if not isinstance(value, list):
         _raise(f"{label}.{key}", "must be a list of strings or null when provided")
     _require_string_list(cast(list[object], value), f"{label}.{key}")
+
+
+def _validate_split_contract_if_present(
+    payload: Mapping[str, object],
+    key: str,
+    label: str,
+) -> None:
+    if key not in payload:
+        return
+    contract = _require_object(payload, key, label)
+    _validate_split_contract_object(contract, f"{label}.{key}")
+
+
+def _validate_split_contract_object(contract: Mapping[str, object], label: str) -> None:
+    for key in ("policy", "source", "is_start", "is_end", "oos_start", "oos_end"):
+        _require_non_empty_string(contract, key, label)
+    for key in (
+        "embargo_days",
+        "min_oos_dates",
+        "min_is_dates",
+        "n_dates",
+        "n_is_dates",
+        "n_oos_dates",
+        "target_horizon",
+        "rebalance_step",
+    ):
+        value = _require_int(contract, key, label)
+        if value < 0:
+            _raise(f"{label}.{key}", "must be non-negative")
+    for key in ("target_horizon", "rebalance_step"):
+        if _require_int(contract, key, label) < 1:
+            _raise(f"{label}.{key}", "must be >= 1")
 
 
 def _validate_portfolio_robustness_summary_if_present(

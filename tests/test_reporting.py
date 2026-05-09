@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from alpha_lab.costs import cost_adjusted_long_short
 from alpha_lab.experiment import ExperimentResult, run_factor_experiment
 from alpha_lab.factors.momentum import momentum
 from alpha_lab.reporting import (
@@ -16,7 +18,12 @@ from alpha_lab.reporting import (
     to_obsidian_markdown,
 )
 from alpha_lab.reporting.factor_verdict import FACTOR_VERDICT_TAXONOMY
-from alpha_lab.reporting.research_tearsheet import _build_annual_axis_ticks
+from alpha_lab.reporting.research_tearsheet import (
+    _build_annual_axis_ticks,
+    _build_ic_distribution_chart,
+    _build_ic_timeseries_with_cumulative_chart,
+    build_research_tearsheet_payload,
+)
 from alpha_lab.research_evaluation_config import ResearchEvaluationConfig, UncertaintyConfig
 
 # ---------------------------------------------------------------------------
@@ -97,6 +104,359 @@ def test_tearsheet_date_ticks_support_compact_yyyymmdd_labels():
     assert "2024.2" in labels
     assert "2024.12" in labels
     assert len(labels) >= 10
+
+
+def test_tearsheet_ic_chart_falls_back_to_ic_when_rankic_empty() -> None:
+    ic_timeseries = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=3, freq="D"),
+            "rank_ic": [np.nan, np.nan, np.nan],
+            "ic": [0.10, -0.05, 0.20],
+        }
+    )
+
+    chart = _build_ic_timeseries_with_cumulative_chart(
+        artifacts={"ic_timeseries": ic_timeseries}
+    )
+
+    assert chart is not None
+    assert chart["series"][0]["name"] == "ic"
+    assert chart["series"][0]["points"] == [
+        ["2024-01-01", 0.10],
+        ["2024-01-02", -0.05],
+        ["2024-01-03", 0.20],
+    ]
+    assert chart["series"][1]["name"] == "cumulative_ic"
+    assert [point[0] for point in chart["series"][1]["points"]] == [
+        "2024-01-01",
+        "2024-01-02",
+        "2024-01-03",
+    ]
+    assert [point[1] for point in chart["series"][1]["points"]] == pytest.approx(
+        [0.10, 0.05, 0.25]
+    )
+
+
+def test_tearsheet_ic_distribution_falls_back_to_ic_when_rankic_empty() -> None:
+    ic_timeseries = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=4, freq="D"),
+            "rank_ic": [np.nan, np.nan, np.nan, np.nan],
+            "ic": [0.10, -0.05, 0.20, 0.03],
+        }
+    )
+
+    chart = _build_ic_distribution_chart(artifacts={"ic_timeseries": ic_timeseries})
+
+    assert chart is not None
+    assert chart["series"][0]["name"] == "ic"
+    assert sum(bin_["count"] for bin_ in chart["series"][0]["bins"]) == 4
+
+
+def test_tearsheet_ic_distribution_constant_series_has_renderable_bin() -> None:
+    ic_timeseries = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=4, freq="D"),
+            "rank_ic": [0.25, 0.25, 0.25, 0.25],
+            "ic": [0.10, -0.05, 0.20, 0.03],
+        }
+    )
+
+    chart = _build_ic_distribution_chart(artifacts={"ic_timeseries": ic_timeseries})
+
+    assert chart is not None
+    bins = chart["series"][0]["bins"]
+    assert len(bins) == 1
+    assert bins[0]["right"] > bins[0]["left"]
+    assert bins[0]["count"] == 4
+
+
+def test_tearsheet_alias_falls_back_when_primary_metric_is_nan(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "coverage_mean": float("nan"),
+                    "coverage_min": float("nan"),
+                    "factor_verdict": "review",
+                    "promotion_decision": "hold",
+                },
+                "coverage_by_date_summary": {
+                    "mean_coverage": 0.75,
+                    "min_coverage": 0.50,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_research_tearsheet_payload(metrics_path=metrics_path)
+
+    setup_metrics = payload["sections"]["setup"]["metrics"]
+    assert setup_metrics["coverage_mean"] == pytest.approx(0.75)
+    assert payload["meta"]["field_aliases"]["coverage_mean"] == (
+        "coverage_by_date_summary.mean_coverage"
+    )
+
+
+def test_tearsheet_payload_chart_inputs_match_artifact_csvs(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "factor_name": "fixture_factor",
+                    "direction": "long",
+                    "target_horizon": 5,
+                    "factor_verdict": "review",
+                    "promotion_decision": "hold",
+                    "mean_rank_ic": 0.10,
+                    "ic_ir": 1.25,
+                    "ic_positive_rate": 0.75,
+                    "mean_long_short_return": 0.025,
+                    "group_monotonicity_share": 1.0,
+                    "group_monotonicity_qtop_qbottom": 0.025,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03"],
+            "rank_ic": [0.10, -0.05],
+            "ic": [0.20, 0.30],
+        }
+    ).to_csv(tmp_path / "ic_timeseries.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"],
+            "group": [1, 2, 1, 2],
+            "group_return": [0.01, 0.03, -0.01, 0.02],
+        }
+    ).to_csv(tmp_path / "group_returns.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03"],
+            "turnover": [float("nan"), 0.5],
+        }
+    ).to_csv(tmp_path / "turnover.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03"],
+            "coverage": [0.8, 0.9],
+        }
+    ).to_csv(tmp_path / "coverage.csv", index=False)
+
+    payload = build_research_tearsheet_payload(metrics_path=metrics_path)
+    signal_charts = payload["sections"]["signal"]["charts"]
+    appendix_charts = payload["appendix"]["charts"]
+    chart_by_title = {chart["title"]: chart for chart in [*signal_charts, *appendix_charts]}
+
+    ic_chart = chart_by_title["IC Time Series + Cumulative IC"]
+    assert ic_chart["series"][0]["name"] == "rank_ic"
+    assert ic_chart["series"][0]["points"] == [["2024-01-02", 0.10], ["2024-01-03", -0.05]]
+    assert [point[0] for point in ic_chart["series"][1]["points"]] == [
+        "2024-01-02",
+        "2024-01-03",
+    ]
+    assert [point[1] for point in ic_chart["series"][1]["points"]] == pytest.approx(
+        [0.10, 0.05]
+    )
+
+    nav_chart = chart_by_title["Cumulative Long-Short NAV"]
+    assert [point[0] for point in nav_chart["series"][0]["points"]] == [
+        "2024-01-02",
+        "2024-01-03",
+    ]
+    assert [point[1] for point in nav_chart["series"][0]["points"]] == pytest.approx(
+        [1.02, 1.0506]
+    )
+
+    group_bar = chart_by_title["Group Mean Return"]["series"][0]["bars"]
+    assert [bar["group"] for bar in group_bar] == ["Q1", "Q2"]
+    assert [bar["value"] for bar in group_bar] == pytest.approx([0.0, 0.025])
+
+    turnover_chart = chart_by_title["Turnover Time Series"]
+    assert turnover_chart["series"][0]["points"] == [["2024-01-03", 0.5]]
+    coverage_chart = chart_by_title["Coverage Time Series"]
+    assert coverage_chart["series"][0]["points"] == [
+        ["2024-01-02", 0.8],
+        ["2024-01-03", 0.9],
+    ]
+
+
+def test_tearsheet_payload_chart_inputs_cover_all_artifact_curves(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "factor_name": "chart_fixture",
+                    "direction": "long",
+                    "target_horizon": 5,
+                    "factor_verdict": "review",
+                    "promotion_decision": "hold",
+                    "mean_rank_ic": 0.08,
+                    "ic_ir": 1.10,
+                    "ic_positive_rate": 0.67,
+                    "mean_long_short_return": 0.02,
+                    "group_monotonicity_share": 1.0,
+                    "group_monotonicity_qtop_qbottom": 0.02,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "backtest_result.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "nav_points": [
+                        ["2024-01-02", 1.00],
+                        ["2024-01-03", 1.05],
+                        ["2024-01-04", 1.03],
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "rank_ic": [0.10, -0.05, 0.20],
+            "ic": [0.20, 0.30, 0.40],
+        }
+    ).to_csv(tmp_path / "ic_timeseries.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": [
+                "2024-01-02",
+                "2024-01-02",
+                "2024-01-03",
+                "2024-01-03",
+                "2024-01-04",
+                "2024-01-04",
+            ],
+            "group": [1, 2, 1, 2, 1, 2],
+            "group_return": [0.01, 0.03, -0.02, 0.01, 0.00, 0.02],
+        }
+    ).to_csv(tmp_path / "group_returns.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "rolling_mean_ic": [0.10, 0.15, 0.20],
+            "rolling_mean_rank_ic": [0.05, 0.10, 0.12],
+        }
+    ).to_csv(tmp_path / "rolling_stability.csv", index=False)
+    pd.DataFrame(
+        {
+            "horizon": [1, 2, 5],
+            "mean_ic": [0.20, 0.15, 0.10],
+            "mean_rank_ic": [0.18, 0.12, 0.05],
+        }
+    ).to_csv(tmp_path / "ic_decay.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "turnover": [float("nan"), 0.40, 0.60],
+        }
+    ).to_csv(tmp_path / "turnover.csv", index=False)
+    pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "coverage": [0.80, 0.90, 1.00],
+        }
+    ).to_csv(tmp_path / "coverage.csv", index=False)
+
+    payload = build_research_tearsheet_payload(metrics_path=metrics_path)
+    charts = [
+        *payload["sections"]["signal"]["charts"],
+        *payload["sections"]["stability"]["charts"],
+        *payload["appendix"]["charts"],
+    ]
+    chart_by_title = {chart["title"]: chart for chart in charts}
+
+    assert set(chart_by_title) == {
+        "Cumulative Long-Short NAV",
+        "IC Time Series + Cumulative IC",
+        "Quantile Cumulative Returns",
+        "Group Mean Return",
+        "Rolling IC / RankIC",
+        "IC Decay",
+        "IC Distribution",
+        "Turnover Time Series",
+        "Coverage Time Series",
+    }
+
+    assert chart_by_title["Cumulative Long-Short NAV"]["series"][0]["points"] == [
+        ["2024-01-02", 1.00],
+        ["2024-01-03", 1.05],
+        ["2024-01-04", 1.03],
+    ]
+
+    ic_chart = chart_by_title["IC Time Series + Cumulative IC"]
+    assert ic_chart["series"][0]["name"] == "rank_ic"
+    assert ic_chart["series"][0]["points"] == [
+        ["2024-01-02", 0.10],
+        ["2024-01-03", -0.05],
+        ["2024-01-04", 0.20],
+    ]
+    assert [point[1] for point in ic_chart["series"][1]["points"]] == pytest.approx(
+        [0.10, 0.05, 0.25]
+    )
+
+    quantile_series = {
+        series["name"]: series["points"]
+        for series in chart_by_title["Quantile Cumulative Returns"]["series"]
+    }
+    assert [point[1] for point in quantile_series["Q1"]] == pytest.approx(
+        [1.01, 0.9898, 0.9898]
+    )
+    assert [point[1] for point in quantile_series["Q2"]] == pytest.approx(
+        [1.03, 1.0403, 1.061106]
+    )
+
+    group_bars = chart_by_title["Group Mean Return"]["series"][0]["bars"]
+    assert [bar["group"] for bar in group_bars] == ["Q1", "Q2"]
+    assert [bar["value"] for bar in group_bars] == pytest.approx([-0.01 / 3.0, 0.02])
+
+    rolling_series = {
+        series["name"]: series["points"]
+        for series in chart_by_title["Rolling IC / RankIC"]["series"]
+    }
+    assert rolling_series["rolling_ic"] == [
+        ["2024-01-02", 0.10],
+        ["2024-01-03", 0.15],
+        ["2024-01-04", 0.20],
+    ]
+    assert rolling_series["rolling_rank_ic"] == [
+        ["2024-01-02", 0.05],
+        ["2024-01-03", 0.10],
+        ["2024-01-04", 0.12],
+    ]
+
+    decay_series = {
+        series["name"]: series["points"] for series in chart_by_title["IC Decay"]["series"]
+    }
+    assert decay_series["mean_ic"] == [[1.0, 0.20], [2.0, 0.15], [5.0, 0.10]]
+    assert decay_series["mean_rank_ic"] == [[1.0, 0.18], [2.0, 0.12], [5.0, 0.05]]
+
+    ic_distribution = chart_by_title["IC Distribution"]["series"][0]
+    assert ic_distribution["name"] == "rank_ic"
+    assert sum(bin_["count"] for bin_ in ic_distribution["bins"]) == 3
+
+    assert chart_by_title["Turnover Time Series"]["series"][0]["points"] == [
+        ["2024-01-03", 0.40],
+        ["2024-01-04", 0.60],
+    ]
+    assert chart_by_title["Coverage Time Series"]["series"][0]["points"] == [
+        ["2024-01-02", 0.80],
+        ["2024-01-03", 0.90],
+        ["2024-01-04", 1.00],
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +571,27 @@ def test_summarise_long_short_ir_matches_summary():
         assert math.isnan(actual)
     else:
         assert math.isclose(actual, result.summary.long_short_ir)
+
+
+def test_summarise_cost_adjusted_return_excludes_initial_nan_turnover() -> None:
+    result = _standard_result()
+    cost_rate = 0.001
+
+    summary_df = summarise_experiment_result(result, cost_rate=cost_rate)
+    adjusted = cost_adjusted_long_short(
+        result.long_short_df,
+        result.long_short_turnover_df,
+        cost_rate=cost_rate,
+    ).sort_values("date", kind="mergesort")
+
+    assert pd.isna(adjusted["turnover"].iloc[0])
+    assert pd.isna(adjusted["adjusted_return"].iloc[0])
+    assert adjusted["adjusted_return"].notna().sum() == (
+        adjusted["long_short_return"].notna().sum() - 1
+    )
+    assert float(summary_df["mean_cost_adjusted_long_short_return"].iloc[0]) == pytest.approx(
+        float(adjusted["adjusted_return"].dropna().mean())
+    )
 
 
 def test_summarise_subperiod_metrics_match_summary():

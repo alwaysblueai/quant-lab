@@ -5,6 +5,7 @@ import pandas as pd
 
 from alpha_lab.experiment import run_factor_experiment
 from alpha_lab.reporting.purged_kfold_diagnostics import (
+    PURGED_KFOLD_FOLD_DAILY_COLUMNS,
     PURGED_KFOLD_FOLDS_COLUMNS,
     build_purged_kfold_diagnostics,
 )
@@ -52,6 +53,9 @@ def test_build_purged_kfold_diagnostics_outputs_summary_and_fold_table() -> None
     assert "verdict" in diagnostics.summary
     assert tuple(diagnostics.folds.columns) == PURGED_KFOLD_FOLDS_COLUMNS
     assert len(diagnostics.folds) == 5
+    assert tuple(diagnostics.fold_daily.columns) == PURGED_KFOLD_FOLD_DAILY_COLUMNS
+    assert not diagnostics.fold_daily.empty
+    assert set(diagnostics.fold_daily["fold"].unique()) <= {1, 2, 3, 4, 5}
 
 
 def test_build_purged_kfold_diagnostics_returns_not_available_when_dates_missing() -> None:
@@ -74,3 +78,4 @@ def test_build_purged_kfold_diagnostics_returns_not_available_when_dates_missing
     assert diagnostics.summary["verdict"] == "not_available"
     assert diagnostics.summary["n_folds"] == 0
     assert diagnostics.folds.empty
+    assert diagnostics.fold_daily.empty

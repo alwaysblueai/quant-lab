@@ -22,11 +22,19 @@ PURGED_KFOLD_FOLDS_COLUMNS: tuple[str, ...] = (
     "mean_long_short_return",
 )
 
+PURGED_KFOLD_FOLD_DAILY_COLUMNS: tuple[str, ...] = (
+    "fold",
+    "date",
+    "ic",
+    "rank_ic",
+)
+
 
 @dataclass(frozen=True)
 class PurgedKFoldDiagnosticsResult:
     summary: dict[str, object]
     folds: pd.DataFrame
+    fold_daily: pd.DataFrame
 
 
 def build_purged_kfold_diagnostics(
@@ -69,6 +77,7 @@ def build_purged_kfold_diagnostics(
                 "reasons": ["insufficient evaluation dates"],
             },
             folds=pd.DataFrame(columns=PURGED_KFOLD_FOLDS_COLUMNS),
+            fold_daily=pd.DataFrame(columns=PURGED_KFOLD_FOLD_DAILY_COLUMNS),
         )
 
     n_splits_used = min(int(n_splits), int(len(date_axis)))
@@ -88,6 +97,7 @@ def build_purged_kfold_diagnostics(
     )
 
     folds_rows: list[dict[str, object]] = []
+    fold_daily_rows: list[dict[str, object]] = []
     for fold_idx, masks in enumerate(split_rows, start=1):
         train_dates = date_axis[masks["train"]]
         test_dates = date_axis[masks["test"]]
@@ -95,6 +105,22 @@ def build_purged_kfold_diagnostics(
         ic_values = ic_series.reindex(test_dates).dropna()
         rank_ic_values = rank_ic_series.reindex(test_dates).dropna()
         long_short_values = long_short_series.reindex(test_dates).dropna()
+        fold_ic = ic_series.reindex(test_dates)
+        fold_rank_ic = rank_ic_series.reindex(test_dates)
+        for raw_date in test_dates:
+            date = pd.Timestamp(raw_date)
+            ic_value = fold_ic.get(date)
+            rank_ic_value = fold_rank_ic.get(date)
+            if pd.isna(ic_value) and pd.isna(rank_ic_value):
+                continue
+            fold_daily_rows.append(
+                {
+                    "fold": int(fold_idx),
+                    "date": date.strftime("%Y-%m-%d"),
+                    "ic": _float_or_none(ic_value),
+                    "rank_ic": _float_or_none(rank_ic_value),
+                }
+            )
 
         mean_ic = _mean_or_none(ic_values)
         mean_rank_ic = _mean_or_none(rank_ic_values)
@@ -119,6 +145,11 @@ def build_purged_kfold_diagnostics(
 
     folds_df = pd.DataFrame(folds_rows, columns=PURGED_KFOLD_FOLDS_COLUMNS)
     validate_purged_kfold_folds_frame(folds_df)
+    fold_daily_df = pd.DataFrame(
+        fold_daily_rows,
+        columns=PURGED_KFOLD_FOLD_DAILY_COLUMNS,
+    )
+    validate_purged_kfold_fold_daily_frame(fold_daily_df)
 
     mean_ic = _mean_or_none(folds_df["mean_ic"])
     mean_rank_ic = _mean_or_none(folds_df["mean_rank_ic"])
@@ -157,13 +188,23 @@ def build_purged_kfold_diagnostics(
         "verdict": verdict,
         "reasons": reasons,
     }
-    return PurgedKFoldDiagnosticsResult(summary=summary, folds=folds_df)
+    return PurgedKFoldDiagnosticsResult(
+        summary=summary,
+        folds=folds_df,
+        fold_daily=fold_daily_df,
+    )
 
 
 def validate_purged_kfold_folds_frame(frame: pd.DataFrame) -> None:
     missing = [name for name in PURGED_KFOLD_FOLDS_COLUMNS if name not in frame.columns]
     if missing:
         raise ValueError(f"purged k-fold folds frame missing columns: {missing}")
+
+
+def validate_purged_kfold_fold_daily_frame(frame: pd.DataFrame) -> None:
+    missing = [name for name in PURGED_KFOLD_FOLD_DAILY_COLUMNS if name not in frame.columns]
+    if missing:
+        raise ValueError(f"purged k-fold fold-daily frame missing columns: {missing}")
 
 
 def _series_by_date(frame: pd.DataFrame, value_col: str) -> pd.Series:
@@ -201,6 +242,18 @@ def _mean_or_none(values: pd.Series) -> float | None:
     if len(numeric) == 0:
         return None
     return float(numeric.mean())
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
 
 
 def _sharpe_or_none(values: pd.Series) -> float | None:

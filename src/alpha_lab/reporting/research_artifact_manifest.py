@@ -4,7 +4,10 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+from alpha_lab.artifact_contracts import (
+    MODEL_FACTOR_DEFERRED_DIAGNOSTIC_CONTRACTS,
+    validate_level12_artifact_payload,
+)
 from alpha_lab.reporting.display_helpers import (
     as_object_dict,
     as_object_list,
@@ -132,6 +135,7 @@ def build_research_artifact_manifest_payload(
             manifest_path=manifest_path,
         )
     )
+    entries.extend(_deferred_diagnostic_contract_manifest_entries(default_profile=default_profile))
     return {
         "schema_version": WORKFLOW_CLOSURE_SCHEMA_VERSION,
         "artifact_type": RESEARCH_ARTIFACT_MANIFEST_ARTIFACT_TYPE,
@@ -192,6 +196,47 @@ def _canonical_artifact_manifest_entries(
                     }
                 )
     return entries
+
+
+def _deferred_diagnostic_contract_manifest_entries(
+    *,
+    default_profile: str,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for contract in MODEL_FACTOR_DEFERRED_DIAGNOSTIC_CONTRACTS:
+        entry = {
+            "artifact_name": contract["artifact_name"],
+            "artifact_type": contract["artifact_type"],
+            "artifact_layer": contract["artifact_layer"],
+            "path": None,
+            "scope": contract["scope"],
+            "case_name": None,
+            "profile_name": default_profile,
+            "producer_hint": contract["producer_hint"],
+            "validation_status": "not_emitted_v1",
+            "required_in_strict_mode": False,
+            "lineage_role": contract["lineage_role"],
+            "contract_status": contract["contract_status"],
+            "row_grain": contract["row_grain"],
+            "required_columns": _contract_string_list(contract, "required_columns"),
+            "description_zh": contract.get("description_zh"),
+        }
+        if contract.get("optional_columns"):
+            entry["optional_columns"] = _contract_string_list(contract, "optional_columns")
+        if contract.get("alternative_artifact_names"):
+            entry["alternative_artifact_names"] = _contract_string_list(
+                contract,
+                "alternative_artifact_names",
+            )
+        entries.append(entry)
+    return entries
+
+
+def _contract_string_list(contract: Mapping[str, object], key: str) -> list[str]:
+    raw = contract.get(key)
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(item) for item in raw if str(item).strip()]
 
 
 def _workflow_artifact_manifest_entries(
