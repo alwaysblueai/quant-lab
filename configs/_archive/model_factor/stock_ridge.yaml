@@ -1,5 +1,5 @@
-name: stock_gbdt
-factor_name: stock_gbdt_5d
+name: stock_ridge
+factor_name: stock_ridge_5d
 features_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe.parquet
 feature_columns:
   - turnover_rate
@@ -36,18 +36,16 @@ universe:
 target:
   kind: forward_return
   horizon: 5
+  price_column: close_qfq
+  max_abs_forward_return: 1.0
 feature_preprocess:
   missing_policy: median_impute
   cross_sectional_transform: winsorize_zscore
   scale_features: auto
 model:
-  family: gbdt
+  family: ridge
   params:
-    loss: absolute_error
-    learning_rate: 0.05
-    max_iter: 150
-    max_leaf_nodes: 31
-    min_samples_leaf: 100
+    alpha: 1.0
 training:
   window_type: rolling
   train_window_n_dates: 120

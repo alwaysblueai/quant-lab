@@ -1,5 +1,5 @@
-name: stock_mlp
-factor_name: stock_mlp_5d
+name: stock_elastic_net
+factor_name: stock_elastic_net_5d
 features_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe.parquet
 feature_columns:
   - turnover_rate
@@ -36,17 +36,17 @@ universe:
 target:
   kind: forward_return
   horizon: 5
+  price_column: close_qfq
+  max_abs_forward_return: 1.0
 feature_preprocess:
   missing_policy: median_impute
   cross_sectional_transform: winsorize_zscore
   scale_features: auto
 model:
-  family: mlp
+  family: elastic_net
   params:
-    hidden_layer_sizes:
-      - 64
-      - 32
-    learning_rate_init: 0.001
+    alpha: 0.001
+    l1_ratio: 0.5
 training:
   window_type: rolling
   train_window_n_dates: 120
