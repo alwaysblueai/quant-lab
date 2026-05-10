@@ -46,7 +46,7 @@ outputs/
 results/
 reports/
 runs/
-artifacts/
+/artifacts/
 logs/
 *.log
 

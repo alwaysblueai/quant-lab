@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
 
 from alpha_lab.interfaces import validate_factor_output
-from alpha_lab.labels import LabelCache
 from alpha_lab.model_candidates import DraftModelSource
 from alpha_lab.model_factor import (
-    FeaturePreprocessConfig,
     ModelFactorBuildConfig,
     ModelFactorBuildResult,
-    TrainingSpec,
     build_model_factor,
 )
 from alpha_lab.model_factor._memory import release_unused_memory
@@ -27,13 +23,11 @@ from alpha_lab.model_factor.diagnostics import (
     ModelFactorDiagnosticsRecorder,
     StageLifecycleCallback,
 )
-from alpha_lab.neutralization import neutralize_signal
 from alpha_lab.real_cases.common_io import (
     apply_universe_to_factor,
     apply_universe_to_prices,
     ensure_parquet_tabular_frame,
     load_prices,
-    load_tabular_frame,
     load_universe_mask,
 )
 from alpha_lab.real_cases.single_factor.evaluate import (
@@ -41,7 +35,6 @@ from alpha_lab.real_cases.single_factor.evaluate import (
     evaluate_single_factor_case,
 )
 from alpha_lab.research_evaluation_config import (
-    ResearchEvaluationConfig,
     get_research_evaluation_config,
 )
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult, IntegrityReport
@@ -59,16 +52,36 @@ from alpha_lab.splits import (
     rebalance_frequency_to_step,
 )
 
-from .artifacts import (
+from ..artifacts import (
     ModelFactorArtifactPaths,
     export_artifact_bundle,
     write_diagnostics_artifact,
 )
-from .spec import (
-    FeatureAvailabilitySpec,
+from ..spec import (
     ModelFactorCaseSpec,
     infer_fundamental_feature_columns,
     load_model_factor_case_spec,
+)
+
+# Cross-module imports (auto-added)
+from .cache import (
+    _build_preparation_cache_key,
+    _resolve_case_output_dir,
+    _resolve_preparation_cache_dir,
+    _resolve_screening_training_override,
+)
+from .diagnostics import _annotate_exception_with_diagnostics, _build_diagnostics_run_meta
+from .feature_manifest import (
+    _build_feature_manifest_payload,
+    _metadata_int_or_none,
+    _resolve_feature_availability_contract,
+)
+from .features import _coverage_by_date, _load_features, _maybe_neutralize_factor
+from .labels import (
+    _build_forward_label_cache,
+    _enrich_label_extreme_samples,
+    _group_return_extreme_rows,
+    _model_factor_price_read_columns,
 )
 
 
@@ -127,9 +140,7 @@ def run_model_factor_case(
     """Run one real-case model-factor study end-to-end and export artifacts."""
 
     integrity_checks: list[IntegrityCheckResult] = []
-    diagnostics = ModelFactorDiagnosticsRecorder(
-        stage_lifecycle_callback=stage_lifecycle_callback
-    )
+    diagnostics = ModelFactorDiagnosticsRecorder(stage_lifecycle_callback=stage_lifecycle_callback)
     spec: ModelFactorCaseSpec | None = None
     spec_path: Path | None = None
     output_dir: Path | None = None
@@ -487,8 +498,7 @@ def run_model_factor_case(
             features=features if not features.empty else None,
             resolved_feature_availability=resolved_feature_availability,
             cache_metadata=(
-                prepared_cache_metadata
-                or (cache_hit.metadata if cache_hit is not None else None)
+                prepared_cache_metadata or (cache_hit.metadata if cache_hit is not None else None)
             ),
         )
         if model_build_prepared_cache_hit:
@@ -697,9 +707,7 @@ def run_model_factor_case(
                 vault_root=vault_root,
                 vault_export_mode=vault_export_mode,
                 draft_model_source=(
-                    draft_model_source.to_audit_dict()
-                    if draft_model_source is not None
-                    else None
+                    draft_model_source.to_audit_dict() if draft_model_source is not None else None
                 ),
             )
             export_stage.attach(
@@ -783,835 +791,3 @@ def run_model_factor_case(
             diagnostics_path=diagnostics_path,
         )
         raise
-
-
-def _resolve_case_output_dir(
-    spec: ModelFactorCaseSpec,
-    *,
-    output_root_dir: str | Path | None,
-) -> Path:
-    root_dir = (
-        Path(output_root_dir).resolve()
-        if output_root_dir is not None
-        else Path(spec.output.root_dir)
-    )
-    return (root_dir.resolve() / spec.name).resolve()
-
-
-def _resolve_preparation_cache_dir(
-    output_dir: Path,
-    *,
-    cache_root_dir: str | Path | None = None,
-) -> Path:
-    if cache_root_dir is not None:
-        return Path(cache_root_dir).expanduser().resolve() / "_model_factor_cache"
-    fallback = output_dir.parent.resolve() / "_model_factor_cache"
-    # Regression guard: web runs land output under <root>/_web_runs/<run_id>/<case>.
-    # Falling back here means cache_root_dir was not propagated and the cache will
-    # be duplicated per run (each run holds ~3-4GB). Web entry point must pass
-    # --cache-root-dir pointing at a shared location.
-    if "_web_runs" in fallback.parts:
-        import warnings as _w
-
-        _w.warn(
-            "model_factor preparation cache falling back to per-run dir under "
-            f"_web_runs ({fallback}); cache_root_dir was not propagated by the web "
-            "launcher and prepared inputs will be duplicated per run. Pass "
-            "cache_root_dir to share across runs.",
-            stacklevel=2,
-        )
-    return fallback
-
-
-def _resolve_screening_training_override(
-    *,
-    spec: ModelFactorCaseSpec,
-    evaluation_profile: str,
-    screening_retrain_every_n_dates: int | None,
-    diagnostics: ModelFactorDiagnosticsRecorder,
-) -> TrainingSpec:
-    if screening_retrain_every_n_dates is None:
-        return spec.training
-    if screening_retrain_every_n_dates <= 0:
-        raise ValueError("screening_retrain_every_n_dates must be > 0")
-    if evaluation_profile != "exploratory_screening":
-        diagnostics.warning(
-            title="筛选重训间隔覆盖未生效",
-            severity="warning",
-            stage="spec_load",
-            description=(
-                "screening_retrain_every_n_dates 只在 exploratory_screening profile 下生效，"
-                f"当前 profile={evaluation_profile!r}，将保持合同中的训练节奏。"
-            ),
-            suggested_action=(
-                "若要启用快速筛选重训间隔，请使用 --evaluation-profile exploratory_screening。"
-            ),
-        )
-        return spec.training
-    original = int(spec.training.retrain_every_n_dates)
-    effective = max(original, int(screening_retrain_every_n_dates))
-    diagnostics.event(
-        level="info",
-        stage="spec_load",
-        message="screening retrain cadence override applied",
-        payload={
-            "original_retrain_every_n_dates": original,
-            "effective_retrain_every_n_dates": effective,
-            "expected_fit_count_ratio": (
-                (float(original) / float(effective)) if effective > 0 else None
-            ),
-        },
-    )
-    return replace(spec.training, retrain_every_n_dates=effective)
-
-
-def _build_preparation_cache_key(
-    *,
-    dataset_cache: ModelFactorDatasetCache,
-    spec: ModelFactorCaseSpec,
-    feature_storage_path: Path,
-    feature_source_path: Path,
-    price_columns: tuple[str, ...],
-    optional_price_columns: tuple[str, ...],
-    evaluation_profile: str,
-) -> str:
-    payload = {
-        "features_path": dataset_cache.file_signature(feature_storage_path),
-        "features_source_path": dataset_cache.file_signature(feature_source_path),
-        "prices_path": dataset_cache.file_signature(Path(spec.prices_path)),
-        "universe": asdict(spec.universe),
-        "universe_path": (
-            dataset_cache.file_signature(Path(spec.universe.path))
-            if spec.universe.path is not None
-            else None
-        ),
-        "feature_columns": list(spec.feature_columns),
-        "feature_availability": asdict(spec.feature_availability),
-        "feature_preprocess": asdict(spec.feature_preprocess),
-        "target": asdict(spec.target),
-        "price_columns": list(price_columns),
-        "optional_price_columns": list(optional_price_columns),
-        "evaluation_profile": str(evaluation_profile),
-    }
-    return dataset_cache.build_key(payload)
-
-
-def _build_diagnostics_run_meta(
-    *,
-    spec: ModelFactorCaseSpec | None,
-    evaluation_profile: str,
-    output_dir: Path | None,
-    status: str,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "workflow": "real_case_model_factor",
-        "status": status,
-        "evaluation_profile": evaluation_profile,
-        "output_dir": str(output_dir) if output_dir is not None else None,
-    }
-    if spec is not None:
-        payload.update(
-            {
-                "case_name": spec.name,
-                "factor_name": spec.factor_name,
-                "model_family": spec.model.family,
-                "target_horizon": int(spec.target.horizon),
-                "feature_count": len(spec.feature_columns),
-                "prices_path": spec.prices_path,
-                "features_path": spec.features_path,
-            }
-        )
-    return payload
-
-
-def _annotate_exception_with_diagnostics(
-    exc: Exception,
-    *,
-    output_dir: Path | None,
-    diagnostics_path: Path | None,
-) -> None:
-    try:
-        if output_dir is not None:
-            exc.model_lab_output_dir = str(output_dir)  # type: ignore[attr-defined]
-        if diagnostics_path is not None:
-            exc.model_lab_artifact_paths = {  # type: ignore[attr-defined]
-                "diagnostics": str(diagnostics_path),
-            }
-    except Exception:  # noqa: BLE001
-        return
-
-
-def _load_features(
-    path_value: str,
-    *,
-    feature_columns: tuple[str, ...] = (),
-    feature_availability: FeatureAvailabilitySpec | None = None,
-    feature_preprocess: FeaturePreprocessConfig | None = None,
-) -> pd.DataFrame:
-    if not feature_columns and feature_availability is None and feature_preprocess is None:
-        features = load_tabular_frame(path_value, object_name="features")
-        return _normalize_loaded_features(features)
-
-    required_columns: list[str] = ["date", "asset", *feature_columns]
-    optional_columns: list[str] = []
-
-    if feature_availability is not None:
-        if feature_availability.mode == "required_timestamp":
-            if feature_availability.column is not None:
-                required_columns.append(feature_availability.column)
-            else:
-                optional_columns.extend(["known_at", "available_at"])
-    else:
-        optional_columns.extend(["known_at", "available_at"])
-
-    if (
-        feature_preprocess is not None
-        and feature_preprocess.cross_sectional_group_scope == "date_and_industry"
-        and feature_preprocess.industry_group_column is not None
-    ):
-        required_columns.append(feature_preprocess.industry_group_column)
-
-    features = load_tabular_frame(
-        path_value,
-        object_name="features",
-        columns=required_columns,
-        optional_columns=optional_columns,
-    )
-    return _normalize_loaded_features(features)
-
-
-def _normalize_loaded_features(features: pd.DataFrame) -> pd.DataFrame:
-    required = {"date", "asset"}
-    missing = required - set(features.columns)
-    if missing:
-        raise ValueError(f"features is missing required columns: {sorted(missing)}")
-
-    features = features.copy()
-    features["date"] = pd.to_datetime(features["date"], errors="coerce")
-    if "known_at" in features.columns:
-        features["known_at"] = pd.to_datetime(features["known_at"], errors="coerce")
-    if "available_at" in features.columns:
-        features["available_at"] = pd.to_datetime(features["available_at"], errors="coerce")
-    return features.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True)
-
-
-def _maybe_neutralize_factor(
-    factor_df: pd.DataFrame,
-    *,
-    spec: ModelFactorCaseSpec,
-    universe_mask: pd.DataFrame | None,
-    integrity_checks: list[IntegrityCheckResult] | None = None,
-    max_price_date: pd.Timestamp | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame | None]:
-    if not spec.neutralization.enabled:
-        return factor_df, None
-
-    exposures_path = spec.neutralization.exposures_path
-    if exposures_path is None:
-        raise ValueError("neutralization.exposures_path is required when neutralization is enabled")
-
-    required = {"date", "asset"}
-    if spec.neutralization.size_col is not None:
-        required.add(spec.neutralization.size_col)
-    if spec.neutralization.industry_col is not None:
-        required.add(spec.neutralization.industry_col)
-
-    exposures = load_tabular_frame(
-        exposures_path,
-        object_name="neutralization exposure",
-        columns=sorted(required),
-        optional_columns=("known_at", "available_at"),
-    )
-    exposures["date"] = pd.to_datetime(exposures["date"], errors="coerce")
-
-    missing = required - set(exposures.columns)
-    if missing:
-        raise ValueError(
-            f"neutralization exposure file is missing required columns: {sorted(missing)}"
-        )
-    known_at_col = None
-    if "known_at" in exposures.columns:
-        known_at_col = "known_at"
-    elif "available_at" in exposures.columns:
-        known_at_col = "available_at"
-
-    if integrity_checks is not None and max_price_date is not None:
-        no_future_check = check_no_future_dates_in_input(
-            exposures,
-            max_allowed_date=max_price_date,
-            date_col="date",
-            object_name="model_factor_neutralization_exposures",
-        )
-        integrity_checks.append(no_future_check)
-        raise_on_hard_failures((no_future_check,))
-
-        asof_check = check_asof_inputs_not_after_signal_date(
-            factor_df[["date", "asset"]],
-            exposures,
-            by=("asset",),
-            signal_date_col="date",
-            aux_effective_date_col="date",
-            aux_known_at_col=known_at_col,
-            object_name="model_factor_neutralization_exposures_asof",
-        )
-        integrity_checks.append(asof_check)
-        raise_on_hard_failures((asof_check,))
-
-    if universe_mask is not None:
-        active = universe_mask[universe_mask["in_universe"]][["date", "asset"]]
-        exposures = exposures.merge(
-            active,
-            on=["date", "asset"],
-            how="inner",
-            validate="many_to_one",
-        )
-
-    merged = factor_df[["date", "asset", "value"]].merge(
-        exposures,
-        on=["date", "asset"],
-        how="left",
-        validate="one_to_one",
-    )
-
-    size_col = spec.neutralization.size_col
-    industry_col = spec.neutralization.industry_col
-
-    if size_col is not None:
-        merged["__size_input"] = merged[size_col]
-        size_col = "__size_input"
-    if industry_col is not None:
-        merged["__industry_input"] = merged[industry_col]
-        industry_col = "__industry_input"
-    known_at_input = None
-    if known_at_col is not None:
-        merged["__known_at_input"] = pd.to_datetime(
-            merged[known_at_col],
-            errors="coerce",
-        )
-        known_at_input = "__known_at_input"
-
-    cols = ["date", "asset", "value"]
-    for col in (size_col, industry_col):
-        if col is not None:
-            cols.append(col)
-    if known_at_input is not None:
-        cols.append(known_at_input)
-
-    neutralized = neutralize_signal(
-        merged[cols].copy(),
-        value_col="value",
-        by="date",
-        size_col=size_col,
-        industry_col=industry_col,
-        beta_col=None,
-        min_obs=spec.neutralization.min_obs,
-        ridge=spec.neutralization.ridge,
-        output_col="value_neutralized",
-        known_at_col=known_at_input,
-        enforce_integrity=True,
-    )
-    if integrity_checks is not None:
-        integrity_checks.extend(list(neutralized.integrity_checks))
-        raise_on_hard_failures(neutralized.integrity_checks)
-
-    out = factor_df[["date", "asset", "factor"]].copy()
-    out = out.merge(
-        neutralized.data[["date", "asset", "value_neutralized"]],
-        on=["date", "asset"],
-        how="left",
-        validate="one_to_one",
-    )
-    out = out.rename(columns={"value_neutralized": "value"})
-    return out, neutralized.diagnostics
-
-
-def _coverage_by_date(
-    factor_df: pd.DataFrame,
-    *,
-    coverage_base_df: pd.DataFrame | None = None,
-    target_label_df: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    columns = [
-        "date",
-        "n_assets",
-        "n_non_null",
-        "coverage",
-        "missingness",
-        "universe_count",
-        "feature_row_count",
-        "complete_feature_count",
-        "feature_nan_row_count",
-        "label_available_count",
-        "eligible_count",
-        "scored_count",
-        "scored_evaluable_count",
-        "missing_feature_count",
-        "missing_label_count",
-        "missing_score_count",
-        "filtered_count",
-        "score_coverage",
-        "universe_coverage",
-    ]
-    if factor_df.empty and (coverage_base_df is None or coverage_base_df.empty):
-        return pd.DataFrame(columns=columns)
-
-    scored = pd.DataFrame(columns=["date", "asset", "value"])
-    if not factor_df.empty:
-        scored = factor_df.loc[:, ["date", "asset", "value"]].copy()
-        scored["date"] = pd.to_datetime(scored["date"], errors="coerce")
-        scored["asset"] = scored["asset"].astype(str)
-        finite_score = pd.to_numeric(scored["value"], errors="coerce").notna()
-        scored = scored.loc[finite_score, ["date", "asset"]].drop_duplicates()
-
-    scored_counts = (
-        scored.groupby("date", sort=True)["asset"].nunique().rename("scored_count")
-        if not scored.empty
-        else pd.Series(dtype="int64", name="scored_count")
-    )
-
-    scored_evaluable_counts = scored_counts.rename("scored_evaluable_count")
-    if target_label_df is not None and not target_label_df.empty and not scored.empty:
-        labels = target_label_df.loc[:, ["date", "asset", "value"]].copy()
-        labels["date"] = pd.to_datetime(labels["date"], errors="coerce")
-        labels["asset"] = labels["asset"].astype(str)
-        valid_label = pd.to_numeric(labels["value"], errors="coerce").notna()
-        label_pairs = labels.loc[valid_label, ["date", "asset"]].drop_duplicates()
-        scored_evaluable_counts = (
-            scored.merge(label_pairs, on=["date", "asset"], how="inner", validate="one_to_one")
-            .groupby("date", sort=True)["asset"]
-            .nunique()
-            .rename("scored_evaluable_count")
-        )
-
-    if coverage_base_df is not None and not coverage_base_df.empty:
-        summary = coverage_base_df.copy()
-        summary["date"] = pd.to_datetime(summary["date"], errors="coerce")
-        summary = summary.dropna(subset=["date"]).sort_values("date", kind="mergesort")
-        summary = summary.drop_duplicates(subset=["date"], keep="last").set_index("date")
-    else:
-        summary = pd.DataFrame(index=scored_counts.index)
-        summary["universe_count"] = scored_counts
-        summary["feature_row_count"] = scored_counts
-        summary["complete_feature_count"] = scored_counts
-        summary["feature_nan_row_count"] = 0
-        summary["label_available_count"] = scored_counts
-        summary["eligible_count"] = scored_counts
-        summary["missing_feature_count"] = 0
-        summary["missing_label_count"] = 0
-        summary["filtered_count"] = 0
-
-    summary["scored_count"] = scored_counts.reindex(summary.index).fillna(0)
-    summary["scored_evaluable_count"] = scored_evaluable_counts.reindex(summary.index).fillna(0)
-
-    for count_column in [
-        "universe_count",
-        "feature_row_count",
-        "complete_feature_count",
-        "feature_nan_row_count",
-        "label_available_count",
-        "eligible_count",
-        "scored_count",
-        "scored_evaluable_count",
-        "missing_feature_count",
-        "missing_label_count",
-        "filtered_count",
-    ]:
-        if count_column not in summary.columns:
-            summary[count_column] = pd.NA
-        summary[count_column] = pd.to_numeric(summary[count_column], errors="coerce")
-
-    if "eligible_count" not in summary.columns:
-        summary["eligible_count"] = summary["label_available_count"]
-    eligible = pd.to_numeric(summary["eligible_count"], errors="coerce")
-    scored_evaluable = pd.to_numeric(summary["scored_evaluable_count"], errors="coerce")
-    scored_total = pd.to_numeric(summary["scored_count"], errors="coerce")
-    feature_total = pd.to_numeric(summary["feature_row_count"], errors="coerce")
-    universe_total = pd.to_numeric(summary["universe_count"], errors="coerce")
-    summary["missing_score_count"] = (eligible - scored_evaluable).clip(lower=0)
-    summary["coverage"] = scored_evaluable / eligible.replace(0, pd.NA)
-    summary["score_coverage"] = scored_total / feature_total.replace(0, pd.NA)
-    summary["universe_coverage"] = scored_total / universe_total.replace(0, pd.NA)
-    summary["missingness"] = 1.0 - summary["coverage"]
-    summary["n_assets"] = eligible
-    summary["n_non_null"] = scored_evaluable
-    out = summary.reset_index()
-    for column in columns:
-        if column not in out.columns:
-            out[column] = pd.NA
-    return out[columns]
-
-
-def _model_factor_price_read_columns(
-    evaluation_config: ResearchEvaluationConfig,
-    *,
-    target_price_column: str = "close",
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    target_column = str(target_price_column or "close").strip() or "close"
-    required = _unique_columns(["date", "asset", "close", target_column])
-    diagnostics_cfg = evaluation_config.single_factor_diagnostics
-    optional: list[str] = [
-        # Preserve default dividend back-adjustment and data-quality summaries
-        # while still avoiding unrelated wide price columns.
-        "dividend_per_share",
-        "volume",
-    ]
-    if diagnostics_cfg.run_tradability_checks:
-        optional.extend(["open", "high", "low", "volume"])
-    if diagnostics_cfg.run_execution_price_sensitivity:
-        optional.append("open")
-    if diagnostics_cfg.compute_capacity_estimation:
-        optional.extend(["amount", "market_cap", "circ_mv", "total_mv", "value"])
-    if diagnostics_cfg.run_baseline_comparison:
-        optional.extend(["ret_5d", "ret_20d"])
-    return required, _unique_columns(optional, exclude=set(required))
-
-
-def _build_forward_label_cache(
-    *,
-    prices: pd.DataFrame,
-    target_horizon: int,
-    target_label_df: pd.DataFrame,
-    target_price_column: str = "close",
-    max_abs_forward_return: float | None = None,
-    evaluation_config: ResearchEvaluationConfig,
-) -> dict[int, pd.DataFrame]:
-    horizons = {int(target_horizon)}
-    if evaluation_config.single_factor_diagnostics.compute_ic_decay:
-        horizons.update(_model_factor_decay_horizons(target_horizon))
-
-    label_prices = _prices_for_forward_labels(prices, price_column=target_price_column)
-    label_cache = LabelCache(label_prices)
-    cache: dict[int, pd.DataFrame] = {}
-    for horizon in sorted(horizons):
-        if horizon == int(target_horizon):
-            cache[horizon] = target_label_df.copy()
-        else:
-            labels = label_cache.forward_return(horizon)
-            cache[horizon] = _filter_forward_label_frame(
-                labels,
-                max_abs_forward_return=max_abs_forward_return,
-            )
-    return cache
-
-
-def _prices_for_forward_labels(prices: pd.DataFrame, *, price_column: str) -> pd.DataFrame:
-    column = str(price_column or "close").strip() or "close"
-    if column not in prices.columns:
-        raise ValueError(f"target price column {column!r} is missing from prices")
-    frame = prices.loc[:, ["date", "asset", column]].copy()
-    if column != "close":
-        frame = frame.rename(columns={column: "close"})
-    return frame.loc[:, ["date", "asset", "close"]]
-
-
-def _filter_forward_label_frame(
-    labels: pd.DataFrame,
-    *,
-    max_abs_forward_return: float | None,
-) -> pd.DataFrame:
-    if max_abs_forward_return is None or labels.empty:
-        return labels
-    out = labels.copy()
-    values = pd.to_numeric(out["value"], errors="coerce")
-    out.loc[values.abs() > float(max_abs_forward_return), "value"] = pd.NA
-    return out
-
-
-def _group_return_extreme_rows(
-    group_returns: pd.DataFrame,
-    *,
-    threshold: float = 0.30,
-    limit: int = 20,
-) -> list[dict[str, object]]:
-    if group_returns.empty or "group_return" not in group_returns.columns:
-        return []
-    frame = group_returns.copy()
-    values = pd.to_numeric(frame["group_return"], errors="coerce")
-    frame = frame[values.abs() > float(threshold)].copy()
-    if frame.empty:
-        return []
-    frame["_abs"] = values.loc[frame.index].abs()
-    frame = frame.sort_values("_abs", ascending=False, kind="mergesort").head(int(limit))
-    rows: list[dict[str, object]] = []
-    for row in frame.itertuples(index=False):
-        rows.append(
-            {
-                "date": _date_text(getattr(row, "date", None)),
-                "group": _jsonable_scalar(getattr(row, "group", None)),
-                "group_return": _finite_or_none(getattr(row, "group_return", None)),
-            }
-        )
-    return rows
-
-
-def _enrich_label_extreme_samples(
-    samples: object,
-    *,
-    assignments: pd.DataFrame,
-    group_returns: pd.DataFrame,
-) -> list[dict[str, object]]:
-    if not isinstance(samples, list) or not samples:
-        return []
-    rows = pd.DataFrame(samples)
-    if rows.empty or not {"date", "asset"}.issubset(rows.columns):
-        return []
-    rows["date"] = pd.to_datetime(rows["date"], errors="coerce")
-    assign = assignments.copy()
-    if not assign.empty and {"date", "asset", "quantile"}.issubset(assign.columns):
-        assign["date"] = pd.to_datetime(assign["date"], errors="coerce")
-        rows = rows.merge(
-            assign[["date", "asset", "quantile"]],
-            on=["date", "asset"],
-            how="left",
-            validate="many_to_one",
-        )
-    if "quantile" in rows.columns:
-        group_frame = group_returns.copy()
-        required_group_columns = {"date", "group", "group_return"}
-        if not group_frame.empty and required_group_columns.issubset(group_frame.columns):
-            group_frame["date"] = pd.to_datetime(group_frame["date"], errors="coerce")
-            group_frame["_quantile"] = pd.to_numeric(group_frame["group"], errors="coerce")
-            rows["_quantile"] = pd.to_numeric(rows["quantile"], errors="coerce")
-            rows = rows.merge(
-                group_frame[["date", "_quantile", "group_return"]],
-                on=["date", "_quantile"],
-                how="left",
-                validate="many_to_one",
-            )
-    out: list[dict[str, object]] = []
-    for row in rows.itertuples(index=False):
-        out.append(
-            {
-                "date": _date_text(getattr(row, "date", None)),
-                "group": _jsonable_scalar(getattr(row, "quantile", None)),
-                "group_return": _finite_or_none(getattr(row, "group_return", None)),
-                "asset": _jsonable_scalar(getattr(row, "asset", None)),
-                "raw_return": _finite_or_none(getattr(row, "raw_return", None)),
-                "entry_price": _finite_or_none(getattr(row, "entry_price", None)),
-                "exit_price": _finite_or_none(getattr(row, "exit_price", None)),
-            }
-        )
-    return out
-
-
-def _date_text(value: object) -> str | None:
-    if value is None:
-        return None
-    timestamp = pd.to_datetime(value, errors="coerce")
-    if pd.isna(timestamp):
-        return str(value)
-    return str(pd.Timestamp(timestamp).date().isoformat())
-
-
-def _finite_or_none(value: object) -> float | None:
-    if value is None:
-        return None
-    try:
-        number = float(cast(Any, value))
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _jsonable_scalar(value: object) -> object:
-    if value is None:
-        return None
-    if pd.isna(value):
-        return None
-    if hasattr(value, "item"):
-        return value.item()
-    return value
-
-
-def _model_factor_decay_horizons(target_horizon: int) -> tuple[int, ...]:
-    horizons = {1, 2, 3, 5, 10, 20}
-    if target_horizon > 0:
-        horizons.add(int(target_horizon))
-    return tuple(sorted(horizons))
-
-
-def _unique_columns(columns: list[str], *, exclude: set[str] | None = None) -> tuple[str, ...]:
-    excluded = exclude or set()
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in columns:
-        column = str(raw).strip()
-        if not column or column in excluded or column in seen:
-            continue
-        out.append(column)
-        seen.add(column)
-    return tuple(out)
-
-
-def _resolve_feature_availability_contract(
-    features: pd.DataFrame,
-    *,
-    prices: pd.DataFrame,
-    contract: FeatureAvailabilitySpec,
-) -> tuple[pd.DataFrame, ResolvedFeatureAvailability]:
-    if contract.mode == "required_timestamp":
-        source_column = _resolve_known_at_column(features, preferred=contract.column)
-        if source_column is None:
-            raise ValueError(
-                "feature_availability.mode='required_timestamp' requires a "
-                "known_at/available_at column, or set feature_availability.column explicitly."
-            )
-        resolved = features.copy()
-        resolved[source_column] = pd.to_datetime(resolved[source_column], errors="coerce")
-        if resolved[source_column].isna().any():
-            raise ValueError(
-                f"feature availability column {source_column!r} contains invalid timestamps"
-            )
-        return (
-            resolved.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True),
-            ResolvedFeatureAvailability(
-                mode=contract.mode,
-                requested_column=contract.column,
-                source_column=source_column,
-                known_at_col=source_column,
-                safety_lag_days=None,
-                shifted_rows=0,
-                dropped_rows=0,
-            ),
-        )
-
-    lag = int(contract.safety_lag_days or 0)
-    if lag <= 0:
-        raise ValueError(
-            "feature_availability.safety_lag_days must be > 0 when "
-            "feature_availability.mode='safety_lag'"
-        )
-    resolved = features.copy()
-    feature_dates = pd.to_datetime(resolved["date"], errors="coerce")
-    price_axis = pd.Index(
-        pd.to_datetime(prices["date"], errors="coerce").dropna().unique()
-    ).sort_values()
-    feature_axis = pd.Index(feature_dates.dropna().unique()).sort_values()
-    missing_dates = feature_axis.difference(price_axis)
-    if len(missing_dates) > 0:
-        raise ValueError(
-            "feature_availability.mode='safety_lag' requires feature dates to exist on the "
-            "price date axis; missing dates: "
-            f"{[pd.Timestamp(value).date().isoformat() for value in missing_dates[:5]]}"
-        )
-    lag_map: dict[pd.Timestamp, pd.Timestamp] = {}
-    for idx, raw_date in enumerate(price_axis):
-        shifted_idx = idx + lag
-        if shifted_idx >= len(price_axis):
-            continue
-        lag_map[pd.Timestamp(raw_date)] = pd.Timestamp(price_axis[shifted_idx])
-    shifted_dates = feature_dates.map(lag_map)
-    keep_mask = shifted_dates.notna()
-    dropped_rows = int((~keep_mask).sum())
-    resolved = resolved.loc[keep_mask].copy()
-    shifted_dates = pd.to_datetime(shifted_dates.loc[keep_mask], errors="coerce")
-    synthetic_known_at_col = "__feature_availability_known_at"
-    resolved["date"] = shifted_dates.to_numpy()
-    resolved[synthetic_known_at_col] = shifted_dates.to_numpy()
-    return (
-        resolved.sort_values(["date", "asset"], kind="mergesort").reset_index(drop=True),
-        ResolvedFeatureAvailability(
-            mode=contract.mode,
-            requested_column=None,
-            source_column=None,
-            known_at_col=synthetic_known_at_col,
-            safety_lag_days=lag,
-            shifted_rows=int(len(resolved)),
-            dropped_rows=dropped_rows,
-        ),
-    )
-
-
-def _resolve_known_at_column(features: pd.DataFrame, *, preferred: str | None) -> str | None:
-    if preferred is not None:
-        return preferred if preferred in features.columns else None
-    if "known_at" in features.columns:
-        return "known_at"
-    if "available_at" in features.columns:
-        return "available_at"
-    return None
-
-
-def _build_feature_manifest_payload(
-    *,
-    spec: ModelFactorCaseSpec,
-    features: pd.DataFrame | None,
-    resolved_feature_availability: ResolvedFeatureAvailability,
-    cache_metadata: dict[str, object] | None = None,
-) -> dict[str, object]:
-    metadata = cache_metadata or {}
-    raw_stats = metadata.get("feature_manifest_stats")
-    stats_by_feature: dict[str, dict[str, object]] = {}
-    if isinstance(raw_stats, list):
-        for item in raw_stats:
-            if isinstance(item, dict) and isinstance(item.get("feature"), str):
-                stats_by_feature[str(item["feature"])] = dict(item)
-    rows: list[dict[str, object]] = []
-    for column in spec.feature_columns:
-        if features is not None and column in features.columns:
-            series = pd.to_numeric(features[column], errors="coerce")
-            rows.append(
-                {
-                    "feature": column,
-                    "non_null_ratio": (
-                        float(series.notna().mean()) if not series.empty else None
-                    ),
-                    "mean": float(series.mean()) if series.notna().any() else None,
-                    "std": float(series.std(ddof=1)) if series.notna().sum() > 1 else None,
-                }
-            )
-        else:
-            stats = stats_by_feature.get(column, {})
-            rows.append(
-                {
-                    "feature": column,
-                    "non_null_ratio": stats.get("non_null_ratio"),
-                    "mean": stats.get("mean"),
-                    "std": stats.get("std"),
-                }
-            )
-    features_loaded = features is not None and not features.empty
-    feature_frame = features if features_loaded else None
-    return {
-        "schema_version": "1.0.0",
-        "artifact_type": "alpha_lab_feature_manifest",
-        "case_name": spec.name,
-        "factor_name": spec.factor_name,
-        "model_family": spec.model.family,
-        "manifest_source": "features" if features_loaded else "cache_metadata",
-        "n_rows": (
-            int(len(feature_frame))
-            if feature_frame is not None
-            else _metadata_int_or_none(metadata.get("n_features_rows"))
-        ),
-        "n_dates": (
-            int(feature_frame["date"].nunique())
-            if feature_frame is not None and "date" in feature_frame
-            else _metadata_int_or_none(metadata.get("n_features_dates"))
-        ),
-        "n_assets": (
-            int(feature_frame["asset"].nunique())
-            if feature_frame is not None and "asset" in feature_frame
-            else _metadata_int_or_none(metadata.get("n_features_assets"))
-        ),
-        "known_at_column": resolved_feature_availability.known_at_col,
-        "feature_availability": {
-            "mode": resolved_feature_availability.mode,
-            "requested_column": resolved_feature_availability.requested_column,
-            "source_column": resolved_feature_availability.source_column,
-            "known_at_column": resolved_feature_availability.known_at_col,
-            "safety_lag_days": resolved_feature_availability.safety_lag_days,
-            "shifted_rows": resolved_feature_availability.shifted_rows,
-            "dropped_rows": resolved_feature_availability.dropped_rows,
-        },
-        "feature_columns": list(spec.feature_columns),
-        "features": rows,
-    }
-
-
-def _metadata_int_or_none(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return int(value)
-    return None
