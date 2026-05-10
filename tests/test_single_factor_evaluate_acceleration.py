@@ -135,7 +135,7 @@ def test_lag_sensitivity_reuses_base_run_for_lag_zero(
         )
 
     monkeypatch.setattr(
-        single_factor_evaluate,
+        single_factor_evaluate.pnl_attribution,
         "_evaluate_variant_lightweight",
         _wrapped_variant_summary,
     )

@@ -141,13 +141,13 @@ def test_single_factor_case_passes_precomputed_labels_to_experiment_runner(
         enable_neutralization=False,
     )
     captured_precomputed: list[dict[int, pd.DataFrame] | None] = []
-    original_runner = sf_evaluate_module.run_factor_experiment
+    original_runner = sf_evaluate_module.core.run_factor_experiment
 
     def _wrapped_runner(*args, **kwargs):
         captured_precomputed.append(kwargs.get("precomputed_forward_labels"))
         return original_runner(*args, **kwargs)
 
-    with patch.object(sf_evaluate_module, "run_factor_experiment", _wrapped_runner):
+    with patch.object(sf_evaluate_module.core, "run_factor_experiment", _wrapped_runner):
         run_single_factor_case(
             spec_path,
             evaluation_profile="exploratory_screening",
