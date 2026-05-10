@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_lab.bucket_builders import build_size_bucket, build_trailing_return_bucket
-from alpha_lab.research.bucket_builders import (
+from alpha_lab.research.buckets import (
     build_past_ret_lookback_bucket,
     build_two_dim_bucket,
 )
