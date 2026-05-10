@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""Garbage-collect old web UI run caches under outputs/real_cases/_web_runs/.
+"""Garbage-collect old web UI run directories under outputs/real_cases/_web_runs/.
 
-Each web UI submission of a model_factor case writes ~4.5 GB of feature
-matrices under its own ``_web_runs/<run_id>/_model_factor_cache/`` directory.
-The cache key inside is content-addressable but the per-run wrapper neutralises
-reuse, so caches accumulate without bound. This script trims them.
+Each web UI submission writes its per-run output bundle (manifests, metrics,
+artifacts, intermediate CSVs, tearsheets) under
+``outputs/real_cases/_web_runs/<run_id>/<case_name>/``. The big shared
+dataset cache lives at ``outputs/real_cases/_model_factor_shared_cache/``
+and is reused across runs via the ``--cache-root-dir`` argument propagated
+by the web launcher (see ``_resolve_preparation_cache_dir`` for the
+contract). Per-run directories themselves are typically tens of MB; this
+script trims them when they accumulate.
+
+Historical note: prior to the Phase 2 web_unified hardening, the dataset
+cache landed under each per-run directory (``_web_runs/<run_id>/
+_model_factor_cache/``) at ~4.5GB per submission. That leak is fixed and
+guarded by ``test_resolve_preparation_cache_dir_rejects_web_runs_fallback``
+plus ``test_preparation_cache_key_is_invariant_to_output_dir``.
 
 Examples::
 

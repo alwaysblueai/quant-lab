@@ -39,19 +39,19 @@ def _resolve_preparation_cache_dir(
     if cache_root_dir is not None:
         return Path(cache_root_dir).expanduser().resolve() / "_model_factor_cache"
     fallback = output_dir.parent.resolve() / "_model_factor_cache"
-    # Regression guard: web runs land output under <root>/_web_runs/<run_id>/<case>.
-    # Falling back here means cache_root_dir was not propagated and the cache will
-    # be duplicated per run (each run holds ~3-4GB). Web entry point must pass
-    # --cache-root-dir pointing at a shared location.
+    # Web runs land output under <root>/_web_runs/<run_id>/<case>. Falling back
+    # to output_dir.parent in that case would land the cache under the per-run
+    # directory and silently duplicate ~3-4GB of feature matrices per submission.
+    # The web launcher always passes --cache-root-dir; reaching this branch with
+    # an _web_runs output dir means the launcher contract was violated. Fail
+    # loudly so the cache leak does not return.
     if "_web_runs" in fallback.parts:
-        import warnings as _w
-
-        _w.warn(
-            "model_factor preparation cache falling back to per-run dir under "
-            f"_web_runs ({fallback}); cache_root_dir was not propagated by the web "
-            "launcher and prepared inputs will be duplicated per run. Pass "
-            "cache_root_dir to share across runs.",
-            stacklevel=2,
+        raise ValueError(
+            "model_factor preparation cache cannot fall back to a per-run "
+            f"directory under _web_runs ({fallback}). The web launcher must "
+            "pass --cache-root-dir pointing at a shared location (typically "
+            "<output_root>/_model_factor_shared_cache); without it, prepared "
+            "inputs would be duplicated per run."
         )
     return fallback
 

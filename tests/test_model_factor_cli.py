@@ -79,6 +79,63 @@ def test_resolve_preparation_cache_dir_override_routes_under_cache_root(tmp_path
     assert other_cache_dir == cache_dir
 
 
+def test_resolve_preparation_cache_dir_rejects_web_runs_fallback(tmp_path: Path) -> None:
+    """A web-launcher run must always pass cache_root_dir.
+
+    Falling back to ``output_dir.parent`` for an output under ``_web_runs/``
+    would silently duplicate ~3-4GB of feature matrices per submission (the
+    leak fixed in the Phase 2 web_unified hardening). Reaching this branch
+    means the launcher contract was violated, so we now refuse to proceed
+    instead of warning.
+    """
+
+    output_dir = tmp_path / "outputs" / "_web_runs" / "run-a" / "case"
+    with pytest.raises(ValueError, match="_web_runs"):
+        _resolve_preparation_cache_dir(output_dir)
+
+
+def test_preparation_cache_key_is_invariant_to_output_dir(tmp_path: Path) -> None:
+    """Two web submissions of the same case must produce the same cache key.
+
+    This is the regression guard for the original ``_web_runs/<run_id>/
+    _model_factor_cache/`` leak: if the cache key were sensitive to the
+    per-run output directory the dataset cache would miss every time and
+    rebuild ~3-4GB per submission.
+    """
+
+    from dataclasses import asdict
+
+    from alpha_lab.model_factor.dataset_cache import ModelFactorDatasetCache
+
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    spec = load_model_factor_case_spec(spec_path)
+    shared_cache_root = tmp_path / "outputs" / "_model_factor_shared_cache"
+
+    def _key_for(run_id: str) -> str:
+        output_dir = tmp_path / "outputs" / "_web_runs" / run_id / spec.name
+        cache_dir = _resolve_preparation_cache_dir(
+            output_dir, cache_root_dir=shared_cache_root
+        )
+        ds_cache = ModelFactorDatasetCache(cache_dir)
+        payload = {
+            "features_path": ds_cache.file_signature(Path(spec.features_path)),
+            "prices_path": ds_cache.file_signature(Path(spec.prices_path)),
+            "feature_columns": list(spec.feature_columns),
+            "feature_availability": asdict(spec.feature_availability),
+            "feature_preprocess": asdict(spec.feature_preprocess),
+            "target": asdict(spec.target),
+            "evaluation_profile": "default_research",
+        }
+        return ds_cache.build_key(payload)
+
+    key_a = _key_for("run-a")
+    key_b = _key_for("run-b")
+    assert key_a == key_b, (
+        "preparation cache key must not depend on the per-run output_dir; "
+        "if it does, web runs will repeatedly rebuild the dataset cache"
+    )
+
+
 def test_model_factor_coverage_uses_eligible_denominator_and_final_scores() -> None:
     base = pd.DataFrame(
         [
