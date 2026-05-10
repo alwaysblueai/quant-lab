@@ -142,7 +142,78 @@
 - Docs: README/docs match actual behavior.
 - Diff quality: minimal, coherent, and reversible.
 
-## 8) Card Language Policy
+## 8) Code Layout Registry
+
+The repo intentionally co-locates two parallel pipelines (single-factor and
+model-factor / "model lab") under a single Python package. Use this registry
+as the single source of truth for "where does <X> live?". The model line
+deliberately stays distributed rather than collapsed into one subpackage so
+each layer owns its own contract; this table is what makes that layout legible.
+
+### Single-factor line (alpha-lab)
+
+| Concern | Path |
+| --- | --- |
+| Case spec | `src/alpha_lab/real_cases/single_factor/spec.py` |
+| Pipeline driver | `src/alpha_lab/real_cases/single_factor/pipeline.py` |
+| Evaluate package | `src/alpha_lab/real_cases/single_factor/evaluate/` (core + coverage + strict_research + capacity + comparisons + pnl_attribution + data_quality + diagnostics + summary_metrics + _utils) |
+| Artifacts | `src/alpha_lab/real_cases/single_factor/artifacts.py` |
+| Templates | `src/alpha_lab/real_cases/single_factor/templates.py` |
+| CLI | `src/alpha_lab/real_cases/single_factor/cli.py` |
+| Custom factor loader | `src/alpha_lab/custom_factors.py` |
+| Draft validator | `src/alpha_lab/draft_factor_validation.py` |
+| Persisted factor defs | `custom_factors/{research,promoted}/<name>/factor.json` |
+| Configs | `configs/real_cases/single_factor/*.yaml` |
+| Workflow docs | `docs/backend_draft_factor_workflow.md`, `docs/factor_promotion_checklist.md`, `docs/templates/stage3_backend_draft_factor_prompt.md` |
+
+### Model-factor line (model lab)
+
+| Concern | Path |
+| --- | --- |
+| Core ML package | `src/alpha_lab/model_factor/core/` (types + config + internals + preprocess + training_arrays + selection + estimator + importance + diagnostics_build + build + _utils) |
+| Dataset cache | `src/alpha_lab/model_factor/dataset_cache.py` |
+| Diagnostics observer | `src/alpha_lab/model_factor/diagnostics.py` |
+| Memory helper | `src/alpha_lab/model_factor/_memory.py` |
+| Case spec | `src/alpha_lab/real_cases/model_factor/spec.py` |
+| Pipeline package | `src/alpha_lab/real_cases/model_factor/pipeline/` (core + cache + features + labels + feature_manifest + diagnostics + _utils) |
+| Artifacts package | `src/alpha_lab/real_cases/model_factor/artifacts/` (core + model_selection + backtest_recipe + feature_export + diagnostics + _utils) |
+| Templates | `src/alpha_lab/real_cases/model_factor/templates.py` |
+| CLI | `src/alpha_lab/real_cases/model_factor/cli.py` |
+| Benchmark runner | `src/alpha_lab/real_cases/model_factor/benchmark.py` |
+| Candidate loader | `src/alpha_lab/model_candidates.py` |
+| Draft validator | `src/alpha_lab/draft_model_validation.py` |
+| Persisted candidate defs | `model_candidates/{research,promoted}/<name>/model_candidate.json` |
+| Configs | `configs/real_cases/model_factor/*.yaml` |
+| Web UI fixtures | `src/alpha_lab/dev_fixtures/model_lab_overview/*.json` |
+| Workflow docs | `docs/backend_draft_model_workflow.md`, `docs/model_factor_performance_roadmap.md`, `docs/model_factor_metric_inventory.md`, `docs/templates/model_lab_stage3_backend_draft_prompt.md`, `docs/templates/codex_gui_model_stage3_execution_envelope.md` |
+
+### Cross-cutting
+
+| Concern | Path |
+| --- | --- |
+| Research bridge (idea exploration) | `src/alpha_lab/research_bridge/` |
+| Reporting (manifests, tearsheets, triage) | `src/alpha_lab/reporting/` |
+| Research integrity contracts | `src/alpha_lab/research_integrity/` |
+| Splits / purged k-fold | `src/alpha_lab/splits.py`, `src/alpha_lab/validation/purged_kfold.py` |
+| Web UI server (alpha-lab + model-lab tabs) | `src/alpha_lab/web_unified.py` |
+| Frontend metrics dashboard | `frontend/metrics-dashboard/` |
+| Vault export / experiment cards | `src/alpha_lab/reporting/__init__.py` (`export_experiment_card`); cards land at `<vault>/50_experiments/` |
+
+### Scripts layout (post-E7 reorganization)
+
+| Bucket | Purpose |
+| --- | --- |
+| `scripts/bench/` | Performance benchmarks (`bench_*`) |
+| `scripts/run/` | Runners — Python and shell (`run_*`) |
+| `scripts/data/` | Data ingestion / preparation (adapt, generate, fill, materialize) |
+| `scripts/build/` | Sidecar builders (`build_factor_from_recipe`, `build_mechanism_index`) |
+| `scripts/smoke/` | Frontend smoke harnesses (`smoke_*`) |
+| `scripts/etl/` | 1-min ETL (Phase 1) |
+| `scripts/intraday/` | Intraday readiness checks |
+| `scripts/verify/` | Cross-checks against vendor parquet |
+| `scripts/{ab_compare,gc_web_runs,diagnose_runtime_stability}.{py,sh}` | Top-level miscellaneous tools |
+
+## 9) Card Language Policy
 - Generated cards, summaries, and human-facing research docs should be Chinese-first.
 - The main body, section titles, and explanatory text should use Chinese by default.
 - Preserve English only where it is necessary for professional terminology, proper nouns, established technical abbreviations, formulas, code symbols, file paths, or quoted source titles.
