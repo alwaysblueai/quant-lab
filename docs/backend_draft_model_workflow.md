@@ -4,16 +4,31 @@
 流程。目标是让研究态草稿模型可以快速迭代，同时保持可审计、可复现、可对比，
 并且不污染前端注册、core API 与 promoted 候选库。
 
-## 上游来源合同
+## 上游来源（Stage 0 + Stage 1 + Stage 2）
+
+本流程接的是 `ideas/<idea_id>/stage2_payload.json`（或同等内容）。完整链路：
+
+1. **Stage 0** — `alpha-lab model-idea distribute --idea ... --output-dir ideas/<id>/`
+   产出 retrieval pack（vault 卡 + 代码库 model_candidates 索引 +
+   ModelFactorCaseSpec schema 摘录 + validator 硬约束清单）+
+   `prompt_claude_mechanism.md`（generator） + `prompt_codex_review.md`（reviewer）。
+2. **Stage 1** — Claude Code 输出 `mechanism_deepdive.md`，Codex GUI 输出
+   `code_feasibility_review.md`，互不可见。
+3. **Stage 2** — 网页版 GPT 接 reconcile + candidate 模板，输出唯一
+   `model_candidate_payload`，含 `provenance.idea_id` /
+   `provenance.stage2_payload_sha256` / `provenance.audience_chain`。
+
+详见 `docs/research_workflow.md`。
 
 网页版 GPT 项目中建议固定加入以下来源文件，确保输出从 Stage1 到 Stage3 都是
 “人可读 + 机器可提取”的固定合同：
 
 - `docs/templates/model_lab_web_gpt_source_pack.md`
-- `docs/templates/model_lab_stage1_reconcile_contract.md`
+- `docs/templates/model_lab_stage1_reconcile_contract.md`（已加 `code_feasibility_review` 输入槽位）
 - `docs/templates/model_lab_stage2_candidate_contract.md`
 - `docs/templates/model_lab_stage3_backend_draft_prompt.md`
-- `docs/templates/codex_gui_model_stage3_execution_envelope.md`
+- `docs/templates/codex_gui_model_stage3_execution_envelope.md`（已加 forbidden_actions / escalation_triggers）
+- `docs/templates/codex_gui_codebase_review_envelope.md`（Stage 1 reviewer 入口）
 
 当用户提供 Claude Code / Codex GUI 两份 Stage1 讨论结果时，网页版 GPT 必须先
 输出 `contract_version=model_stage1_reconcile_v1` 的
@@ -72,10 +87,18 @@ run_controls:
   vault_export_mode: "skip"
 case_spec_payload: { ... 完整 ModelFactorCaseSpec 字段 ... }
 stage3_validation_focus: []
+provenance:
+  idea_id: "20260511T143000Z__turnover-conditioned-pv"
+  stage2_payload_sha256: "<sha256 of canonical-JSON Stage2 payload>"
+  audience_chain: ["claude_mechanism", "codex_review", "web_gpt_stage2"]
 ```
 
 `case_spec_payload` 不允许只给 patch；网页 GPT 必须输出完整 case spec，避免
 Codex GUI 自行猜测如何 merge。
+
+`provenance` 块由 Stage 2 网页 GPT 填写，Stage 3 不得改写或删除。
+validator 会做形态校验，artifact 审计块会把 `provenance.idea_id` 复制进
+`draft_model_source.provenance`。
 
 ## Codex GUI 执行流
 
@@ -194,13 +217,19 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
     "factor_name": "...",
     "feature_columns": ["..."],
     "feature_availability": { "mode": "...", "column": "..." },
-    "model_family": "..."
+    "model_family": "...",
+    "provenance": {
+      "idea_id": "20260511T143000Z__turnover-conditioned-pv",
+      "stage2_payload_sha256": "...",
+      "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+    }
   }
 }
 ```
 
 缺少 `candidate_json_sha256`、`case_spec_sha256`、`feature_contract_sha256` 或
-source path 时，本轮 Stage3 视为失败。
+source path 时，本轮 Stage3 视为失败。`provenance` 缺失仅产生 warning（兼容旧
+candidate），但所有走 `alpha-lab model-idea distribute` 流的候选必须有 provenance。
 
 ## 结果分析
 
