@@ -608,7 +608,7 @@ def test_profile_aware_campaign_script_remains_backward_compatible(
     monkeypatch.setattr("alpha_lab.examples.profile_aware_campaign_level12.main", _fake_main)
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_path("scripts/run_profile_aware_campaign_level12_example.py", run_name="__main__")
+        runpy.run_path("scripts/run/run_profile_aware_campaign_level12_example.py", run_name="__main__")
     assert excinfo.value.code == 23
 
 
