@@ -1,0 +1,66 @@
+direction: long
+factor_name: turnover_technical_ridge_20_smoke
+feature_availability:
+  column: known_at
+  mode: required_timestamp
+feature_columns:
+- turnover_rate_f
+- turnover_rate
+- atr_bfq
+- dv_ttm
+- topdays
+- updays
+- downdays
+- lowdays
+- total_mv
+- circ_mv
+- pe_ttm
+- macd_dea_bfq
+- macd_dif_bfq
+- trix_bfq
+- obv_bfq
+- emv_bfq
+- rsi_bfq_24
+- wr_bfq
+- dmi_adx_bfq
+- dmi_pdi_bfq
+feature_importance:
+  enabled: true
+  method: auto
+  mode: every_fit
+  save_ledger: true
+feature_preprocess:
+  cross_sectional_transform: winsorize_zscore
+  missing_policy: median_impute
+  scale_features: auto
+features_path: /home/yukun_zhao/quant/projects/alpha-lab/data/processed/model_lab_drafts/turnover_technical_ridge_20_smoke/features.parquet
+model:
+  family: ridge
+  params:
+    alpha: 5.0
+model_selection:
+  enabled: false
+n_quantiles: 5
+name: turnover_technical_ridge_20_smoke
+neutralization:
+  enabled: false
+output:
+  root_dir: /home/yukun_zhao/quant/projects/alpha-lab/outputs/real_cases
+prices_path: /home/yukun_zhao/quant/projects/alpha-lab/data/processed/model_lab_drafts/turnover_technical_ridge_20_smoke/prices.parquet
+rebalance_frequency: W
+target:
+  horizon: 5
+  kind: forward_return
+  max_abs_forward_return: 1.0
+  price_column: close_qfq
+training:
+  min_score_assets: 300
+  min_train_dates: 40
+  min_train_rows: 12000
+  retrain_every_n_dates: 20
+  train_window_n_dates: 80
+  window_type: rolling
+transaction_cost:
+  one_way_rate: 0.001
+universe:
+  name: default

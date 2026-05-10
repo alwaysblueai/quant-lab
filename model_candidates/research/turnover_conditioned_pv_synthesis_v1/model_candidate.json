@@ -1,0 +1,222 @@
+{
+  "base_case_spec_path": "configs/real_cases/model_factor/stock_elastic_net_safe_bfq.yaml",
+  "candidate_name": "turnover_conditioned_pv_synthesis_v1",
+  "case_spec_payload": {
+    "direction": "long",
+    "factor_name": "turnover_conditioned_pv_synthesis_v1_5d",
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp"
+    },
+    "feature_columns": [
+      "turnover_rate",
+      "turnover_rate_f",
+      "volume_ratio",
+      "atr_bfq",
+      "bias1_bfq",
+      "bias2_bfq",
+      "bias3_bfq",
+      "cci_bfq",
+      "macd_bfq",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "mtm_bfq",
+      "obv_bfq",
+      "rsi_bfq_6",
+      "rsi_bfq_12",
+      "rsi_bfq_24",
+      "vr_bfq",
+      "wr_bfq",
+      "updays",
+      "downdays",
+      "topdays",
+      "lowdays",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq",
+      "dmi_mdi_bfq",
+      "mfi_bfq",
+      "emv_bfq",
+      "trix_bfq"
+    ],
+    "feature_importance": {
+      "enabled": true,
+      "method": "auto",
+      "mode": "every_fit",
+      "save_ledger": true
+    },
+    "feature_preprocess": {
+      "cross_sectional_group_scope": "date",
+      "cross_sectional_transform": "winsorize_zscore",
+      "missing_policy": "median_impute",
+      "scale_features": "auto"
+    },
+    "features_path": "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet",
+    "model": {
+      "family": "elastic_net",
+      "params": {
+        "alpha": 0.001,
+        "l1_ratio": 0.5
+      }
+    },
+    "model_selection": {
+      "candidates": [
+        {
+          "family": "ridge",
+          "params": {
+            "alpha": 0.1
+          }
+        },
+        {
+          "family": "ridge",
+          "params": {
+            "alpha": 1.0
+          }
+        },
+        {
+          "family": "lasso",
+          "params": {
+            "alpha": 0.0005
+          }
+        },
+        {
+          "family": "elastic_net",
+          "params": {
+            "alpha": 0.001,
+            "l1_ratio": 0.5
+          }
+        },
+        {
+          "family": "elastic_net",
+          "params": {
+            "alpha": 0.0003,
+            "l1_ratio": 0.2
+          }
+        }
+      ],
+      "embargo_pct": 0.05,
+      "enabled": true,
+      "metric": "rank_ic_minus_turnover_penalty",
+      "n_splits": 3,
+      "turnover_bucket_quantile": 0.2,
+      "turnover_penalty_lambda": 0.1
+    },
+    "n_quantiles": 5,
+    "name": "turnover_conditioned_pv_synthesis_v1",
+    "neutralization": {
+      "enabled": false
+    },
+    "output": {
+      "root_dir": "../../../outputs/real_cases"
+    },
+    "prices_path": "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet",
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return",
+      "max_abs_forward_return": 1.0,
+      "price_column": "close_qfq"
+    },
+    "training": {
+      "min_score_assets": 2000,
+      "min_train_dates": 60,
+      "min_train_rows": 50000,
+      "retrain_every_n_dates": 40,
+      "train_window_n_dates": 120,
+      "window_type": "rolling"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "name": "default"
+    }
+  },
+  "contract_version": "stage2_model_candidate_v1",
+  "data_contract": {
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp",
+      "safety_lag_days": null
+    },
+    "feature_optional_columns": [
+      "pe_ttm",
+      "pb",
+      "ps_ttm",
+      "dv_ttm",
+      "total_mv",
+      "circ_mv",
+      "free_share"
+    ],
+    "feature_required_columns": [
+      "date",
+      "asset",
+      "known_at",
+      "turnover_rate",
+      "turnover_rate_f",
+      "volume_ratio",
+      "atr_bfq",
+      "bias1_bfq",
+      "bias2_bfq",
+      "bias3_bfq",
+      "cci_bfq",
+      "macd_bfq",
+      "macd_dea_bfq",
+      "macd_dif_bfq",
+      "mtm_bfq",
+      "obv_bfq",
+      "rsi_bfq_6",
+      "rsi_bfq_12",
+      "rsi_bfq_24",
+      "vr_bfq",
+      "wr_bfq",
+      "updays",
+      "downdays",
+      "topdays",
+      "lowdays",
+      "dmi_adx_bfq",
+      "dmi_pdi_bfq",
+      "dmi_mdi_bfq",
+      "mfi_bfq",
+      "emv_bfq",
+      "trix_bfq"
+    ],
+    "prices_required_columns": [
+      "date",
+      "asset",
+      "close",
+      "close_qfq"
+    ]
+  },
+  "expected_horizon": "t_plus_1_or_later",
+  "implementation_status": "draft_for_stage3",
+  "implementation_type": "spec_variant",
+  "risk_controls": {
+    "feature_availability_pit": "features_safe_bfq_35.parquet has known_at and no available_at; this candidate explicitly uses feature_availability.mode=required_timestamp and column=known_at. Stage3 must verify known_at is present and aligned no later than signal date.",
+    "feature_instability": "feature_importance must be inspected to ensure top features are not dominated by one unstable turnover, ATR, or oscillator column across retrain folds.",
+    "label_leakage": "target remains supported forward_return with horizon=5 and price_column=close_qfq; Stage3 must audit close_qfq adjustment and target alignment through integrity_report.",
+    "overfit_complexity": "v1 keeps low-complexity linear candidates only: ridge, lasso, elastic_net. No tree family is used in the first draft, and no explicit interaction builder is added.",
+    "split_regime_fragility": "rolling 120 trading-date training window is preserved from the base config; Stage3 should inspect training_log and model_selection fold scores for no_finite_scores, low fold count, or regime-concentrated selection.",
+    "turnover_cost": "model_selection uses rank_ic_minus_turnover_penalty as the intended selection metric, with transaction_cost.one_way_rate=0.001. Stage3 must verify parser support and compare selected candidate turnover proxy with realized screening turnover artifacts."
+  },
+  "run_controls": {
+    "evaluation_profile": "exploratory_screening",
+    "screening_retrain_every_n_dates": 40,
+    "vault_export_mode": "skip"
+  },
+  "source_mechanisms": [
+    "M1",
+    "M2"
+  ],
+  "stage3_validation_focus": [
+    "Validate that base_case_spec_path is configs/real_cases/model_factor/stock_elastic_net_safe_bfq.yaml, not stock_elastic_net.yaml.",
+    "Validate features_path resolves to data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet from configs/real_cases/model_factor.",
+    "Validate prices_path resolves to data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet from configs/real_cases/model_factor.",
+    "Validate feature_columns are all real columns in features_safe_bfq_35.parquet and exclude reserved columns date/asset/factor/value.",
+    "Validate feature_availability uses known_at and that available_at is not required.",
+    "Validate feature_preprocess uses ModelFactorCaseSpec fields: missing_policy, scale_features, cross_sectional_transform, cross_sectional_group_scope.",
+    "Validate model_selection candidates parse directly as ModelSpec objects with family and params, not nested under model and not carrying candidate names.",
+    "Validate model_selection metric rank_ic_minus_turnover_penalty is supported; if unsupported, stop and report validator failure rather than rewriting the case.",
+    "Inspect whether excluding pe_ttm/pb/ps_ttm/dv_ttm/total_mv/circ_mv/free_share materially changes coverage or training rows.",
+    "Inspect model_selection.json, training_log.csv, feature_importance_ledger.csv, metrics.json, summary.md, integrity_report.md, run_manifest.json, model_definition.json, and feature_manifest.json."
+  ]
+}

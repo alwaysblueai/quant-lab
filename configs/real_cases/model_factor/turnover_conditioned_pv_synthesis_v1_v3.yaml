@@ -1,0 +1,99 @@
+direction: long
+factor_name: turnover_conditioned_pv_synthesis_v1_5d
+feature_availability:
+  column: known_at
+  mode: required_timestamp
+feature_columns:
+- turnover_rate
+- turnover_rate_f
+- volume_ratio
+- atr_bfq
+- bias1_bfq
+- bias2_bfq
+- bias3_bfq
+- cci_bfq
+- macd_bfq
+- macd_dea_bfq
+- macd_dif_bfq
+- mtm_bfq
+- obv_bfq
+- rsi_bfq_6
+- rsi_bfq_12
+- rsi_bfq_24
+- vr_bfq
+- wr_bfq
+- updays
+- downdays
+- topdays
+- lowdays
+- dmi_adx_bfq
+- dmi_pdi_bfq
+- dmi_mdi_bfq
+- mfi_bfq
+- emv_bfq
+- trix_bfq
+feature_importance:
+  enabled: true
+  method: auto
+  mode: every_fit
+  save_ledger: true
+feature_preprocess:
+  cross_sectional_group_scope: date
+  cross_sectional_transform: winsorize_zscore
+  missing_policy: median_impute
+  scale_features: auto
+features_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet
+model:
+  family: elastic_net
+  params:
+    alpha: 0.001
+    l1_ratio: 0.5
+model_selection:
+  candidates:
+  - family: ridge
+    params:
+      alpha: 0.1
+  - family: ridge
+    params:
+      alpha: 1.0
+  - family: lasso
+    params:
+      alpha: 0.0005
+  - family: elastic_net
+    params:
+      alpha: 0.001
+      l1_ratio: 0.5
+  - family: elastic_net
+    params:
+      alpha: 0.0003
+      l1_ratio: 0.2
+  embargo_pct: 0.05
+  enabled: true
+  metric: rank_ic_minus_turnover_penalty
+  n_splits: 3
+  turnover_bucket_quantile: 0.2
+  turnover_penalty_lambda: 0.1
+n_quantiles: 5
+name: turnover_conditioned_pv_synthesis_v1
+neutralization:
+  enabled: false
+output:
+  root_dir: ../../../outputs/real_cases
+prices_path: ../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet
+rebalance_frequency: W
+target:
+  horizon: 5
+  kind: forward_return
+  max_abs_forward_return: 1.0
+  price_column: close_qfq
+training:
+  min_score_assets: 2000
+  min_train_dates: 60
+  min_train_rows: 50000
+  retrain_every_n_dates: 40
+  train_window_n_dates: 120
+  window_type: rolling
+transaction_cost:
+  one_way_rate: 0.001
+universe:
+  name: default

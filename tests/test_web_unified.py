@@ -22,6 +22,7 @@ from alpha_lab.web_unified import (
     _build_frontend_batch_parallel_config,
     _build_model_lab_batch_worker_count,
     _build_model_lab_subprocess_command,
+    _build_model_lab_subprocess_env,
     _extract_metrics_summary,
     _index_html_raw,
     _load_model_factor_artifact_paths_from_manifest,
@@ -1342,6 +1343,39 @@ def test_model_lab_source_service_reads_curated_source(tmp_path: Path) -> None:
     assert payload["line_count"] > 0
 
 
+def test_model_lab_source_list_tolerates_missing_registered_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    monkeypatch.setattr(
+        "alpha_lab.web_unified._MODEL_LAB_SOURCE_SPECS",
+        (
+            {
+                "key": "missing_source",
+                "label": "missing.py",
+                "path": "src/alpha_lab/does_not_exist.py",
+                "description": "Missing source should not crash source listing.",
+                "focus": "n/a",
+            },
+        ),
+    )
+
+    sources = svc.list_model_lab_sources()
+
+    assert sources == [
+        {
+            "key": "missing_source",
+            "label": "missing.py",
+            "path": str((tmp_path / "src/alpha_lab/does_not_exist.py").resolve()),
+            "description": "Missing source should not crash source listing.",
+            "focus": "n/a",
+            "exists": False,
+        }
+    ]
+
+
 def test_model_lab_idea_explorer_service_round_trip(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
@@ -2010,35 +2044,18 @@ def test_model_lab_html_omits_duplicate_claude_key_settings() -> None:
     assert "/api/settings/llm" not in html
 
 
-def test_model_lab_html_uses_automatic_idea_explorer_defaults() -> None:
+def test_model_lab_html_is_backend_first_report_workspace() -> None:
     html = _model_lab_html()
 
-    assert 'name="explorerMode"' not in html
-    assert 'name="explorerStage"' not in html
-    assert 'id="explorerTopK"' not in html
-    assert 'id="explorerMemoryLimit"' not in html
-    assert 'id="explorerBindSelectedSpec"' not in html
-    assert 'id="explorerSpecName"' not in html
-    assert "function autoModelIdeaStage" in html
-    assert "function autoModelIdeaMode" in html
-    assert "const topK = 6;" in html
-    assert "const memoryLimit = 3;" in html
-    assert "save_session: true" in html
-    assert "inject_recent_drift: true" in html
-    assert "探索并生成双 Agent Prompt" in html
-    assert "Claude Code / Codex GUI" in html
-    assert 'id="explorerAgentPromptCards"' in html
-    assert 'data-action="copy-model-idea-agent-prompt"' in html
-    assert "function renderModelIdeaAgentPrompts" in html
-    assert 'id="explorerQuickSessions"' in html
-    assert 'id="explorerMechanismIndexStatus"' in html
-    assert "renderIdeaQuickSessions" in html
-    assert "/api/settings/mechanism-index" in html
-    assert "deleteIdeaSession" in html
-    assert "/api/model-lab/idea-explorer/sessions/" in html
-    assert "当前阶段：" in html
-    assert "完成双 agent 点评与网页版 GPT 汇总" in html
-    assert "这不会删除 spec、run 或知识库卡片" in html
+    assert "后端迭代优先" in html
+    assert "Validate + Run Full Report" in html
+    assert "Validate + Run Screening" not in html
+    assert "探索并生成双 Agent Prompt" not in html
+    assert 'id="explorerIdea"' not in html
+    assert 'id="btnIdeaExplore"' not in html
+    assert 'id="explorerAgentPromptCards"' not in html
+    assert 'id="explorerQuickSessions"' not in html
+    assert 'id="explorerMechanismIndexStatus"' not in html
     assert 'id="explorerPrompt"' not in html
     assert 'id="explorerResponse"' not in html
     assert 'id="btnIdeaRecordResponse"' not in html
@@ -3320,6 +3337,20 @@ def test_model_lab_subprocess_command_includes_draft_candidate(
     assert cmd[cmd.index("--draft-model-candidate") + 1] == str(candidate_path)
     assert "--screening-retrain-every-n-dates" in cmd
     assert cmd[cmd.index("--screening-retrain-every-n-dates") + 1] == "40"
+
+
+def test_model_lab_subprocess_env_prefers_workspace_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTHONPATH", "existing-path")
+
+    env = _build_model_lab_subprocess_env()
+
+    first_entry = env["PYTHONPATH"].split(os.pathsep)[0]
+    assert Path(first_entry).name == "src"
+    assert "existing-path" in env["PYTHONPATH"].split(os.pathsep)
+    assert env["PYTHONUNBUFFERED"] == "1"
+    assert env["ALPHA_LAB_MODEL_LAB_CHILD"] == "1"
 
 
 def test_single_factor_web_output_root_is_scoped_by_run_id(tmp_path: Path) -> None:

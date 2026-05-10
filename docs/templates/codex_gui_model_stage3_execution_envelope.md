@@ -41,9 +41,10 @@
 6. 检查 artifact draft_model_source 审计字段（candidate_json_sha256、case_spec_sha256、feature_contract_sha256、source path）
 7. 输出结果摘要和下一轮 case_spec_payload 字段修改建议
 
-如果本地 Web Model Lab 已启动，也可以优先使用 `/model-lab` 的 `Draft Candidates`
-面板执行同一流程：粘贴 payload -> 保存 Candidate -> Validate -> 生成 Case YAML ->
-Validate + Run Screening。无论走 CLI 还是 Web UI，最终判断都以 validator 和
+默认在 Codex GUI 后端完成初筛实验和迭代点评。只有当候选已经比较成熟、需要
+完整可视化报告时，才使用 `/model-lab` 的 `Draft Candidates` 面板执行前端
+完整报告流程：粘贴 payload -> 保存 Candidate -> Validate -> 生成 Case YAML ->
+Validate + Run Full Report。无论走 CLI 还是 Web UI，最终判断都以 validator 和
 artifact 中的 `draft_model_source` hash 审计字段为准。
 
 如果 validator、case_spec_payload schema、feature 字段可用性、PIT 检查或

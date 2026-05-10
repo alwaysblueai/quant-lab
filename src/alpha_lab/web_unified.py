@@ -182,15 +182,15 @@ _MODEL_LAB_MAX_COMPARE_RUNS: int = 8
 _MODEL_LAB_SOURCE_SPECS: tuple[dict[str, str], ...] = (
     {
         "key": "core",
-        "label": "model_factor/core.py",
-        "path": "src/alpha_lab/model_factor/core.py",
-        "description": "训练循环、窗口切分、ModelFamily、_build_estimator 都在这里。",
-        "focus": "先看 build_model_factor、TrainingSpec、_build_estimator。",
+        "label": "model_factor/core/build.py",
+        "path": "src/alpha_lab/model_factor/core/build.py",
+        "description": "模型因子构建主循环：训练窗口、预测、训练日志都在这里串起来。",
+        "focus": "先看 build_model_factor，以及训练窗口如何进入 fit/predict。",
     },
     {
         "key": "pipeline",
-        "label": "real_cases/model_factor/pipeline.py",
-        "path": "src/alpha_lab/real_cases/model_factor/pipeline.py",
+        "label": "real_cases/model_factor/pipeline/core.py",
+        "path": "src/alpha_lab/real_cases/model_factor/pipeline/core.py",
         "description": "端到端 case 执行入口：读数据、训练、评估、导出 artifact。",
         "focus": "先看 run_model_factor_case 和 progress_callback 的阶段划分。",
     },
@@ -203,8 +203,8 @@ _MODEL_LAB_SOURCE_SPECS: tuple[dict[str, str], ...] = (
     },
     {
         "key": "artifacts",
-        "label": "real_cases/model_factor/artifacts.py",
-        "path": "src/alpha_lab/real_cases/model_factor/artifacts.py",
+        "label": "real_cases/model_factor/artifacts/core.py",
+        "path": "src/alpha_lab/real_cases/model_factor/artifacts/core.py",
         "description": "metrics、training_log、feature_importance 等 artifact 的写出逻辑。",
         "focus": "先看 export_artifact_bundle 和 metrics_payload 的组织方式。",
     },
@@ -1570,6 +1570,13 @@ def _build_model_lab_subprocess_env() -> dict[str, str]:
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("ALPHA_LAB_MODEL_LAB_CHILD", "1")
+    source_root = str(Path(__file__).resolve().parents[1])
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        source_root
+        if not existing_pythonpath
+        else os.pathsep.join([source_root, existing_pythonpath])
+    )
     thread_count = str(_parse_positive_int_env("ALPHA_LAB_MODEL_LAB_THREADS") or 1)
     for key in (
         "OMP_NUM_THREADS",
@@ -2124,15 +2131,21 @@ class _UnifiedService:
     def list_model_lab_sources(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         for item in _MODEL_LAB_SOURCE_SPECS:
-            path = self._resolve_model_lab_source_path(item["key"])
+            try:
+                path = self._resolve_model_lab_source_path(item["key"])
+                path_text = str(path)
+                exists = path.exists()
+            except FileNotFoundError:
+                path_text = str((self.workspace_root / item["path"]).resolve())
+                exists = False
             rows.append(
                 {
                     "key": item["key"],
                     "label": item["label"],
-                    "path": str(path),
+                    "path": path_text,
                     "description": item["description"],
                     "focus": item["focus"],
-                    "exists": path.exists(),
+                    "exists": exists,
                 }
             )
         return rows
@@ -2283,12 +2296,13 @@ class _UnifiedService:
         run_payload = {
             "spec_name": materialized["name"],
             "evaluation_profile": str(
-                payload.get("evaluation_profile") or "exploratory_screening"
+                payload.get("evaluation_profile") or "default_research"
             ),
             "screening_retrain_every_n_dates": _as_int(
                 payload.get("screening_retrain_every_n_dates"),
-                default=40,
-            ),
+                default=0,
+            )
+            or None,
             "vault_export_mode": str(payload.get("vault_export_mode") or "skip"),
             "render_report": bool(payload.get("render_report", True)),
             "output_root_dir": _optional_text(payload.get("output_root_dir")),

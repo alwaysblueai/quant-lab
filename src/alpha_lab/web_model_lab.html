@@ -1943,7 +1943,7 @@
     <div class="topbar">
       <div>
         <h1>Model Lab</h1>
-        <p>面向 `model-factor` 的研究工作台：选 spec、改 YAML、启动 run、查看训练日志与产物。</p>
+        <p>面向成熟 model candidate 的完整报告工作台；早期想法探索与快速迭代默认在 Codex GUI 后端完成。</p>
       </div>
       <div class="inline-controls">
         <a class="link-btn" href="/">返回 Unified 首页</a>
@@ -1951,48 +1951,23 @@
     </div>
 
     <div class="panel">
-      <span class="idea-stage-tag">Stage 1: Knowledge + Codebase Retrieval</span>
-      <h2>想法探索器 / Model Idea Explorer</h2>
-      <p class="idea-prompt-hint">输入一个模糊 model idea；后端检索 quant-knowledge、当前 model-factor spec、已有特征字段和代码锚点，然后生成两份 Markdown-only 桌面 agent prompt。</p>
-      <div class="idea-simple-entry">
-        <label>模糊 Model Idea</label>
-        <textarea
-          id="explorerIdea"
-          class="idea-textarea"
-          spellcheck="false"
-          placeholder="例如：针对 safe_bfq 特征，探索一个更重视特征稳定性和换手成本的模型合成因子方案。"
-        ></textarea>
-        <div class="toolbar idea-toolbar">
-          <button id="btnIdeaExplore" class="primary">探索并生成双 Agent Prompt</button>
+      <span class="idea-stage-tag">Backend-first research loop</span>
+      <h2>后端迭代优先</h2>
+      <p class="idea-prompt-hint">模糊 model idea 的初步探索、草稿实验和下一轮点评默认在 Codex GUI 后端完成；本页面只接收已经迭代到较成熟的 `model_candidate_payload`，用于标准验证、完整报告和 artifact 可视化。</p>
+      <div class="idea-workflow-strip">
+        <div class="idea-workflow-step active">
+          <strong>1. 后端探索</strong>
+          <span>Codex GUI 读取网页版 GPT 方案，保存 candidate，运行快速实验并写实验点评。</span>
         </div>
-        <div class="muted" style="font-size:12px">默认绑定当前选中的 Spec；Stage1 只生成 Claude Code / Codex GUI 的 Markdown 点评 prompt，不生成 model_candidate_payload，不启动实验。</div>
-        <div id="explorerStageBadge" class="muted" style="font-size:12px"></div>
-        <div id="explorerMechanismIndexStatus" class="idea-index-status"></div>
-        <div id="explorerQuickSessions" class="idea-quick-sessions"></div>
-      </div>
-      <div id="explorerFlash" class="idea-flash muted"></div>
-      <div id="explorerAgentPanel" class="idea-results-wrap">
-        <div id="explorerDraftMeta" class="idea-preview-header">
-          <strong>尚未生成探索结果</strong>
-          <span class="muted">等待输入 idea</span>
+        <div class="idea-workflow-step active">
+          <strong>2. 网页版 GPT 迭代</strong>
+          <span>把后端实验报告交给网页版 GPT，产出下一版 `model_candidate_payload`。</span>
         </div>
-        <div id="explorerDraftProtocol" class="idea-workflow-strip"></div>
-        <div id="explorerAgentPromptCards" class="idea-agent-panel">
-          <div class="idea-agent-note">生成后这里会出现 Claude Code 和 Codex GUI 两张 prompt 卡片；复制后分别交给桌面 agent 做独立 Markdown 点评，再带到网页版 GPT 做 Stage2 汇总。</div>
+        <div class="idea-workflow-step active">
+          <strong>3. 前端完整报告</strong>
+          <span>候选足够成熟后，在下方 Draft Candidates 面板运行完整报告并检查审计 hash。</span>
         </div>
       </div>
-      <details class="idea-advanced-settings">
-        <summary>管理历史会话</summary>
-        <div class="muted" style="font-size:12px;margin:6px 0 8px">
-          日常只需要生成双 agent prompt；这里用于查看、刷新或归档历史会话。
-        </div>
-        <div class="toolbar idea-toolbar">
-          <button id="btnIdeaRefreshSessions">刷新会话</button>
-        </div>
-        <div id="explorerSessionList" class="idea-session-list">
-          <div class="muted">加载中…</div>
-        </div>
-      </details>
     </div>
 
     <div class="panel" id="draftCandidatePanel">
@@ -2018,7 +1993,7 @@
             <button id="btnCandidateSave">保存 Candidate</button>
             <button id="btnCandidateValidate">Validate</button>
             <button id="btnCandidateMaterialize">生成 Case YAML</button>
-            <button id="btnCandidateRun" class="primary">Validate + Run Screening</button>
+            <button id="btnCandidateRun" class="primary">Validate + Run Full Report</button>
           </div>
           <div id="candidatePreview">
             <div class="muted">粘贴 payload 后会预览 candidate、features 和 model family。</div>
@@ -2263,10 +2238,6 @@
       runFilterOnlyFailed: false,
       runFilterRecentDays: 0,
       overviewCache: new Map(),
-      ideaExplorerResult: null,
-      ideaSessions: [],
-      selectedIdeaSessionId: "",
-      mechanismIndexStatus: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -2318,20 +2289,6 @@
           if (el.textContent === msg) el.textContent = "";
         }, 3500);
       }
-    }
-
-    function showIdeaFlash(msg, isError = false) {
-      const el = $("explorerFlash");
-      if (!el) return;
-      el.textContent = String(msg || "");
-      el.className = `idea-flash ${isError ? "danger-text" : "muted"}`;
-      if (!msg) return;
-      setTimeout(() => {
-        if (el.textContent === msg) {
-          el.textContent = "";
-          el.className = "idea-flash muted";
-        }
-      }, 3500);
     }
 
     function shortHash(value) {
@@ -2490,7 +2447,7 @@
       return data;
     }
 
-    async function runSelectedCandidateScreening() {
+    async function runSelectedCandidateFullReport() {
       const saved = await saveCandidateFromEditor();
       const name = String(saved.name || state.selectedCandidateName || "").trim();
       if (!name) throw new Error("candidate name missing");
@@ -2498,7 +2455,7 @@
       if (!data.ok) {
         state.candidateValidation = data.validation || null;
         renderCandidateValidation();
-        throw new Error("Validate + Run Screening failed");
+        throw new Error("Validate + Run Full Report failed");
       }
       state.candidateValidation = data.validation || null;
       renderCandidateValidation();
@@ -2507,7 +2464,7 @@
         await openSpec(data.materialized.name);
       }
       await loadRuns();
-      showFlash(`已提交 screening run: ${String(data.run?.run_id || "").slice(0, 10)}`);
+      showFlash(`已提交 full report run: ${String(data.run?.run_id || "").slice(0, 10)}`);
       return data;
     }
 
@@ -11664,10 +11621,6 @@ ${styleText}
     $("btnRunSelectedSpecs").addEventListener("click", () => startSelectedRuns().catch((err) => showFlash(err.message, true)));
     $("btnDuplicateSpec").addEventListener("click", () => duplicateSpec().catch((err) => showFlash(err.message, true)));
     $("btnDiffSpec").addEventListener("click", () => diffSpecs().catch((err) => showFlash(err.message, true)));
-    $("btnIdeaExplore")?.addEventListener("click", () => runIdeaExplore().catch((err) => showIdeaFlash(err.message, true)));
-    $("btnIdeaRefreshSessions")?.addEventListener("click", () => {
-      loadIdeaSessions().catch((err) => showIdeaFlash(err.message, true));
-    });
     $("btnRefreshCandidates")?.addEventListener("click", () => loadCandidates().catch((err) => showFlash(err.message, true)));
     $("candidatePayloadInput")?.addEventListener("input", () => {
       state.selectedCandidateName = "";
@@ -11679,7 +11632,7 @@ ${styleText}
     $("btnCandidateSave")?.addEventListener("click", () => saveCandidateFromEditor().catch((err) => showFlash(err.message, true)));
     $("btnCandidateValidate")?.addEventListener("click", () => validateSelectedCandidate().catch((err) => showFlash(err.message, true)));
     $("btnCandidateMaterialize")?.addEventListener("click", () => materializeSelectedCandidate().catch((err) => showFlash(err.message, true)));
-    $("btnCandidateRun")?.addEventListener("click", () => runSelectedCandidateScreening().catch((err) => showFlash(err.message, true)));
+    $("btnCandidateRun")?.addEventListener("click", () => runSelectedCandidateFullReport().catch((err) => showFlash(err.message, true)));
     $("btnCompareRuns").addEventListener("click", () => compareRuns().catch((err) => showFlash(err.message, true)));
     $("btnSelectAllRuns")?.addEventListener("click", () => {
       try {
@@ -11851,12 +11804,9 @@ ${styleText}
           return;
         }
         bindSpecDiffPanelHeightSync();
-        renderModelIdeaAgentPrompts(null);
         await loadProfiles();
         await loadSpecs();
         await loadCandidates();
-        await loadIdeaSessions();
-        await loadMechanismIndexStatus();
         syncSpecDiffPanelHeightWithEditor();
         await loadRuns();
         await loadSources();

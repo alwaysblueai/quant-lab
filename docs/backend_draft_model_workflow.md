@@ -90,9 +90,14 @@ Codex GUI 自行猜测如何 merge。
 
 ## Web UI 执行流
 
-Model Lab Web UI 现在提供同一条 Stage3 闭环，入口是 `/model-lab` 页面中的
-`Draft Candidates` 面板。UI 只做编排，不重新实现 validator、case parser 或
-model-factor pipeline。
+Model Lab Web UI 的定位是**成熟候选的完整报告工作台**，不是第一轮 idea
+exploration 或快速试错入口。模糊 idea、草稿模型初筛、失败归因和下一轮
+`case_spec_payload` 调整，默认由 Codex GUI 在后端完成；用户再把后端实验报告
+交给网页版 GPT 产出下一版方案。
+
+前端只在候选经过若干轮后端迭代、已经值得生成完整可视化报告时使用。入口是
+`/model-lab` 页面中的 `Draft Candidates` 面板。UI 只做编排，不重新实现
+validator、case parser 或 model-factor pipeline。
 
 标准操作顺序：
 
@@ -105,16 +110,17 @@ model-factor pipeline。
 4. 点击 `生成 Case YAML`，把完整 `case_spec_payload` materialize 到
    `configs/real_cases/model_factor/<candidate>_vN.yaml`；重复生成会自动递增
    `_v2`、`_v3`。
-5. 点击主按钮 `Validate + Run Screening`，UI 固定执行
-   save -> validate -> materialize -> run；run 使用
-   `exploratory_screening`、`screening_retrain_every_n_dates=40`、
+5. 点击主按钮 `Validate + Run Full Report`，UI 固定执行
+   save -> validate -> materialize -> run；run 默认使用 `default_research`、
    `vault_export_mode=skip`，并把 `--draft-model-candidate` 传入标准 CLI。
+   快速初筛仍应在 Codex GUI 后端显式使用 `exploratory_screening` 命令完成。
 6. Run 队列中会显示 `draft:<candidate>` badge；artifact viewer 会从
    `run_manifest.json`、`model_definition.json`、`feature_manifest.json` 中展示
    `candidate_json_sha256`、`case_spec_sha256`、`feature_contract_sha256` 的短 hash。
 
-Web UI 不提供 promoted、前端正式注册、自定义 feature code 或自定义 estimator
-code 入口。若 artifact 缺少 `draft_model_source`，本轮 Stage3 仍视为流程失败。
+Web UI 不提供 idea explorer 主入口、promoted、前端正式注册、自定义 feature
+code 或自定义 estimator code 入口。若 artifact 缺少 `draft_model_source`，本轮
+Stage3 仍视为流程失败。
 
 ## Validator 门禁
 

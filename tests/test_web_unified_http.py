@@ -354,11 +354,15 @@ def test_model_lab_page_returns_html(live_server: tuple[str, _UnifiedService]) -
     assert "Model Lab" in body
     assert 'id="btnIdeaRecordResponse"' not in body
     assert 'id="explorerResponse"' not in body
-    assert 'id="explorerAgentPromptCards"' in body
+    assert 'id="explorerIdea"' not in body
+    assert 'id="btnIdeaExplore"' not in body
+    assert 'id="explorerAgentPromptCards"' not in body
+    assert "后端迭代优先" in body
     assert "Draft Candidates" in body
     assert "candidatePayloadInput" in body
     assert "/api/model-lab/candidates" in body
     assert "btnCandidateRun" in body
+    assert "Validate + Run Full Report" in body
 
 
 # ---------------------------------------------------------------------------
@@ -2085,6 +2089,7 @@ def test_model_lab_candidate_routes(
     record = svc.run_store.get(str(submitted["run_id"]))
     assert record is not None
     assert record.draft_model_candidate_path == str(candidate_path)
+    assert record.evaluation_profile == "default_research"
 
 
 def test_model_lab_run_routes_run_note_and_duplicate_spec_diff(
