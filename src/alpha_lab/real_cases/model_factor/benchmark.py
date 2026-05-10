@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import resource
 import subprocess
 import threading
 import time
@@ -12,6 +11,11 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - exercised on Windows.
+    resource = None
 
 from alpha_lab.real_cases.model_factor.pipeline import (
     ModelFactorCaseRunResult,
@@ -289,6 +293,15 @@ def _build_config_snapshot(
 
 
 def _apply_memory_limit(memory_limit_gb: float | None) -> dict[str, object]:
+    if resource is None:
+        return {
+            "address_space_limit_enabled": False,
+            "requested_memory_limit_gb": memory_limit_gb,
+            "previous_soft_bytes": None,
+            "previous_hard_bytes": None,
+            "applied_soft_bytes": None,
+            "unsupported_reason": "python_resource_module_unavailable",
+        }
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     payload: dict[str, object] = {
         "address_space_limit_enabled": memory_limit_gb is not None,
@@ -310,7 +323,7 @@ def _apply_memory_limit(memory_limit_gb: float | None) -> dict[str, object]:
 
 
 def _rlimit_value(value: int) -> int | str:
-    if value == resource.RLIM_INFINITY:
+    if resource is not None and value == resource.RLIM_INFINITY:
         return "unlimited"
     return int(value)
 
@@ -647,7 +660,11 @@ class _ProcessMemorySampler:
         self._sample()
 
     def summary(self) -> dict[str, object]:
-        rusage_maxrss_kb = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        rusage_maxrss_kb = (
+            int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            if resource is not None
+            else 0
+        )
         peak_rss_kb = max(self._peak_rss_kb, rusage_maxrss_kb)
         return {
             "peak_rss_kb": peak_rss_kb,

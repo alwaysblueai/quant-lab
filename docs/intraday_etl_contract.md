@@ -330,6 +330,13 @@ sign_flip_count >= 0
 - 北交所部分股票的 `prices.raw_open` 来自集合竞价成交价，可能不同于 09:30 第一根分钟 bar 的 open。BJ open mismatch 单独归类为集合竞价口径差异，不作为硬 gate；非北交所 open 仍保留宽松硬 gate，用来捕捉全局错位。
 - 少数资产存在成交量/成交额 vendor 异常，例如分钟值本身相对 daily truth 偏离约 2 倍。ETL 不对单资产做 hard-coded 修复，用 `vol_unreliable` / `amt_unreliable` 屏蔽依赖成交数据的因子。
 
+## Known Feature Limitations
+
+- `amount_share_close30`（Group E，尾盘 30min 成交占比）：在 2024-2025 子样本上对 1 日前向收益有显著横截面 IC（约 +0.014, t=+3.8），但**全 10 年样本（2016-2025）IC 趋零（约 -0.001, t=-0.74）**，呈现"近期管用、长期失效"特征。原因推测是 2021 年量化普及后机构尾盘策略竞争加剧。
+  - 列本身的物理量与公式都正确（value_distribution 分布正常、`amount_share_morning + amount_share_afternoon == 1` 恒等通过），不是 ETL 或公式 bug
+  - 研究侧不应单独把它当因子直接用；可作为多因子模型输入或与其他时段 share 列做交互
+  - readiness review 里 sanity_ic 会触发该列的 "flat" 条件，属于已知现象，不阻断 v1.0 release
+
 ## Residual Amount / Volume Tolerance
 
 `vol_unreliable=1` 和 `amt_unreliable=1` 的行已经不参与依赖成交量/成交额的研究特征，因此 verify gate 也只在 reliable rows 上计算成交量/成交额 pass rate：
