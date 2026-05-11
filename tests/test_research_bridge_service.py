@@ -918,32 +918,29 @@ def test_draft_idea_prepares_dual_engine_additive_artifacts(tmp_path: Path) -> N
     assert result.manifest_path.exists()
 
     reconcile = result.reconcile_path.read_text(encoding="utf-8")
-    # New protocol: 1 generator (claude_mechanism) × 1 reviewer (codex_review),
-    # not 2 generators. Reconcile template points at the Stage 2 contracts and
-    # spells out the "加法不减法" rule.
-    assert "Stage 1 = generator + reviewer" in reconcile
-    assert "claude_mechanism" in reconcile
-    assert "codex_review" in reconcile
-    assert "mechanism_deepdive.md" in reconcile
-    assert "code_feasibility_review.md" in reconcile
-    assert "provenance.idea_id" in reconcile
+    # New symmetric protocol: 两引擎对称执行同一任务（generator + reviewer 合一）.
+    assert "两引擎对称执行同一任务" in reconcile
+    assert "stage1_claude.md" in reconcile
+    assert "stage1_codex.md" in reconcile
+    assert "factor_json_payload" in reconcile
     assert "## union" not in reconcile  # legacy two-ledger sections removed
     assert "## fusion_candidates" not in reconcile
 
     codex_dispatch = result.model_dispatch_paths["codex"].read_text(encoding="utf-8")
-    # The codex prompt is now the reviewer prompt; old generator bias is gone.
-    assert "Stage 1 Reviewer Prompt" in codex_dispatch
-    assert "codex_review" in codex_dispatch
-    assert "lab=single_factor" in codex_dispatch
-    assert "你是 Stage 1 **reviewer**" in codex_dispatch
-    assert "你**不写**新机制" in codex_dispatch
-    assert "code_feasibility_review.md" in codex_dispatch
-    assert "代码库索引（reviewer 专用上下文）" in codex_dispatch
+    # The codex prompt now carries the same symmetric task as claude's, with
+    # only the self-identification line differing.
+    assert "Stage 1 Prompt — Codex GUI" in codex_dispatch
+    assert "你是 **Codex GUI**" in codex_dispatch
+    assert "generator + reviewer 合一" in codex_dispatch
+    assert "Part A — Mechanism candidates (generator)" in codex_dispatch
+    assert "Part B — Code feasibility review (reviewer)" in codex_dispatch
+    assert "代码库索引" in codex_dispatch
     assert "factor.json required keys" in codex_dispatch  # lab=single_factor
     assert "factor validator 硬规则" in codex_dispatch
     assert f"vault_root：`{vault}`" in codex_dispatch
-    # Old generator bias text must not survive the refactor.
+    # Old asymmetric / generator-bias text must not survive.
     assert "偏广度迁移" not in codex_dispatch
+    assert "你是 Stage 1 **reviewer**" not in codex_dispatch
     assert "ledger_v1.codex.yaml" not in codex_dispatch
 
 
@@ -983,10 +980,12 @@ def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> Non
         vault_root=tmp_path / "quant-knowledge",
     )
 
-    # New audience-based generator prompt: header, role, no insight-brief
-    # softening helpers (those were tied to the old 收敛/可探索 transform).
-    assert "Stage 1 Generator Prompt" in dispatch
-    assert "claude_mechanism" in dispatch
+    # New symmetric engine prompt: header carries engine self-id, body contains
+    # both Part A (generator) and Part B (reviewer); insight-brief softening
+    # transform (收敛/可探索) still applied to cross-card synthesis lines.
+    assert "Stage 1 Prompt — Claude Code" in dispatch
+    assert "你是 **Claude Code**" in dispatch
+    assert "generator + reviewer 合一" in dispatch
     assert "vault_root：" in dispatch
     assert "### Cross-card synthesis" in dispatch
     # Insight filter still drops incomplete synthesis lines.

@@ -1,15 +1,17 @@
-"""Tests for the new Stage 0 audience-based distribution.
+"""Tests for the Stage 0 audience-based distribution + Stage 4 experiment-card.
 
 Covers:
-- ``audience_prompts.build_prompt`` lab × audience surface
+- ``engine_prompts.build_prompt`` symmetric task (Claude Code + Codex GUI
+  receive byte-identical content except for self-identification)
 - ``codebase_index.build_codebase_snapshot`` directory walk
-- ``service.distribute_idea`` end-to-end (writes ideas/<id>/ layout)
+- ``service.distribute_idea`` end-to-end (writes the 5-file layout)
 - ``model_idea.distribute_model_idea`` thin wrapper (lab=model_factor)
 - CLI ``alpha-lab idea distribute`` routing
+- ``experiment_card.scaffold_experiment_card`` + ``--cleanup`` behavior
 
-These tests cover the protocol shift from docs/research_workflow.md: Stage 1
-is generator + reviewer, not two generators. Reviewer prompts must include
-the codebase snapshot + schema + validator hard rules.
+These tests cover the protocol from docs/end_to_end_workflow.md: both
+engines do the **same** generator + reviewer task; web GPT综合两份输出
+取长补短 in Stage 2.
 """
 
 from __future__ import annotations
@@ -19,17 +21,23 @@ from pathlib import Path
 
 import pytest
 
-from alpha_lab.research_bridge.audience_prompts import (
-    Audience,
-    CardForPrompt,
-    Lab,
-    PromptContext,
-    build_prompt,
-    normalize_audiences,
-)
 from alpha_lab.research_bridge.codebase_index import (
     CodebaseSnapshot,
     build_codebase_snapshot,
+)
+from alpha_lab.research_bridge.engine_prompts import (
+    CardForPrompt,
+    Engine,
+    Lab,
+    PromptContext,
+    build_prompt,
+    normalize_engines,
+    output_filename_for,
+    prompt_filename_for,
+)
+from alpha_lab.research_bridge.experiment_card import (
+    ExperimentCardOutcome,
+    scaffold_experiment_card,
 )
 from alpha_lab.research_bridge.model_idea import distribute_model_idea
 from alpha_lab.research_bridge.service import distribute_idea
@@ -71,11 +79,6 @@ def _build_workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-# ---------------------------------------------------------------------------
-# audience_prompts
-# ---------------------------------------------------------------------------
-
-
 def _ctx(*, lab: Lab, draft_dir: Path, vault_root: Path) -> PromptContext:
     return PromptContext(
         idea="test idea",
@@ -103,68 +106,88 @@ def _ctx(*, lab: Lab, draft_dir: Path, vault_root: Path) -> PromptContext:
     )
 
 
-def test_normalize_audiences_default_returns_both() -> None:
-    assert normalize_audiences(None) == (
-        Audience.CLAUDE_MECHANISM,
-        Audience.CODEX_REVIEW,
-    )
+# ---------------------------------------------------------------------------
+# engine_prompts: symmetric task
+# ---------------------------------------------------------------------------
 
 
-def test_normalize_audiences_parses_csv() -> None:
-    assert normalize_audiences("codex_review,claude_mechanism") == (
-        Audience.CODEX_REVIEW,
-        Audience.CLAUDE_MECHANISM,
-    )
+def test_normalize_engines_default_returns_both() -> None:
+    assert normalize_engines(None) == (Engine.CLAUDE, Engine.CODEX)
 
 
-def test_normalize_audiences_rejects_unknown() -> None:
-    with pytest.raises(ValueError, match="unknown audience"):
-        normalize_audiences("rogue_audience")
+def test_normalize_engines_parses_csv() -> None:
+    assert normalize_engines("codex,claude") == (Engine.CODEX, Engine.CLAUDE)
 
 
-def test_generator_prompt_does_not_leak_codebase_index(tmp_path: Path) -> None:
+def test_normalize_engines_rejects_unknown() -> None:
+    with pytest.raises(ValueError, match="unknown engine"):
+        normalize_engines("rogue_engine")
+
+
+def test_filename_helpers() -> None:
+    assert output_filename_for(Engine.CLAUDE) == "stage1_claude.md"
+    assert output_filename_for(Engine.CODEX) == "stage1_codex.md"
+    assert prompt_filename_for(Engine.CLAUDE) == "prompt_claude.md"
+    assert prompt_filename_for(Engine.CODEX) == "prompt_codex.md"
+
+
+def test_prompt_body_symmetric_except_identity_and_output_filename(
+    tmp_path: Path,
+) -> None:
+    """Same task, same retrieval, same codebase index.
+
+    The two engine prompts differ only in (a) self-identification line and
+    (b) the output filename they're told to write to (stage1_<engine>.md).
+    """
+
     ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
-    prompt = build_prompt(audience=Audience.CLAUDE_MECHANISM, ctx=ctx)
-    assert "Stage 1 Generator Prompt" in prompt
-    assert "claude_mechanism" in prompt
-    assert "mechanism_deepdive.md" in prompt
-    # Generator does not see codebase index, schema, validator rules.
-    assert "代码库索引" not in prompt
-    assert "factor.json required keys" not in prompt
-    assert "factor validator 硬规则" not in prompt
-    # Generator does not write a review or judge feasibility.
-    assert "code_feasibility_review.md" not in prompt
-    assert "implementation_status" not in prompt
+    claude_prompt = build_prompt(engine=Engine.CLAUDE, ctx=ctx)
+    codex_prompt = build_prompt(engine=Engine.CODEX, ctx=ctx)
+    assert "你是 **Claude Code**" in claude_prompt
+    assert "你是 **Codex GUI**" in codex_prompt
+    assert "Stage 1 Prompt — Claude Code" in claude_prompt
+    assert "Stage 1 Prompt — Codex GUI" in codex_prompt
+
+    def normalize(text: str) -> str:
+        return (
+            text.replace("Claude Code", "X")
+            .replace("Codex GUI", "X")
+            .replace("stage1_claude.md", "stage1_X.md")
+            .replace("stage1_codex.md", "stage1_X.md")
+        )
+
+    assert normalize(claude_prompt) == normalize(codex_prompt)
 
 
-def test_reviewer_prompt_carries_codebase_and_validator(tmp_path: Path) -> None:
+def test_prompt_contains_generator_and_reviewer_sections(tmp_path: Path) -> None:
     ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
-    prompt = build_prompt(audience=Audience.CODEX_REVIEW, ctx=ctx)
-    assert "Stage 1 Reviewer Prompt" in prompt
-    assert "codex_review" in prompt
-    assert "code_feasibility_review.md" in prompt
-    # Reviewer sees codebase index + schema + validator rules.
+    prompt = build_prompt(engine=Engine.CLAUDE, ctx=ctx)
+    assert "你的任务（generator + reviewer 合一）" in prompt
+    assert "Part A" in prompt
+    assert "Part B" in prompt
+    assert "Part A — Mechanism candidates (generator)" in prompt
+    assert "Part B — Code feasibility review (reviewer)" in prompt
+    assert "stage1_claude.md" in prompt
+
+
+def test_prompt_carries_codebase_and_validator_rules(tmp_path: Path) -> None:
+    ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
+    prompt = build_prompt(engine=Engine.CODEX, ctx=ctx)
     assert "alpha_one" in prompt
     assert "alpha_promoted" in prompt
     assert "ridge_smoke" in prompt
     assert "alpha_one_v1" in prompt
     assert "factor.json required keys" in prompt
     assert "factor validator 硬规则" in prompt
-    # Reviewer-specific status enum.
     assert "in_contract_factor_def" in prompt
-    # Reviewer does not propose new mechanisms.
-    assert "你**不写**新机制" in prompt
 
 
-def test_reviewer_prompt_uses_model_lab_schema_when_lab_is_model_factor(
-    tmp_path: Path,
-) -> None:
+def test_prompt_uses_model_lab_schema_when_lab_is_model_factor(tmp_path: Path) -> None:
     ctx = _ctx(lab=Lab.MODEL_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
-    prompt = build_prompt(audience=Audience.CODEX_REVIEW, ctx=ctx)
+    prompt = build_prompt(engine=Engine.CLAUDE, ctx=ctx)
     assert "ModelFactorCaseSpec top-level fields" in prompt
     assert "model validator 硬规则" in prompt
     assert "in_contract_spec_variant" in prompt
-    # Single-factor schema must not appear when lab is model_factor.
     assert "factor.json required keys" not in prompt
 
 
@@ -181,13 +204,13 @@ def test_codebase_snapshot_walks_research_and_promoted(tmp_path: Path) -> None:
     assert "ridge_smoke" in snap.model_candidates_research
     assert "alpha_one_v1" in snap.single_factor_cases
     assert snap.model_factor_cases == ()
-    # Schema cheatsheets are populated from the validator-side constants.
     assert "name" in snap.factor_json_required_keys
     assert "feature_columns" in snap.model_case_spec_top_keys
-    # Validator rule cheatsheets non-empty.
     assert any("snake_case" in rule for rule in snap.factor_validator_rules)
-    assert any("ModelFactorCaseSpec" in rule or "spec_variant" in rule
-               for rule in snap.model_validator_rules)
+    assert any(
+        "ModelFactorCaseSpec" in rule or "spec_variant" in rule
+        for rule in snap.model_validator_rules
+    )
 
 
 def test_codebase_snapshot_handles_missing_dirs(tmp_path: Path) -> None:
@@ -198,11 +221,11 @@ def test_codebase_snapshot_handles_missing_dirs(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# distribute_idea (single-factor) end-to-end
+# distribute_idea (single-factor) end-to-end — new 5-file layout
 # ---------------------------------------------------------------------------
 
 
-def test_distribute_idea_writes_canonical_ideas_layout(tmp_path: Path) -> None:
+def test_distribute_idea_writes_5_file_layout(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     workspace = _build_workspace(tmp_path)
 
@@ -215,54 +238,61 @@ def test_distribute_idea_writes_canonical_ideas_layout(tmp_path: Path) -> None:
     )
 
     assert result.lab is Lab.SINGLE_FACTOR
-    assert result.idea_id.endswith("__intraday-turnover-regime") or "__" in result.idea_id
     assert result.draft_dir.exists()
-    # Canonical files under ideas/<idea_id>/.
-    expected_names = {
+    # Canonical 5-file layout under ideas/<idea_id>/.
+    expected = {
         "manifest.json",
         "retrieval_pack.md",
+        "prompt_claude.md",
+        "prompt_codex.md",
+        "stage2_input.md",
+    }
+    actual = {p.name for p in result.draft_dir.iterdir()}
+    assert actual == expected, f"unexpected layout: {actual ^ expected}"
+
+    # Legacy files must not appear
+    legacy_names = {
         "retrieval_log.md",
         "reconcile.md",
-        f"prompt_{Audience.CLAUDE_MECHANISM.value}.md",
-        f"prompt_{Audience.CODEX_REVIEW.value}.md",
+        "ledger_v1.yaml",
+        "prompt_claude_mechanism.md",
+        "prompt_codex_review.md",
+        "mechanism_deepdive.md",
+        "code_feasibility_review.md",
     }
-    assert expected_names.issubset({p.name for p in result.draft_dir.iterdir()})
+    assert not (actual & legacy_names)
 
-    # Manifest references the codebase snapshot so reviewers can audit it.
+    # Manifest carries idea_id + codebase snapshot.
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["idea_id"] == result.idea_id
     assert manifest["lab"] == "single_factor"
-    assert manifest["audiences"] == ["claude_mechanism", "codex_review"]
+    assert manifest["engines"] == ["claude", "codex"]
     assert "codebase_snapshot" in manifest
     assert manifest["codebase_snapshot"]["factors"]["research"] == ["alpha_one"]
 
-    # Reviewer prompt contains the codebase listings; generator prompt does not.
-    reviewer = result.audience_prompt_paths[Audience.CODEX_REVIEW].read_text(
-        encoding="utf-8"
-    )
-    assert "alpha_one" in reviewer
-    assert "ridge_smoke" in reviewer
-    generator = result.audience_prompt_paths[Audience.CLAUDE_MECHANISM].read_text(
-        encoding="utf-8"
-    )
-    assert "代码库索引" not in generator
+    # Both prompts contain identity self-id and refer to their output filename.
+    claude = result.engine_prompt_paths[Engine.CLAUDE].read_text(encoding="utf-8")
+    codex = result.engine_prompt_paths[Engine.CODEX].read_text(encoding="utf-8")
+    assert "Claude Code" in claude
+    assert "Codex GUI" in codex
+    assert "stage1_claude.md" in claude
+    assert "stage1_codex.md" in codex
 
 
-def test_distribute_idea_does_not_call_legacy_ledger_layout(tmp_path: Path) -> None:
-    """No `dispatch.<model>.md` / `ledger_v1.<model>.yaml` legacy files."""
+def test_distribute_idea_stage2_input_references_sources(tmp_path: Path) -> None:
+    """stage2_input.md must point at the 3 web-GPT source files."""
 
     vault = _build_vault(tmp_path)
     workspace = _build_workspace(tmp_path)
     result = distribute_idea(
-        vault_root=vault,
-        idea="legacy guard",
-        workspace_root=workspace,
-        top_k=2,
+        vault_root=vault, idea="contract guard", workspace_root=workspace, top_k=2
     )
-    names = {p.name for p in result.draft_dir.iterdir()}
-    assert not any(name.startswith("dispatch.") for name in names)
-    assert not any(name.startswith("ledger_v1.") and name != "ledger_v1.yaml"
-                   for name in names)
+    text = result.stage2_input_path.read_text(encoding="utf-8")
+    assert "single_factor_source_pack.md" in text
+    assert "single_factor_stage1_reconcile_contract.md" in text
+    assert "single_factor_stage2_candidate_contract.md" in text
+    assert "factor_json_payload" in text
+    assert "provenance.idea_id" in text
 
 
 # ---------------------------------------------------------------------------
@@ -281,13 +311,13 @@ def test_distribute_model_idea_uses_model_lab(tmp_path: Path) -> None:
         top_k=2,
     )
     assert result.lab is Lab.MODEL_FACTOR
-    reviewer = result.audience_prompt_paths[Audience.CODEX_REVIEW].read_text(
-        encoding="utf-8"
-    )
-    # Model-lab reviewer prompt is scoped to ModelFactorCaseSpec, not factor.json.
-    assert "ModelFactorCaseSpec top-level fields" in reviewer
-    assert "model validator 硬规则" in reviewer
-    assert "factor.json required keys" not in reviewer
+    claude = result.engine_prompt_paths[Engine.CLAUDE].read_text(encoding="utf-8")
+    assert "ModelFactorCaseSpec top-level fields" in claude
+    assert "factor.json required keys" not in claude
+    stage2 = result.stage2_input_path.read_text(encoding="utf-8")
+    assert "model_lab_stage1_reconcile_contract.md" in stage2
+    assert "model_lab_stage2_candidate_contract.md" in stage2
+    assert "model_candidate_payload" in stage2
 
 
 # ---------------------------------------------------------------------------
@@ -305,11 +335,11 @@ def test_unified_cli_routes_idea_distribute(monkeypatch, tmp_path: Path) -> None
             lab = Lab.SINGLE_FACTOR
             idea_id = "fake_id"
             stage = "mechanism_discovery"
-            audiences = (Audience.CLAUDE_MECHANISM, Audience.CODEX_REVIEW)
+            engines = (Engine.CLAUDE, Engine.CODEX)
             draft_dir = tmp_path
-            retrieval_pack_path = tmp_path / "retrieval_pack.md"
-            reconcile_path = tmp_path / "reconcile.md"
             manifest_path = tmp_path / "manifest.json"
+            retrieval_pack_path = tmp_path / "retrieval_pack.md"
+            stage2_input_path = tmp_path / "stage2_input.md"
 
         return _Stub()
 
@@ -325,8 +355,8 @@ def test_unified_cli_routes_idea_distribute(monkeypatch, tmp_path: Path) -> None
             "distribute",
             "--idea",
             "regime conditioned reversal",
-            "--audiences",
-            "claude_mechanism,codex_review",
+            "--engines",
+            "claude,codex",
             "--lab",
             "single_factor",
             "--vault-root",
@@ -337,6 +367,78 @@ def test_unified_cli_routes_idea_distribute(monkeypatch, tmp_path: Path) -> None
     )
     assert rc == 0
     assert captured["idea"] == "regime conditioned reversal"
-    assert captured["audiences"] == "claude_mechanism,codex_review"
+    assert captured["engines"] == "claude,codex"
     assert captured["lab"] == Lab.SINGLE_FACTOR
     assert captured["vault_root"] == "/tmp/vault"
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 experiment-card
+# ---------------------------------------------------------------------------
+
+
+def test_scaffold_experiment_card_writes_skeleton(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    workspace = _build_workspace(tmp_path)
+    result = distribute_idea(
+        vault_root=vault, idea="card test", workspace_root=workspace, top_k=2
+    )
+    card_path = scaffold_experiment_card(
+        idea_id=result.idea_id,
+        outcome=ExperimentCardOutcome.KILLED,
+        workspace_root=workspace,
+    )
+    text = card_path.read_text(encoding="utf-8")
+    assert f"idea_id: {result.idea_id}" in text
+    assert "outcome: killed" in text
+    assert "## emergent_moves" in text
+    assert "## operative_claims" in text
+
+
+def test_scaffold_experiment_card_refuses_overwrite(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    workspace = _build_workspace(tmp_path)
+    result = distribute_idea(
+        vault_root=vault, idea="overwrite", workspace_root=workspace, top_k=2
+    )
+    scaffold_experiment_card(
+        idea_id=result.idea_id,
+        outcome=ExperimentCardOutcome.PARKED,
+        workspace_root=workspace,
+    )
+    with pytest.raises(FileExistsError):
+        scaffold_experiment_card(
+            idea_id=result.idea_id,
+            outcome=ExperimentCardOutcome.KILLED,
+            workspace_root=workspace,
+        )
+
+
+def test_scaffold_experiment_card_cleanup_keeps_only_manifest_and_card(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    workspace = _build_workspace(tmp_path)
+    result = distribute_idea(
+        vault_root=vault, idea="cleanup", workspace_root=workspace, top_k=2
+    )
+    # Before cleanup: 5 files
+    assert len(list(result.draft_dir.iterdir())) == 5
+    scaffold_experiment_card(
+        idea_id=result.idea_id,
+        outcome=ExperimentCardOutcome.PROMOTED,
+        workspace_root=workspace,
+        cleanup=True,
+    )
+    after = {p.name for p in result.draft_dir.iterdir()}
+    assert after == {"manifest.json", "experiment_card.md"}
+
+
+def test_scaffold_experiment_card_missing_idea_dir_raises(tmp_path: Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        scaffold_experiment_card(
+            idea_id="nonexistent",
+            outcome=ExperimentCardOutcome.KILLED,
+            workspace_root=workspace,
+        )
