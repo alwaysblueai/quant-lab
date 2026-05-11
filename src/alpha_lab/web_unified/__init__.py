@@ -100,6 +100,28 @@ from alpha_lab.research_evaluation_config import (
 from alpha_lab.splits import preflight_split_contract, rebalance_frequency_to_step
 from alpha_lab.vault_export import export_to_vault, resolve_vault_root
 
+# Template + asset-path helpers live in ``_templates``; re-export everything
+# that the rest of this module (and tests / monkeypatch consumers) reaches for.
+from alpha_lab.web_unified._templates import (
+    _ALPHA_LAB_OVERVIEW_FIXTURE_DIR as _ALPHA_LAB_OVERVIEW_FIXTURE_DIR,  # noqa: E501
+)
+from alpha_lab.web_unified._templates import _INDEX_HTML_TEMPLATE_PATH as _INDEX_HTML_TEMPLATE_PATH
+from alpha_lab.web_unified._templates import _MD_RENDER_JS_PATH as _MD_RENDER_JS_PATH
+from alpha_lab.web_unified._templates import (
+    _MODEL_LAB_HTML_TEMPLATE_PATH as _MODEL_LAB_HTML_TEMPLATE_PATH,  # noqa: E501
+)
+from alpha_lab.web_unified._templates import (
+    _MODEL_LAB_OVERVIEW_FIXTURE_DIR as _MODEL_LAB_OVERVIEW_FIXTURE_DIR,  # noqa: E501
+)
+from alpha_lab.web_unified._templates import _index_html as _index_html
+from alpha_lab.web_unified._templates import _index_html_raw as _index_html_raw
+from alpha_lab.web_unified._templates import _load_index_html_template as _load_index_html_template
+from alpha_lab.web_unified._templates import (
+    _load_model_lab_html_template as _load_model_lab_html_template,  # noqa: E501
+)
+from alpha_lab.web_unified._templates import _md_render_js as _md_render_js
+from alpha_lab.web_unified._templates import _model_lab_html as _model_lab_html
+
 RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 RunWorkflow = Literal["single_factor", "model_factor"]
 _KNOWLEDGE_WRITEBACK_STAGES: frozenset[str] = frozenset({"stage2", "stage3", "run"})
@@ -1536,7 +1558,8 @@ def _build_model_lab_subprocess_env() -> dict[str, str]:
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("ALPHA_LAB_MODEL_LAB_CHILD", "1")
-    source_root = str(Path(__file__).resolve().parents[1])
+    # __file__ is src/alpha_lab/web_unified/__init__.py; parents[2] == src/
+    source_root = str(Path(__file__).resolve().parents[2])
     existing_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
         source_root
@@ -2842,7 +2865,8 @@ class _UnifiedService:
         item = next((row for row in _MODEL_LAB_SOURCE_SPECS if row["key"] == source_key), None)
         if item is None:
             raise FileNotFoundError(f"model-lab source not found: {source_key}")
-        repo_root = Path(__file__).resolve().parents[2]
+        # __file__ is src/alpha_lab/web_unified/__init__.py; parents[3] == repo root
+        repo_root = Path(__file__).resolve().parents[3]
         candidates = [
             (self.workspace_root / item["path"]).resolve(),
             (repo_root / item["path"]).resolve(),
@@ -6846,68 +6870,6 @@ def _compile_custom_factor(name: str, code: str) -> Any:
 # ---------------------------------------------------------------------------
 # HTML Frontend — 5-page single-page app
 # ---------------------------------------------------------------------------
-
-
-_MD_RENDER_JS_PATH = Path(__file__).with_name("web_unified_md_render.js")
-_MD_RENDER_JS: str | None = None
-_ALPHA_LAB_OVERVIEW_FIXTURE_DIR = (
-    Path(__file__).with_name("dev_fixtures") / "alpha_lab_overview"
-)
-_MODEL_LAB_OVERVIEW_FIXTURE_DIR = (
-    Path(__file__).with_name("dev_fixtures") / "model_lab_overview"
-)
-
-
-def _md_render_js() -> str:
-    """Load mdRender JS function from file with in-memory caching."""
-    global _MD_RENDER_JS
-    if _MD_RENDER_JS is None:
-        _MD_RENDER_JS = _MD_RENDER_JS_PATH.read_text(encoding="utf-8")
-    return _MD_RENDER_JS
-
-
-# Cached inline HTML template cache path.
-_INDEX_HTML_TEMPLATE_PATH = Path(__file__).with_name("web_unified_index.html")
-_INDEX_HTML_TEMPLATE: str | None = None
-_MODEL_LAB_HTML_TEMPLATE_PATH = Path(__file__).with_name("web_model_lab.html")
-_MODEL_LAB_HTML_TEMPLATE: str | None = None
-
-
-def _load_index_html_template() -> str:
-    """Load frontend HTML template with in-memory caching."""
-    global _INDEX_HTML_TEMPLATE
-    if _INDEX_HTML_TEMPLATE is None:
-        _INDEX_HTML_TEMPLATE = _INDEX_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return _INDEX_HTML_TEMPLATE
-
-
-def _index_html(*, reload_template: bool = False) -> str:
-    template = (
-        _INDEX_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
-        if reload_template
-        else _index_html_raw()
-    )
-    return template.replace("@@MD_RENDER_JS@@", _md_render_js())
-
-
-def _index_html_raw() -> str:
-    return _load_index_html_template()
-
-
-def _load_model_lab_html_template() -> str:
-    global _MODEL_LAB_HTML_TEMPLATE
-    if _MODEL_LAB_HTML_TEMPLATE is None:
-        _MODEL_LAB_HTML_TEMPLATE = _MODEL_LAB_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return _MODEL_LAB_HTML_TEMPLATE
-
-
-def _model_lab_html(*, reload_template: bool = False) -> str:
-    template = (
-        _MODEL_LAB_HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
-        if reload_template
-        else _load_model_lab_html_template()
-    )
-    return template.replace("@@MD_RENDER_JS@@", _md_render_js())
 
 
 def _safe_model_lab_fixture_id(value: str) -> str:
