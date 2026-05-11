@@ -1,7 +1,7 @@
 """Unified Research Frontend — single local HTTP server integrating
 Knowledge Ops, Bridge Workspace, Validation Console, and Writeback Review.
 
-Evolved from web_cockpit.py; provides the ``start_unified_server`` entry-point.
+Provides the ``start_unified_server`` entry-point.
 """
 
 from __future__ import annotations

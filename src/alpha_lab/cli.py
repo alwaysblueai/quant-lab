@@ -798,66 +798,6 @@ def build_unified_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     web_commands = web.add_subparsers(dest="web_action", required=True)
-    web_ui = web_commands.add_parser(
-        "ui",
-        help="[DEPRECATED] Run legacy web UI server; use `alpha-lab web unified`.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    web_ui.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind host for the local web server.",
-    )
-    web_ui.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Bind port for the local web server.",
-    )
-    web_ui.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root used for resolving dist/web_ui_* directories.",
-    )
-    web_ui.add_argument(
-        "--no-open-browser",
-        action="store_true",
-        help="Do not auto-open browser; print URL only.",
-    )
-    web_cockpit = web_commands.add_parser(
-        "cockpit",
-        help=(
-            "[DEPRECATED] Alias retained for compatibility; routes to "
-            "`alpha-lab web unified`."
-        ),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    web_cockpit.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind host for the local web server.",
-    )
-    web_cockpit.add_argument(
-        "--port",
-        type=int,
-        default=8766,
-        help="Bind port for the local web server.",
-    )
-    web_cockpit.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root used for resolving dist/cockpit_* directories.",
-    )
-    web_cockpit.add_argument(
-        "--vault-root",
-        default=None,
-        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
-    )
-    web_cockpit.add_argument(
-        "--no-open-browser",
-        action="store_true",
-        help="Do not auto-open browser; print URL only.",
-    )
     web_unified = web_commands.add_parser(
         "unified",
         help=(
@@ -1166,43 +1106,6 @@ def unified_main(argv: list[str] | None = None) -> int:
     if args.top_command == "web":
         if args.port <= 0 or args.port > 65535:
             parser.error("--port must be within 1..65535")
-        if args.web_action == "ui":
-            print(
-                "[DEPRECATED] `alpha-lab web ui` is deprecated. "
-                "Use `alpha-lab web unified` for the maintained research frontend.",
-                file=sys.stderr,
-            )
-            from alpha_lab.web_ui import start_web_ui_server
-
-            try:
-                start_web_ui_server(
-                    host=args.host,
-                    port=args.port,
-                    workspace_root=args.workspace_root,
-                    open_browser=not bool(args.no_open_browser),
-                )
-            except OSError as exc:
-                parser.error(str(exc))
-            return 0
-        if args.web_action == "cockpit":
-            print(
-                "[DEPRECATED] `alpha-lab web cockpit` is deprecated and now aliases "
-                "`alpha-lab web unified`. Use `alpha-lab web unified` directly.",
-                file=sys.stderr,
-            )
-            from alpha_lab.web_unified import start_unified_server
-
-            try:
-                start_unified_server(
-                    host=args.host,
-                    port=args.port,
-                    workspace_root=args.workspace_root,
-                    vault_root=args.vault_root,
-                    open_browser=not bool(args.no_open_browser),
-                )
-            except OSError as exc:
-                parser.error(str(exc))
-            return 0
         if args.web_action == "unified":
             from alpha_lab.web_unified import start_unified_server
 

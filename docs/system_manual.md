@@ -258,10 +258,6 @@ Re-check the token value and reset `TUSHARE_TOKEN`.
 `amount` 单位为千元，约等于人民币 2000 万元），并剔除当日流动性后 `20%`。
 `top_liquid_*` 则按过去 `60` 个交易日平均成交额 `amount` 排序，而不是按当日成交额排序。
 
-旧版兼容命令 `alpha-lab web ui` 的自动数据源表单也默认使用 `standard`，
-并提供 `pilot / standard / robust / institutional` 可选项；你仍然可以在表单里继续
-手动修改开始/结束日期。新的交互式研究流程默认推荐使用 `alpha-lab web unified`。
-
 针对 A 股日频量价因子研究，`alpha-lab data export-case-inputs` 现在默认导出更完整的
 研究列：
 
@@ -365,92 +361,6 @@ alpha-lab bridge apply-writeback --project momentum-factor --draft <draft_path>
 - 把 `experiment_card.md / summary.md / run_manifest.json` 写入 `50_experiments/`
 - 更新 `55_projects/<slug>/10_active_state.md`
 - 向 `55_projects/<slug>/20_decision_log.md` 追加一条项目级结论
-
-### 旧版 Web UI + BaoStock 自定义因子输入（兼容）
-
-`alpha-lab web ui` 已进入兼容期；新交互式流程优先使用
-`alpha-lab web unified`。以下内容仅用于仍依赖旧版单因子上传页面的场景。
-
-在 Web UI 里选择 `data_source=baostock` 时，内置只会自动映射 `bp/roe_ttm`。
-如果你要跑自定义因子，推荐两种方式：
-
-1. 离线先产出标准 `factor.csv`（手动模式上传 spec）。
-2. 在 spec 里写 `factor_input.recipe`，让 Web UI 在拉到 `prices.csv` 后自动生成因子。
-
-建议分层：
-- `factor_input.recipe`：因子构建层（base/preprocess/orthogonalize）。
-- 顶层 `direction`：组合方向层。
-- 顶层 `preprocess`：回测层；如果 `factor_input.mode=recipe` 且
-  `disable_pipeline_preprocess=true`，Web UI 会自动禁用这一层，避免重复处理。
-
-标准因子文件格式（必须）：
-
-| date | asset | factor | value |
-|---|---|---|---|
-| 2024-01-03 | 000001.SZ | mom3_resid_lv5 | 0.127 |
-| 2024-01-03 | 600000.SH | mom3_resid_lv5 | -0.084 |
-
-示例 spec（可直接上传 Web UI，选择 `Baostock`）：
-
-```yaml
-name: mom3_resid_lv5_demo
-factor_name: mom3_resid_lv5
-factor_path: ./placeholder.csv
-prices_path: ./placeholder_prices.csv
-factor_input:
-  mode: recipe
-  disable_pipeline_preprocess: true
-  recipe:
-    base:
-      method: momentum
-      window: 3
-    preprocess:
-      winsorize:
-        enabled: true
-        lower: 0.01
-        upper: 0.99
-        min_group_size: 5
-      standardization:
-        method: zscore
-        min_group_size: 5
-    orthogonalize:
-      enabled: true
-      exposures:
-        - method: low_volatility
-          window: 5
-      min_obs: 20
-      ridge: 1.0e-8
-rebalance_frequency: M
-n_quantiles: 5
-direction: long
-universe:
-  name: baostock_all_a
-  path: ./placeholder_universe.csv
-  in_universe_column: in_universe
-target:
-  kind: forward_return
-  horizon: 5
-preprocess:
-  winsorize: false
-  winsorize_lower: 0.01
-  winsorize_upper: 0.99
-  standardization: none
-  min_group_size: 5
-transaction_cost:
-  one_way_rate: 0.001
-output:
-  root_dir: dist/web_ui_runs
-```
-
-如果希望先离线生成因子再上传：
-
-```bash
-uv run python scripts/build_factor_from_recipe.py \
-  --recipe path/to/recipe.yaml \
-  --prices data/processed/real_case_inputs/baostock_v1/prices.csv \
-  --factor-name mom3_resid_lv5 \
-  --output data/processed/real_case_inputs/baostock_v1/mom3_resid_lv5.csv
-```
 
 ### Profile-Aware Compact Workflow
 
