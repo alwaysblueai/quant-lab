@@ -60,11 +60,20 @@ _MODEL_CASE_SPEC_TOP_KEYS: tuple[str, ...] = (
 _FACTOR_VALIDATOR_RULES: tuple[str, ...] = (
     "name must be snake_case (3-64 chars) and not collide with BUILTIN_FACTOR_NAMES",
     "frequency must be 'daily'",
-    "code must define build_factor(frame) returning index-aligned pd.Series, or legacy builder(prices, ...)",
+    (
+        "code must define build_factor(frame) returning index-aligned pd.Series, "
+        "or legacy builder(prices, ...)"
+    ),
     "forbidden imports: os/pathlib/glob/pickle/shutil/socket/subprocess/urllib/requests/httpx",
     "forbidden calls: __import__/eval/exec/open/compile/breakpoint/input",
-    "forbidden attr calls: mkdir/read_csv/read_parquet/to_csv/to_parquet/popen/system/run/urlopen/write_text/...",
-    "future-leakage tokens forbidden in identifiers: future_return/forward_return/fwd_return/next_return/label_return/target_return",
+    (
+        "forbidden attr calls: mkdir/read_csv/read_parquet/to_csv/to_parquet/"
+        "popen/system/run/urlopen/write_text/..."
+    ),
+    (
+        "future-leakage tokens forbidden in identifiers: "
+        "future_return/forward_return/fwd_return/next_return/label_return/target_return"
+    ),
     "shift(-n) and negative pct_change rejected as future leakage",
     "rolling/expanding must group by 'asset'",
     "required_columns must be real factor_recipe.py registered names (prices + intraday-derived)",
@@ -73,12 +82,21 @@ _FACTOR_VALIDATOR_RULES: tuple[str, ...] = (
 _MODEL_VALIDATOR_RULES: tuple[str, ...] = (
     "contract_version must be 'stage2_model_candidate_v1'",
     "implementation_status must be 'draft_for_stage3'",
-    "implementation_type must be 'spec_variant' (no custom feature/estimator/sample_weight code in v1)",
+    (
+        "implementation_type must be 'spec_variant' "
+        "(no custom feature/estimator/sample_weight code in v1)"
+    ),
     "candidate_name is snake_case (3-64)",
     "case_spec_payload must parse via model_factor_case_spec_from_mapping (no patch-only)",
     "feature_columns must all appear in features file header",
-    "fundamental-like features cannot use feature_availability.mode='required_timestamp' with column=null",
-    "payload must not contain Level 3 / execution_replay / fill_simulation / portfolio_construction / live_trading tokens",
+    (
+        "fundamental-like features cannot use feature_availability.mode='required_timestamp' "
+        "with column=null"
+    ),
+    (
+        "payload must not contain Level 3 / execution_replay / fill_simulation / "
+        "portfolio_construction / live_trading tokens"
+    ),
 )
 
 
@@ -134,7 +152,11 @@ def _list_subdir_names(parent: Path) -> tuple[str, ...]:
     if not parent.exists() or not parent.is_dir():
         return ()
     return tuple(
-        sorted(child.name for child in parent.iterdir() if child.is_dir() and not child.name.startswith("."))
+        sorted(
+            child.name
+            for child in parent.iterdir()
+            if child.is_dir() and not child.name.startswith(".")
+        )
     )
 
 

@@ -20,11 +20,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 
-class ExperimentCardOutcome(str, Enum):
+class ExperimentCardOutcome(StrEnum):
     """Stage 4 outcome label."""
 
     PROMOTED = "promoted"
@@ -100,9 +100,8 @@ def scaffold_experiment_card(
     )
     card_path.write_text(card_text, encoding="utf-8")
 
-    cleaned: list[Path] = []
     if cleanup:
-        cleaned = list(_cleanup_temp_files(idea_dir))
+        _cleanup_temp_files(idea_dir)
 
     return card_path
 
@@ -193,7 +192,8 @@ def _render_card(
             f"idea_distributed_at: {created}",
             f"experiment_card_written_at: {now}",
             f"engines: [{engines_text}]",
-            "final_artifact_path: <fill in: custom_factors/... or model_candidates/... or promoted/...>",
+            "final_artifact_path: <fill in: custom_factors/... or model_candidates/... or "
+            "promoted/...>",
             "final_metrics_sha256: <fill in: run_manifest 中的关键 hash 摘要>",
             "---",
             "",

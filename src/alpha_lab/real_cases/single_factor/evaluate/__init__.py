@@ -7,6 +7,7 @@ The implementation is split across topic modules for maintainability.
 
 from __future__ import annotations
 
+from ._utils import _evaluate_variant_lightweight
 from .comparisons import (
     _merge_baseline_factor_comparison_metrics,
     _merge_param_sensitivity_metrics,
@@ -29,7 +30,6 @@ from .pnl_attribution import (
     _merge_daily_pnl_attribution_metrics,
     _merge_signal_lag_sensitivity_metrics,
 )
-from ._utils import _evaluate_variant_lightweight
 
 __all__ = [
     "SingleFactorEvaluationResult",

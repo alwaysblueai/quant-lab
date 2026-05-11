@@ -648,14 +648,14 @@ def test_unified_cli_web_unified_invalid_port(capsys: pytest.CaptureFixture[str]
     assert "--port must be within 1..65535" in captured.err
 
 
-def test_unified_cli_run_routes_to_legacy_main(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unified_cli_run_routes_to_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_legacy_main(argv: list[str] | None = None) -> int:
+    def _fake_run_main(argv: list[str] | None = None) -> int:
         captured["argv"] = argv
         return 55
 
-    monkeypatch.setattr("alpha_lab.cli._legacy_main", _fake_legacy_main)
+    monkeypatch.setattr("alpha_lab.cli._run_main", _fake_run_main)
 
     rc = main(["run", "--input-path", "prices.csv"])
     assert rc == 55

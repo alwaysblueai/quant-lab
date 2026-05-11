@@ -20,22 +20,22 @@ This module is the single source of truth for the prompt body. Both
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Sequence
 
 from alpha_lab.research_bridge.codebase_index import CodebaseSnapshot
 
 
-class Lab(str, Enum):
+class Lab(StrEnum):
     """Which research lab the idea belongs to."""
 
     SINGLE_FACTOR = "single_factor"
     MODEL_FACTOR = "model_factor"
 
 
-class Engine(str, Enum):
+class Engine(StrEnum):
     """Stage 1 desktop agent identity."""
 
     CLAUDE = "claude"

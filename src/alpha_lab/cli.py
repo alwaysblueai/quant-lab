@@ -320,7 +320,7 @@ def _print_stdout_summary(
 # ---------------------------------------------------------------------------
 
 
-def _legacy_main(argv: list[str] | None = None) -> int:
+def _run_main(argv: list[str] | None = None) -> int:
     """Run a factor experiment from the command line.
 
     Parameters
@@ -471,13 +471,13 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     run = top.add_parser(
         "run",
-        help="Run the legacy single-experiment CLI (backward-compatible route).",
+        help="Run a single-factor experiment via the underlying argparse CLI.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     run.add_argument(
         "args",
         nargs=argparse.REMAINDER,
-        help="Arguments forwarded to the legacy run CLI (use 'alpha-lab run --help').",
+        help="Arguments forwarded to the single-experiment runner (use 'alpha-lab run --help').",
     )
 
     fast_screen = top.add_parser(
@@ -994,7 +994,7 @@ def unified_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.top_command == "run":
-        return _legacy_main(args.args)
+        return _run_main(args.args)
 
     if args.top_command == "fast-screen":
         from alpha_lab.fast_screen.cli import main as fast_screen_main
@@ -1319,17 +1319,17 @@ def resolved_argv_for_data(args: argparse.Namespace) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entrypoint that preserves the legacy CLI and adds unified routing."""
+    """Entrypoint with unified routing on top of the single-experiment runner."""
     resolved_argv = list(sys.argv[1:] if argv is None else argv)
     if not resolved_argv:
         return unified_main(["--help"])
     if resolved_argv[0] in {"-h", "--help"}:
         return unified_main(resolved_argv)
     if resolved_argv[0] == "run":
-        return _legacy_main(resolved_argv[1:])
+        return _run_main(resolved_argv[1:])
     if resolved_argv[0] in _UNIFIED_TOP_LEVEL_COMMANDS:
         return unified_main(resolved_argv)
-    return _legacy_main(resolved_argv)
+    return _run_main(resolved_argv)
 
 
 def _print_profiles() -> None:
