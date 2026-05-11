@@ -215,6 +215,60 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional explicit session id when --save-session is enabled.",
     )
 
+    distribute = commands.add_parser(
+        "distribute",
+        help=(
+            "Stage 0: emit retrieval pack + audience-specific prompts "
+            "(claude_mechanism / codex_review) for a model-lab idea."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    distribute.add_argument(
+        "--idea",
+        required=True,
+        help="Natural-language model idea to distribute.",
+    )
+    distribute.add_argument(
+        "--audiences",
+        default="claude_mechanism,codex_review",
+        help="Comma-separated Stage 1 audiences.",
+    )
+    distribute.add_argument(
+        "--mode",
+        default="start",
+        choices=["start", "free", "constrained"],
+        help="Stage 1 prompt strictness (mirrors single-factor distribute).",
+    )
+    distribute.add_argument(
+        "--stage",
+        default="mechanism_discovery",
+        choices=["mechanism_discovery", "signal_mapping"],
+        help="Idea-explorer stage to draft.",
+    )
+    distribute.add_argument("--project", default=None, help="Optional bridge project slug.")
+    distribute.add_argument("--top-k", type=int, default=8, help="Retrieval depth.")
+    distribute.add_argument(
+        "--available-data",
+        action="append",
+        default=[],
+        help="Available data identifier. May be repeated.",
+    )
+    distribute.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root used for ideas/<idea_id>/ allocation.",
+    )
+    distribute.add_argument(
+        "--output-root",
+        default=None,
+        help="Optional ideas/ output root override.",
+    )
+    distribute.add_argument(
+        "--vault-root",
+        default=None,
+        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
+    )
+
     record = commands.add_parser(
         "record-response",
         help="Lint and persist an externally produced model-idea response.",
@@ -241,9 +295,73 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def distribute_model_idea(
+    *,
+    idea: str,
+    audiences: str | tuple[str, ...] | list[str] | None = None,
+    mode: str = "start",
+    project_slug: str | None = None,
+    top_k: int = 8,
+    available_data: frozenset[str] | list[str] | None = None,
+    stage: str | None = None,
+    workspace_root: str | Path = ".",
+    output_root: str | Path | None = None,
+    vault_root: str | Path | None = None,
+):
+    """Stage 0 distribute for the model lab.
+
+    Thin wrapper around :func:`alpha_lab.research_bridge.service.distribute_idea`
+    with ``lab=Lab.MODEL_FACTOR``. Codex review prompt is automatically
+    populated with the model-side schema (ModelFactorCaseSpec top-level fields)
+    and validator hard rules.
+    """
+
+    # Local import to avoid circulars (service imports model_idea via CLI bridge).
+    from alpha_lab.research_bridge.audience_prompts import Lab
+    from alpha_lab.research_bridge.service import distribute_idea
+
+    return distribute_idea(
+        vault_root=vault_root,
+        idea=idea,
+        audiences=audiences,
+        lab=Lab.MODEL_FACTOR,
+        mode=mode,
+        project_slug=project_slug,
+        top_k=top_k,
+        available_data=available_data,
+        stage=stage,
+        workspace_root=workspace_root,
+        output_root=output_root,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.action == "distribute":
+        try:
+            result = distribute_model_idea(
+                idea=str(args.idea),
+                audiences=str(args.audiences) if args.audiences else None,
+                mode=str(args.mode),
+                project_slug=(
+                    str(args.project) if getattr(args, "project", None) else None
+                ),
+                top_k=int(args.top_k),
+                available_data=(
+                    frozenset(str(x) for x in args.available_data)
+                    if args.available_data
+                    else None
+                ),
+                stage=str(args.stage) if args.stage else None,
+                workspace_root=str(args.workspace_root),
+                output_root=str(args.output_root) if args.output_root else None,
+                vault_root=str(args.vault_root) if args.vault_root else None,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_payload(), ensure_ascii=False, indent=2))
+        return 0
     if args.action == "record-response":
         response_text = str(args.response_text or "")
         if args.response_file:

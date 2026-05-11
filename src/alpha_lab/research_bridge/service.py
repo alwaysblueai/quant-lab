@@ -67,6 +67,16 @@ from alpha_lab.vault_export_graph_feedback import (
 from . import loaders as bridge_loaders
 from . import mechanism_index
 from . import sessions as bridge_sessions
+from .audience_prompts import (
+    Audience,
+    CardForPrompt,
+    DEFAULT_AUDIENCES,
+    Lab,
+    PromptContext,
+    build_prompt as _build_audience_prompt,
+    normalize_audiences,
+)
+from .codebase_index import CodebaseSnapshot, build_codebase_snapshot
 from .llm_rerank import (
     DEFAULT_MAX_CANDIDATES,
     CategorizeOutcome,
@@ -1003,6 +1013,291 @@ def explore_idea(
     )
 
 
+@dataclass(frozen=True)
+class IdeaDistributeResult:
+    """New audience-based Stage 0 distribution result.
+
+    Lives next to :class:`IdeaDraftResult` (legacy) so callers can migrate
+    incrementally. The on-disk layout is the canonical ``ideas/<idea_id>/``
+    described in ``docs/research_workflow.md``.
+    """
+
+    idea: str
+    idea_id: str
+    lab: Lab
+    mode: str
+    stage: str
+    audiences: tuple[Audience, ...]
+    draft_dir: Path
+    retrieval_pack_path: Path
+    retrieval_log_path: Path
+    audience_prompt_paths: dict[Audience, Path]
+    audience_output_paths: dict[Audience, Path]
+    final_ledger_path: Path
+    reconcile_path: Path
+    manifest_path: Path
+    retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "idea": self.idea,
+            "idea_id": self.idea_id,
+            "lab": self.lab.value,
+            "mode": self.mode,
+            "stage": self.stage,
+            "audiences": [a.value for a in self.audiences],
+            "draft_dir": str(self.draft_dir),
+            "retrieval_pack_path": str(self.retrieval_pack_path),
+            "retrieval_log_path": str(self.retrieval_log_path),
+            "audience_prompt_paths": {
+                a.value: str(p) for a, p in self.audience_prompt_paths.items()
+            },
+            "audience_output_paths": {
+                a.value: str(p) for a, p in self.audience_output_paths.items()
+            },
+            "final_ledger_path": str(self.final_ledger_path),
+            "reconcile_path": str(self.reconcile_path),
+            "manifest_path": str(self.manifest_path),
+            "retrieval_diagnostics": dict(self.retrieval_diagnostics),
+        }
+
+
+_AUDIENCE_OUTPUT_FILENAME: dict[Audience, str] = {
+    Audience.CLAUDE_MECHANISM: "mechanism_deepdive.md",
+    Audience.CODEX_REVIEW: "code_feasibility_review.md",
+}
+
+
+def distribute_idea(
+    *,
+    vault_root: str | Path | None,
+    idea: str,
+    audiences: list[str] | tuple[str, ...] | tuple[Audience, ...] | str | None = None,
+    lab: Lab | str = Lab.SINGLE_FACTOR,
+    mode: str = "start",
+    project_slug: str | None = None,
+    top_k: int = 8,
+    available_data: frozenset[str] | list[str] | None = None,
+    stage: str | None = None,
+    workspace_root: str | Path = ".",
+    output_root: str | Path | None = None,
+    persist_session: bool = False,
+    inject_recent_drift: bool = False,
+    parent_session_id: str | None = None,
+) -> IdeaDistributeResult:
+    """Stage 0 distribution: emit retrieval pack + audience-specific prompts.
+
+    This is the primary new entry point. It does **not** call any LLM; it only
+    writes Markdown files under ``ideas/<idea_id>/`` that the user pastes into
+    Claude Code (audience=claude_mechanism, generator) and Codex GUI
+    (audience=codex_review, reviewer).
+    """
+
+    if isinstance(audiences, tuple) and audiences and isinstance(audiences[0], Audience):
+        selected_audiences: tuple[Audience, ...] = tuple(audiences)
+    else:
+        selected_audiences = normalize_audiences(audiences)
+    target_lab = Lab(lab) if isinstance(lab, str) else lab
+    resolved_workspace = Path(workspace_root).expanduser().resolve()
+    resolved_vault = _resolve_bridge_vault_root(vault_root)
+    explore_result = explore_idea(
+        vault_root=resolved_vault,
+        idea=idea,
+        mode=mode,
+        project_slug=project_slug,
+        top_k=top_k,
+        available_data=available_data,
+        stage=stage,
+        workspace_root=resolved_workspace,
+        persist_session=persist_session,
+        inject_recent_drift=inject_recent_drift,
+        parent_session_id=parent_session_id,
+    )
+    diagnostics = dict(explore_result.retrieval_diagnostics)
+    normalized_stage = str(diagnostics.get("stage") or MECHANISM_DISCOVERY)
+
+    base_dir = (
+        Path(output_root).expanduser().resolve()
+        if output_root is not None
+        else resolved_workspace / "ideas"
+    )
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    idea_id_base = f"{stamp}__{_safe_idea_draft_slug(explore_result.idea)[:48]}"
+    draft_dir = _allocate_unique_draft_dir(base_dir, idea_id_base)
+    draft_dir.mkdir(parents=True, exist_ok=False)
+    idea_id = draft_dir.name
+
+    codebase = build_codebase_snapshot(resolved_workspace)
+    ctx = _build_prompt_context(
+        idea=explore_result.idea,
+        draft_dir=draft_dir,
+        vault_root=resolved_vault,
+        result=explore_result,
+        codebase=codebase,
+        lab=target_lab,
+        mode=explore_result.mode,
+    )
+
+    audience_prompt_paths: dict[Audience, Path] = {}
+    audience_output_paths: dict[Audience, Path] = {}
+    for audience in selected_audiences:
+        prompt_path = draft_dir / f"prompt_{audience.value}.md"
+        prompt_path.write_text(
+            _build_audience_prompt(audience=audience, ctx=ctx),
+            encoding="utf-8",
+        )
+        audience_prompt_paths[audience] = prompt_path
+        audience_output_paths[audience] = draft_dir / _AUDIENCE_OUTPUT_FILENAME.get(
+            audience, f"{audience.value}_output.md"
+        )
+
+    retrieval_pack_path = draft_dir / "retrieval_pack.md"
+    retrieval_pack_path.write_text(
+        _render_retrieval_pack(
+            ctx=ctx,
+            audiences=selected_audiences,
+            audience_prompt_paths=audience_prompt_paths,
+        ),
+        encoding="utf-8",
+    )
+
+    retrieval_log_path = draft_dir / "retrieval_log.md"
+    retrieval_log_path.write_text(
+        _render_stage1_retrieval_log(explore_result),
+        encoding="utf-8",
+    )
+
+    final_ledger_path = draft_dir / "ledger_v1.yaml"
+    reconcile_path = draft_dir / "reconcile.md"
+    reconcile_path.write_text(
+        _render_reconcile_template(
+            idea=explore_result.idea,
+            audiences=selected_audiences,
+            audience_prompt_paths=audience_prompt_paths,
+            audience_output_paths=audience_output_paths,
+            final_ledger_path=final_ledger_path,
+            lab=target_lab,
+            idea_id=idea_id,
+        ),
+        encoding="utf-8",
+    )
+
+    manifest_path = draft_dir / "manifest.json"
+    manifest_payload = {
+        "type": "alpha_lab_idea_distribute",
+        "created_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "idea": explore_result.idea,
+        "idea_id": idea_id,
+        "lab": target_lab.value,
+        "mode": explore_result.mode,
+        "stage": normalized_stage,
+        "audiences": [a.value for a in selected_audiences],
+        "retrieval_pack_path": str(retrieval_pack_path),
+        "retrieval_log_path": str(retrieval_log_path),
+        "audience_prompt_paths": {
+            a.value: str(p) for a, p in audience_prompt_paths.items()
+        },
+        "audience_output_paths": {
+            a.value: str(p) for a, p in audience_output_paths.items()
+        },
+        "final_ledger_path": str(final_ledger_path),
+        "reconcile_path": str(reconcile_path),
+        "retrieval_diagnostics": diagnostics,
+        "codebase_snapshot": codebase.to_payload(),
+    }
+    manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return IdeaDistributeResult(
+        idea=explore_result.idea,
+        idea_id=idea_id,
+        lab=target_lab,
+        mode=explore_result.mode,
+        stage=normalized_stage,
+        audiences=selected_audiences,
+        draft_dir=draft_dir,
+        retrieval_pack_path=retrieval_pack_path,
+        retrieval_log_path=retrieval_log_path,
+        audience_prompt_paths=audience_prompt_paths,
+        audience_output_paths=audience_output_paths,
+        final_ledger_path=final_ledger_path,
+        reconcile_path=reconcile_path,
+        manifest_path=manifest_path,
+        retrieval_diagnostics=diagnostics,
+    )
+
+
+def _render_retrieval_pack(
+    *,
+    ctx: PromptContext,
+    audiences: tuple[Audience, ...],
+    audience_prompt_paths: dict[Audience, Path],
+) -> str:
+    lines: list[str] = [
+        f"# Retrieval Pack — {ctx.idea}",
+        "",
+        f"idea_id: `{ctx.idea_id}`",
+        f"lab: `{ctx.lab.value}`",
+        f"mode: `{ctx.mode}`",
+        "",
+        "## Audiences (Stage 1)",
+    ]
+    for audience in audiences:
+        prompt = audience_prompt_paths.get(audience)
+        prompt_name = prompt.name if prompt is not None else f"prompt_{audience.value}.md"
+        role = (
+            "generator (机制候选 ledger)"
+            if audience is Audience.CLAUDE_MECHANISM
+            else "reviewer (代码可执行性评审)"
+        )
+        lines.append(f"- `{audience.value}` — {role} → `{prompt_name}`")
+    lines.extend(
+        [
+            "",
+            "## Vault cards (shared retrieval; identical between audiences)",
+            f"- vault_root: `{ctx.vault_root}`",
+        ]
+    )
+    if ctx.related_cards:
+        for idx, card in enumerate(ctx.related_cards, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"### K{idx}: {card.name}",
+                    f"- path: `{card.path}`",
+                    f"- summary: {card.summary}",
+                ]
+            )
+            if card.transferable_moves:
+                lines.append("- transferable_moves:")
+                for move in card.transferable_moves[:4]:
+                    lines.append(f"  - {move}")
+    else:
+        lines.append("- 未命中卡片（novel synthesis 合法）。")
+    lines.extend(["", "## Cross-card synthesis"])
+    if ctx.insight_brief:
+        for brief in ctx.insight_brief:
+            lines.append(f"- {brief}")
+    else:
+        lines.append("- 本轮未生成跨卡合成摘要。")
+    lines.extend(
+        [
+            "",
+            "## Codebase snapshot (reviewer-only context)",
+            f"- single-factor promoted: {len(ctx.codebase.factors_promoted)}",
+            f"- single-factor research: {len(ctx.codebase.factors_research)}",
+            f"- model candidates promoted: {len(ctx.codebase.model_candidates_promoted)}",
+            f"- model candidates research: {len(ctx.codebase.model_candidates_research)}",
+            f"- single-factor cases registered: {len(ctx.codebase.single_factor_cases)}",
+            f"- model-factor cases registered: {len(ctx.codebase.model_factor_cases)}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def draft_idea(
     *,
     vault_root: str | Path | None,
@@ -1019,11 +1314,11 @@ def draft_idea(
     inject_recent_drift: bool = False,
     parent_session_id: str | None = None,
 ) -> IdeaDraftResult:
-    """Create Stage 1 dual-engine draft artifacts without running an LLM.
+    """Legacy Stage 1 dispatch (kept for back-compat).
 
-    The generated pack gives every engine the same retrieval snapshot and
-    Markdown-only prompt. Desktop agents should not write YAML or files; the
-    user carries the reviewed Markdown into Stage 2 outside alpha-lab.
+    Renders audience-based prompts (generator + reviewer) but emits the legacy
+    file layout: ``dispatch.<model>.md`` + per-model ledger placeholders. New
+    code should call :func:`distribute_idea` instead.
     """
 
     selected_models = _normalize_idea_draft_models(models)
@@ -1057,6 +1352,10 @@ def draft_idea(
     shared_prompt_path = draft_dir / "prompt.shared.md"
     shared_prompt_path.write_text(explore_result.gpt_prompt, encoding="utf-8")
 
+    codebase = build_codebase_snapshot(resolved_workspace)
+    audiences_used: list[Audience] = []
+    audience_prompt_paths: dict[Audience, Path] = {}
+    audience_output_paths: dict[Audience, Path] = {}
     model_dispatch_paths: dict[str, Path] = {}
     ledger_paths: dict[str, Path] = {}
     for model in selected_models:
@@ -1068,21 +1367,33 @@ def draft_idea(
                 result=explore_result,
                 draft_dir=draft_dir,
                 vault_root=resolved_vault,
+                codebase=codebase,
+                lab=Lab.SINGLE_FACTOR,
+                mode=explore_result.mode,
             ),
             encoding="utf-8",
         )
         model_dispatch_paths[model] = dispatch_path
-
         ledger_paths[model] = draft_dir / f"ledger_v1.{model}.yaml"
+        audience = _audience_for_legacy_model(model)
+        if audience not in audiences_used:
+            audiences_used.append(audience)
+        audience_prompt_paths[audience] = dispatch_path
+        audience_output_paths[audience] = draft_dir / _AUDIENCE_OUTPUT_FILENAME.get(
+            audience, f"{audience.value}_output.md"
+        )
 
     final_ledger_path = draft_dir / "ledger_v1.yaml"
     reconcile_path = draft_dir / "reconcile.md"
     reconcile_path.write_text(
         _render_reconcile_template(
             idea=explore_result.idea,
-            models=selected_models,
-            ledger_paths=ledger_paths,
+            audiences=tuple(audiences_used),
+            audience_prompt_paths=audience_prompt_paths,
+            audience_output_paths=audience_output_paths,
             final_ledger_path=final_ledger_path,
+            lab=Lab.SINGLE_FACTOR,
+            idea_id=draft_dir.name,
         ),
         encoding="utf-8",
     )
@@ -1099,6 +1410,7 @@ def draft_idea(
         "mode": explore_result.mode,
         "stage": normalized_stage,
         "models": list(selected_models),
+        "audiences": [a.value for a in audiences_used],
         "shared_prompt_path": str(shared_prompt_path),
         "model_dispatch_paths": {
             key: str(value) for key, value in model_dispatch_paths.items()
@@ -1177,6 +1489,76 @@ def _allocate_unique_draft_dir(base_dir: Path, draft_name: str) -> Path:
     raise FileExistsError(f"unable to allocate unique draft directory under {base_dir}")
 
 
+_LEGACY_MODEL_TO_AUDIENCE: dict[str, Audience] = {
+    "claude": Audience.CLAUDE_MECHANISM,
+    "codex": Audience.CODEX_REVIEW,
+}
+
+
+def _audience_for_legacy_model(model: str) -> Audience:
+    """Map old ``--models claude,codex`` tokens onto the audience enum.
+
+    Used by the deprecated ``draft_idea`` entry; new code should pass
+    :class:`Audience` directly.
+    """
+
+    key = model.strip().lower()
+    if key in _LEGACY_MODEL_TO_AUDIENCE:
+        return _LEGACY_MODEL_TO_AUDIENCE[key]
+    try:
+        return Audience(key)
+    except ValueError as exc:
+        raise ValueError(
+            f"unknown legacy model name {model!r}; expected one of "
+            f"{sorted(_LEGACY_MODEL_TO_AUDIENCE)} or a valid audience"
+        ) from exc
+
+
+def _cards_for_prompt(result: ExploreIdeaResult) -> tuple[CardForPrompt, ...]:
+    return tuple(
+        CardForPrompt(
+            name=card.name,
+            path=card.path,
+            summary=card.summary,
+            transferable_moves=tuple(card.transferable_moves),
+        )
+        for card in result.related_cards[:8]
+    )
+
+
+def _idea_id_from_dir(draft_dir: Path) -> str:
+    """Stable id used in audience prompts; falls back to draft_dir name."""
+
+    return draft_dir.name or "<unknown_idea>"
+
+
+def _build_prompt_context(
+    *,
+    idea: str,
+    draft_dir: Path,
+    vault_root: Path,
+    result: ExploreIdeaResult,
+    codebase: CodebaseSnapshot,
+    lab: Lab = Lab.SINGLE_FACTOR,
+    mode: str = "start",
+) -> PromptContext:
+    insight = tuple(
+        _stage1_generation_material_text(text)
+        for text in _complete_stage1_prompt_briefs(result.insight_brief)
+    )
+    return PromptContext(
+        idea=idea,
+        idea_id=_idea_id_from_dir(draft_dir),
+        lab=lab,
+        draft_dir=draft_dir,
+        vault_root=vault_root,
+        related_cards=_cards_for_prompt(result),
+        insight_brief=insight,
+        codebase=codebase,
+        mode=mode,
+    )
+
+
 def _render_idea_model_dispatch(
     *,
     model: str,
@@ -1184,90 +1566,29 @@ def _render_idea_model_dispatch(
     result: ExploreIdeaResult,
     draft_dir: Path,
     vault_root: Path,
+    codebase: CodebaseSnapshot | None = None,
+    lab: Lab = Lab.SINGLE_FACTOR,
+    mode: str = "start",
 ) -> str:
-    label = _idea_draft_model_label(model)
-    bias = _idea_draft_model_bias(model)
-    lines = [
-        f"# Stage 1 Agent Prompt - {label}",
-        "",
-        "## 1. 新 idea",
-        idea,
-        "",
-        "## 2. 工作目录与资料位置",
-        f"- draft_dir：`{draft_dir}`",
-        f"- vault_root：`{vault_root}`",
-        "- 本轮不要创建、修改或保存任何 YAML 文件。",
-        "- 本轮只输出 Markdown 研究点评，供用户阅读、追问和带到网页版 GPT 讨论。",
-        "- 不要读取、引用或改写另一个 agent 的输出。",
-        "",
-        "## 3. Stage 1 纪律",
-        "- 第一轮回复必须是 Markdown 研究草稿：供用户阅读和讨论，不要输出 YAML，不要写文件。",
-        "- 即使用户后续要求补充，也优先继续完善 Markdown 点评；最终实现和结构化整理发生在 Stage2。",
-        "- 当前只做机制探索，不输出最终因子定义、完整公式、排名或 single best idea。",
-        "- 候选机制只增不减；不要做 keep/kill 判决。",
-        "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
-        "- `operative_claims` 只能作为弱上下文 hint，不作为淘汰条件。",
-        "- `inspired_by` / `fusion_of` / `cross_domain_jump` 是可选溯源；novel synthesis 合法。",
-        "- 机制命名不要直接使用 reversal / momentum / value / quality / size / "
-        "liquidity 等既有标签，也不要预设收益方向。",
-        "",
-        "## 4. 相关卡片列表",
-        "卡片路径相对于 vault root；请按 path 打开 quant-knowledge 原文后再写 Markdown 草稿。",
-    ]
-    if result.related_cards:
-        for idx, card in enumerate(result.related_cards[:8], start=1):
-            lines.extend(
-                [
-                    "",
-                    f"### K{idx}: {card.name}",
-                    f"- path: `{card.path}`",
-                    f"- summary: {card.summary}",
-                ]
-            )
-            if card.transferable_moves:
-                lines.append("- transferable_moves:")
-                for move in card.transferable_moves[:4]:
-                    lines.append(f"  - {move}")
-            else:
-                lines.append("- transferable_moves: []")
-    else:
-        lines.append("- 未命中相关卡片；可以做 novel synthesis，但需要把假设边界写清楚。")
+    """Render the audience-specific Stage 1 prompt body.
 
-    prompt_briefs = _complete_stage1_prompt_briefs(result.insight_brief)
-    lines.extend(["", "### Cross-card synthesis"])
-    lines.append(
-        "以下只作为候选生成素材；不是约束或 keep/kill 规则。"
-        "收敛语气已弱化为可探索分支或 concern。"
-    )
-    if prompt_briefs:
-        for brief in prompt_briefs:
-            lines.append(f"- {_stage1_generation_material_text(brief)}")
-    else:
-        lines.append("- 本轮未生成可用的跨卡合成摘要；请以相关卡片原文为准自行寻找可迁移动作。")
+    Replaces the old "Claude=深度组合 / Codex=广度迁移" generator dispatch with
+    the new generator+reviewer split (see ``docs/research_workflow.md``). The
+    function name is preserved for back-compat with existing call sites.
+    """
 
-    lines.extend(
-        [
-            "",
-            "## 5. Markdown 输出格式 + 生成偏好",
-            f"- 生成倾向：{bias}",
-            "- 只输出 Markdown 点评，不输出 YAML，不写文件。",
-        (
-            "- 建议包含：阅读过的卡片、可迁移动作、候选机制点评、关键分歧、"
-            "主要疑问、后续应由用户和网页版 GPT 讨论的问题。"
-        ),
-            "- 每个候选机制只需写成可讨论的研究判断，不要收敛成最终因子定义或完整公式。",
-            "- 若某个机制之后可能进入实现，请说明所需数据、可能的混淆项和最容易出错的假设。",
-            "",
-            "建议结构：",
-            "- `阅读摘要`: 实际打开了哪些卡片，分别拿走了什么 move。",
-            "- `候选机制点评`: 3-8 个互补机制，每个机制说明市场参与者行为、可观察信号和不确定性。",
-            "- `与相近标签的差异`: 说明它和普通波动、普通反应不足、价量背离等标签的结构差异。",
-            "- `需要用户重点判断`: 哪些地方必须由用户读卡或结合业务知识确认。",
-            "- `进入 Stage2 的讨论问题`: 给网页版 GPT 和用户继续融合时使用。",
-            "",
-        ]
+    audience = _audience_for_legacy_model(model)
+    snapshot = codebase if codebase is not None else build_codebase_snapshot(Path("."))
+    ctx = _build_prompt_context(
+        idea=idea,
+        draft_dir=draft_dir,
+        vault_root=vault_root,
+        result=result,
+        codebase=snapshot,
+        lab=lab,
+        mode=mode,
     )
-    return "\n".join(lines)
+    return _build_audience_prompt(audience=audience, ctx=ctx)
 
 
 def _complete_stage1_prompt_briefs(values: list[str], *, limit: int = 6) -> list[str]:
@@ -1306,85 +1627,103 @@ def _stage1_generation_material_text(value: str) -> str:
 
 
 def _idea_draft_model_label(model: str) -> str:
+    """Human-friendly label for legacy model tokens."""
+
     key = model.strip().lower()
-    if key == "claude":
-        return "Claude Code"
-    if key == "codex":
-        return "Codex"
+    if key in {"claude", Audience.CLAUDE_MECHANISM.value}:
+        return "Claude Code (claude_mechanism — generator)"
+    if key in {"codex", Audience.CODEX_REVIEW.value}:
+        return "Codex GUI (codex_review — reviewer)"
     return model.strip() or "Agent"
-
-
-def _idea_draft_model_bias(model: str) -> str:
-    if model == "claude":
-        return "偏深度组合：在 3-5 张卡内寻找深层结构相似性，把多个 move 融合成少数高密度机制假设。"
-    if model == "codex":
-        return "偏广度迁移：从更远的 asset class / 频率 / method 拉跨领域类比，提出更多互补候选。"
-    return "保持独立 voice：从共享素材中提出与其他引擎互补的新机制。"
-
-
-def _render_stage1_ledger_template(*, model: str, idea: str) -> str:
-    return "\n".join(
-        [
-            "# Stage 1 ledger template",
-            f"# model: {model}",
-            f"# idea: {idea}",
-            "mechanisms:",
-            "  - id: mechanism_1",
-            "    hypothesis: \"\"",
-            "    # optional: cite source cards only when useful for learning",
-            "    # - card: \"\"",
-            "    #   what_i_took: \"\"",
-            "    #   cross_domain_jump: \"\"",
-            "    inspired_by: []",
-            "    # optional: [card_1, card_2]",
-            "    fusion_of: []",
-            "    novel_delta: \"\"",
-            "    signal_sketch: \"\"",
-            "    data_needs: []",
-            "    concern: \"\"",
-            "",
-        ]
-    )
 
 
 def _render_reconcile_template(
     *,
     idea: str,
-    models: tuple[str, ...],
-    ledger_paths: dict[str, Path],
+    audiences: tuple[Audience, ...],
+    audience_prompt_paths: dict[Audience, Path],
+    audience_output_paths: dict[Audience, Path],
     final_ledger_path: Path,
+    lab: Lab,
+    idea_id: str,
 ) -> str:
-    model_rows = [
-        f"- `{model}`: `{ledger_paths[model].name}`" for model in models
+    """Render a Stage 2 reconcile entry template for "1 ledger × 1 review"."""
+
+    contract_template = (
+        "docs/templates/single_factor_stage1_reconcile_contract.md"
+        if lab is Lab.SINGLE_FACTOR
+        else "docs/templates/model_lab_stage1_reconcile_contract.md"
+    )
+    payload_label = (
+        "factor_json_payload" if lab is Lab.SINGLE_FACTOR else "model_candidate_payload"
+    )
+    candidate_contract = (
+        "docs/templates/single_factor_stage2_candidate_contract.md"
+        if lab is Lab.SINGLE_FACTOR
+        else "docs/templates/model_lab_stage2_candidate_contract.md"
+    )
+
+    has_generator = Audience.CLAUDE_MECHANISM in audiences
+    has_reviewer = Audience.CODEX_REVIEW in audiences
+
+    lines: list[str] = [
+        f"# Reconcile — {idea}",
+        "",
+        f"idea_id: `{idea_id}`",
+        f"lab: `{lab.value}`",
+        "",
+        "## 协议（2026-05-11）",
+        "Stage 1 = generator + reviewer，不是 2 个 generator。",
+        "- generator (audience=claude_mechanism) → mechanism candidate ledger",
+        "- reviewer (audience=codex_review) → code-feasibility review",
+        "网页版 GPT 在 Stage 2 把两侧合并为 `" + payload_label + "`，详见：",
+        f"- {contract_template}",
+        f"- {candidate_contract}",
+        "",
+        "## 输入产物（Stage 1 输出）",
     ]
-    return "\n".join(
+    if has_generator:
+        prompt = audience_prompt_paths.get(Audience.CLAUDE_MECHANISM)
+        out = audience_output_paths.get(Audience.CLAUDE_MECHANISM)
+        lines.extend(
+            [
+                f"- generator prompt: `{prompt.name if prompt else 'prompt_claude_mechanism.md'}`",
+                f"- generator output: `{out.name if out else 'mechanism_deepdive.md'}`（用户保存 Claude Code 输出）",
+            ]
+        )
+    if has_reviewer:
+        prompt = audience_prompt_paths.get(Audience.CODEX_REVIEW)
+        out = audience_output_paths.get(Audience.CODEX_REVIEW)
+        lines.extend(
+            [
+                f"- reviewer prompt: `{prompt.name if prompt else 'prompt_codex_review.md'}`",
+                f"- reviewer output: `{out.name if out else 'code_feasibility_review.md'}`（用户保存 Codex GUI 输出）",
+            ]
+        )
+
+    lines.extend(
         [
-            f"# Reconcile - {idea}",
             "",
-            "目标：加法合并，不做互审淘汰。最终 `ledger_v1.yaml` 应该是候选并集，",
-            "并额外尝试第三轮 fusion 候选；弱项只标 concern，不删除。",
+            "## 输出产物（Stage 2 网页 GPT 写入）",
+            f"- `{final_ledger_path.name}`：合并后的最终 ledger（机制候选 × 可执行性评审）",
+            "- `stage2_payload.json`：网页 GPT 输出的 `" + payload_label + "`，含必填 `provenance` 块",
             "",
-            "## 输入 ledger",
-            *model_rows,
+            "## 槽位（reviewer 决定 implementation_status，不是 generator）",
+            "- mechanisms[].source_agents 始终为 `[claude_mechanism]`；reviewer 的输入通过 `code_feasibility_review` 反映。",
+            "- mechanisms[].implementation_status 必须取自 `code_feasibility_review.per_mechanism.<id>.implementation_status`。",
+            '- 不做"互审淘汰"——不可执行机制保留为 `needs_extension`。',
+            "- generator 输出缺失：reconcile 仍可输出 payload，但所有机制保守标 `needs_extension`。",
+            '- reviewer 输出缺失：reconcile 仍可输出 payload，但所有机制保守标 `needs_extension`，并在 `unresolved_questions` 标"待补评审"。',
             "",
-            "## 输出 ledger",
-            f"- `{final_ledger_path.name}`",
-            "",
-            "## union",
-            "- 原样保留各模型中结构不同的机制候选。",
-            "- 如果两个候选只是在措辞上重复，合并描述但保留两个来源的 inspired_by。",
-            "",
-            "## fusion_candidates",
-            "- 从不同模型各取至少一个 move，提出新的融合候选。",
-            "- 只要机制有可验证信号草图，即使无明确来源卡也可以保留。",
-            "",
-            "## notes",
-            "- concern: 记录需要 Stage 3 数据验证的弱点。",
-            "- 不写淘汰式三分法栏目。",
+            "## quality gate",
+            "- mechanism_candidates 至少 1 条。",
+            "- code_feasibility_review 必须包含每条机制的 implementation_status。",
+            "- payload 必须含 provenance.idea_id（取自 manifest.json::idea_id）。",
             "- 不把 `operative_claims` 当作 kill 条件。",
             "",
         ]
     )
+    return "\n".join(lines)
 
 
 def _render_stage1_retrieval_log(result: ExploreIdeaResult) -> str:
