@@ -45,20 +45,18 @@
 | Summary/card 文档 | `src/alpha_lab/real_cases/single_factor/templates.py` | `summary.md` 与 `experiment_card.md` 的核心 split 指标使用 full + OOS 并列展示；Coverage 已纳入同一展示口径。 |
 | Research validation package | `src/alpha_lab/reporting/research_validation_package.py` | Level 1/2 validation package 以 key/value 方式透传核心研究指标；未发现把未年化 IR 命名为 Sharpe 的新增问题。 |
 | PDF 图表 | `src/alpha_lab/reporting/research_tearsheet.py` | 从 artifact CSV/JSON 构建 NAV、IC、分组、rolling、decay、turnover、coverage 图表；空数据跳过图表。 |
-| Dashboard 展示 | `frontend/metrics-dashboard/src/App.tsx` | 主要展示 RankIC/IC 日线和分组均值；split 与 OOS summary 由前端按 `split_phase`/split contract 解析并重算。 |
 
 ### 通过
 
 - 指标计算的主路径保持同 `(date, asset)` 对齐：IC/RankIC/MI、分组收益、多空收益与 turnover 都没有发现跨日期 join。
 - 后端 split 包装符合 inventory：`ic_timeseries`、`rolling_stability`、`group_returns`、`turnover` drop `EMBARGO`；`coverage` 保留 `EMBARGO`。
 - 年化统计没有和未年化 IR 混用：`ic_ir`、`rank_ic_ir`、`long_short_ir` 保持未年化；`artifact_enrichment.py` 的 `annualized_return`、`annualized_volatility`、`sharpe` 基于非重叠多空收益另算。
-- `research_tearsheet.py` 的图表覆盖比 dashboard 更完整，已能从 artifact 构建 NAV、IC、quantile cumulative、rolling、decay、turnover、coverage。
+- `research_tearsheet.py` 的图表覆盖完整，已能从 artifact 构建 NAV、IC、quantile cumulative、rolling、decay、turnover、coverage。
 
 ### 口径需说明
 
-- dashboard summary 的 OOS turnover、coverage、ICIR 都是前端从 CSV 再算；这可以作为交互展示，但需要声明它是展示层 OOS 估计，不等同于 `metrics.json` 中所有后端标量。
-- `ic_timeseries.csv` 同时包含 `ic`、`rank_ic`、`mutual_information`；dashboard/PDF 选择 RankIC 作为主图是合理默认，fallback 到 `ic` 时标题和 series label 已同步变更。
-- `capacity_estimation.csv`、`daily_pnl_attribution.csv`、`factor_autocorrelation.csv` 目前更像审计 CSV；若团队期待 dashboard 可见，需要单独排新增展示，不应在本轮默认变更。
+- `ic_timeseries.csv` 同时包含 `ic`、`rank_ic`、`mutual_information`；PDF tearsheet 选择 RankIC 作为主图是合理默认，fallback 到 `ic` 时标题和 series label 已同步变更。
+- `capacity_estimation.csv`、`daily_pnl_attribution.csv`、`factor_autocorrelation.csv` 目前更像审计 CSV，未默认进入主图序列。
 
 ### 现状已闭环的口径与修复
 
