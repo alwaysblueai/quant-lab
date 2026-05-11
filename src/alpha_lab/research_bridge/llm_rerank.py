@@ -67,9 +67,15 @@ class CategorizeOutcome:
         return {item.path: item.relevance for item in self.categorized}
 
 
-def anthropic_client_kwargs(api_key: str) -> dict[str, str]:
-    """Return shared Anthropic client kwargs, including an optional base URL."""
-    kwargs = {"api_key": api_key}
+def anthropic_client_kwargs(api_key: str) -> dict[str, Any]:
+    """Return shared Anthropic client kwargs, including an optional base URL.
+
+    Return type is ``dict[str, Any]`` rather than ``dict[str, str]`` because the
+    upstream ``anthropic.Anthropic`` constructor has many strongly-typed
+    parameters; mypy validates ``**kwargs`` unpacking per-key, so a narrow
+    ``str`` value type triggers a long cascade of false positives.
+    """
+    kwargs: dict[str, Any] = {"api_key": api_key}
     base_url = str(os.environ.get(ANTHROPIC_BASE_URL_ENV) or "").strip()
     if base_url:
         kwargs["base_url"] = base_url

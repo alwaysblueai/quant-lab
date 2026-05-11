@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLabExperimentError
 from alpha_lab.research_bridge.categories import (
@@ -1058,7 +1058,7 @@ def distribute_idea(
     """
 
     if isinstance(engines, tuple) and engines and isinstance(engines[0], Engine):
-        selected_engines: tuple[Engine, ...] = tuple(engines)
+        selected_engines: tuple[Engine, ...] = cast(tuple[Engine, ...], tuple(engines))
     else:
         selected_engines = normalize_engines(engines)
     target_lab = Lab(lab) if isinstance(lab, str) else lab

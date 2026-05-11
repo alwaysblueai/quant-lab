@@ -11,6 +11,12 @@ import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from alpha_lab.research_bridge.service import (
+        IdeaDistributeResult as _IdeaDistributeResult,
+    )
 
 from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
 from alpha_lab.config import PROJECT_ROOT
@@ -201,7 +207,7 @@ def distribute_model_idea(
     workspace_root: str | Path = ".",
     output_root: str | Path | None = None,
     vault_root: str | Path | None = None,
-):
+) -> _IdeaDistributeResult:
     """Stage 0 distribute for the model lab.
 
     Thin wrapper around :func:`alpha_lab.research_bridge.service.distribute_idea`

@@ -522,6 +522,12 @@ def compute_microstructure(
     day_low = float(close.min()) if close.notna().any() else np.nan
 
     # Limit touch / open counts.
+    limit_up_touch: float
+    limit_up_open: float
+    limit_dn_touch: float
+    limit_dn_open: float
+    minutes_at_high: float
+    minutes_at_low: float
     if up_limit is not None and np.isfinite(up_limit) and up_limit > 0:
         at_up = (close - up_limit).abs() <= limit_touch_tol
         limit_up_touch = int(at_up.sum())

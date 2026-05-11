@@ -28,7 +28,12 @@ def test_ensure_sorted_reorders_and_marks() -> None:
     sorted_frame = ensure_sorted(frame, by=("asset", "date"))
 
     assert sorted_frame.attrs.get(SORTED_ATTR_KEY) == ("asset", "date")
-    expected_order = [("A", "2024-01-02"), ("A", "2024-01-04"), ("B", "2024-01-01"), ("B", "2024-01-03")]
+    expected_order = [
+        ("A", "2024-01-02"),
+        ("A", "2024-01-04"),
+        ("B", "2024-01-01"),
+        ("B", "2024-01-03"),
+    ]
     actual_order = [
         (row["asset"], row["date"].strftime("%Y-%m-%d"))
         for _, row in sorted_frame.iterrows()

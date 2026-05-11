@@ -357,7 +357,8 @@ def _build_coverage_summary(
         f"asset_coverage={avg_asset_coverage:.1%}; "
         f"sample_coverage={overall_sample_coverage:.1%}"
     )
-    warmup_days = int((warmup_summary or {}).get("coverage_warmup_excluded_days") or 0)
+    raw_warmup_days = (warmup_summary or {}).get("coverage_warmup_excluded_days") or 0
+    warmup_days = int(raw_warmup_days) if isinstance(raw_warmup_days, int | float) else 0
     if warmup_days > 0:
         summary = f"{summary}; warmup_excluded_days={warmup_days}"
     return summary

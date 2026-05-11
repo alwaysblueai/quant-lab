@@ -4,7 +4,7 @@ import concurrent.futures
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import numpy as np
 import pandas as pd
@@ -650,7 +650,7 @@ def evaluate_single_factor_case(
         "coverage_break_days_raw": raw_coverage_break_days,
         "coverage_break_days_ex_warmup": coverage_break_days,
         "coverage_warmup_excluded_days": int(
-            coverage_warmup_summary["coverage_warmup_excluded_days"]
+            cast(int | float, coverage_warmup_summary["coverage_warmup_excluded_days"])
         ),
         "coverage_warmup_start": coverage_warmup_summary["coverage_warmup_start"],
         "coverage_warmup_end": coverage_warmup_summary["coverage_warmup_end"],

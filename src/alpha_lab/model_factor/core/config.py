@@ -82,7 +82,9 @@ def _feature_importance_permutation_top_k_features(config: object) -> int | None
         return None
     if isinstance(value, bool):
         return 20
-    return int(value)
+    if isinstance(value, int | float | str):
+        return int(value)
+    return 20
 
 
 def _feature_importance_permutation_random_state(config: object) -> int:

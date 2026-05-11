@@ -3078,24 +3078,18 @@ class _UnifiedService:
             return {"ok": False, "error": str(exc)}
 
         files: list[dict[str, str]] = []
+        claude_engine = next((e for e in result.engines if e.value == "claude"), None)
+        codex_engine = next((e for e in result.engines if e.value == "codex"), None)
         for label, path in (
             ("manifest.json", result.manifest_path),
             ("retrieval_pack.md", result.retrieval_pack_path),
             (
                 "prompt_claude.md",
-                result.engine_prompt_paths.get(
-                    next(iter([e for e in result.engines if e.value == "claude"]), None)
-                )
-                if any(e.value == "claude" for e in result.engines)
-                else None,
+                result.engine_prompt_paths.get(claude_engine) if claude_engine else None,
             ),
             (
                 "prompt_codex.md",
-                result.engine_prompt_paths.get(
-                    next(iter([e for e in result.engines if e.value == "codex"]), None)
-                )
-                if any(e.value == "codex" for e in result.engines)
-                else None,
+                result.engine_prompt_paths.get(codex_engine) if codex_engine else None,
             ),
             ("stage2_input.md", result.stage2_input_path),
         ):
@@ -4246,7 +4240,7 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/vault/idea-distribute":
                 idea = str(payload.get("idea") or "").strip()
                 lab = str(payload.get("lab") or "single_factor").strip()
-                engines = payload.get("engines")
+                engines = _coerce_engines_payload(payload.get("engines"))
                 top_k = _as_int(payload.get("top_k"), default=8)
                 self._send_json(
                     self.svc.create_idea_distribute(
@@ -4259,7 +4253,7 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/model-lab/idea-distribute":
                 idea = str(payload.get("idea") or "").strip()
-                engines = payload.get("engines")
+                engines = _coerce_engines_payload(payload.get("engines"))
                 top_k = _as_int(payload.get("top_k"), default=8)
                 self._send_json(
                     self.svc.create_idea_distribute(
@@ -6495,6 +6489,22 @@ def _as_int(value: object, *, default: int) -> int:
     return default
 
 
+def _coerce_engines_payload(
+    value: object,
+) -> list[str] | tuple[str, ...] | str | None:
+    """Narrow a JSON-decoded ``engines`` payload to the shapes Stage 0 accepts."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(str(item) for item in value)
+    return None
+
+
 def _coerce_builder_kwarg(value: object) -> object:
     if isinstance(value, str):
         text = value.strip()
@@ -7052,8 +7062,10 @@ def _default_model_lab_artifact_fixture_content(
     artifact_key: str,
 ) -> str:
     key = artifact_key.strip()
-    summary = fixture.get("summary") if isinstance(fixture.get("summary"), dict) else {}
-    snapshot = fixture.get("snapshot") if isinstance(fixture.get("snapshot"), dict) else {}
+    raw_summary = fixture.get("summary")
+    summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
+    raw_snapshot = fixture.get("snapshot")
+    snapshot: dict[str, object] = raw_snapshot if isinstance(raw_snapshot, dict) else {}
     run_id = str(fixture.get("run_id") or f"fixture-{fixture.get('fixture_id', 'artifact')}")
     if key == "metrics":
         return json.dumps({"metrics": summary}, ensure_ascii=False, indent=2)
@@ -7125,7 +7137,7 @@ def _default_model_lab_artifact_fixture_content(
             "- Action: review coverage breaks, rolling stability, and NAV compounding sanity.\n"
         )
     if key == "training_log":
-        rows = [
+        rows: list[dict[str, object]] = [
             {
                 "score_date": "2026-01-02",
                 "status": "skipped",

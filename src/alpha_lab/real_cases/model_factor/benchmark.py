@@ -12,11 +12,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-try:
-    import resource
-except ImportError:  # pragma: no cover - exercised on Windows.
-    resource = None
-
 from alpha_lab.real_cases.model_factor.pipeline import (
     ModelFactorCaseRunResult,
     run_model_factor_case,
@@ -25,6 +20,13 @@ from alpha_lab.real_cases.model_factor.spec import (
     ModelFactorCaseSpec,
     load_model_factor_case_spec,
 )
+
+try:
+    import resource as _resource
+except ImportError:  # pragma: no cover - exercised on Windows.
+    _resource = None  # type: ignore[assignment]
+
+resource = _resource
 
 _BENCHMARK_SCHEMA_VERSION = "1.0.0"
 _MEMORY_PROFILE_SCHEMA_VERSION = "1.0.0"
