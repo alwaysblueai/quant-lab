@@ -159,6 +159,28 @@ def test_prompt_body_symmetric_except_identity_and_output_filename(
     assert normalize(claude_prompt) == normalize(codex_prompt)
 
 
+def test_prompt_carries_inline_governance_preamble(tmp_path: Path) -> None:
+    """Codex GUI 桌面版 Project 没有持久化 Instructions —— governance 必须内联。"""
+
+    ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
+    for engine in (Engine.CLAUDE, Engine.CODEX):
+        prompt = build_prompt(engine=engine, ctx=ctx)
+        # Section heading + key hard-rule fragments
+        assert "## 0. Governance" in prompt
+        assert "你的位置" in prompt
+        assert "禁止越界" in prompt
+        assert "vault = 素材库不是判决书" in prompt
+        assert "PIT / future-leakage" in prompt
+        # Governance section sits before §1 (so engine reads rules first)
+        gov_idx = prompt.find("## 0. Governance")
+        idea_idx = prompt.find("## 1. Idea")
+        assert 0 < gov_idx < idea_idx
+        # Explicit anti-overreach tokens
+        assert "Stage 2 网页 GPT 的事" in prompt
+        assert "Stage 3 后端的事" in prompt
+        assert "Level 3 永久禁止" in prompt
+
+
 def test_prompt_contains_generator_and_reviewer_sections(tmp_path: Path) -> None:
     ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
     prompt = build_prompt(engine=Engine.CLAUDE, ctx=ctx)

@@ -151,6 +151,9 @@ def build_prompt(*, engine: Engine, ctx: PromptContext) -> str:
         "",
         f"你是 **{engine_label}**。idea_id: `{ctx.idea_id}`。",
         "",
+    ]
+    lines.extend(_governance_preamble())
+    lines.extend([
         "## 1. Idea",
         ctx.idea,
         "",
@@ -182,7 +185,7 @@ def build_prompt(*, engine: Engine, ctx: PromptContext) -> str:
         "",
         "## 5. 共享 retrieval（两个引擎一字不差相同）",
         "卡片路径相对于 vault_root；按 path 打开 quant-knowledge 原文。",
-    ]
+    ])
     lines.extend(_format_cards(ctx.related_cards))
     lines.extend(_format_insight_brief(ctx.insight_brief))
     lines.extend(
@@ -325,3 +328,73 @@ def _format_inline_list(items: Sequence[str]) -> str:
     if not items:
         return "（空）"
     return ", ".join(items)
+
+
+# ---------------------------------------------------------------------------
+# Governance preamble (in-prompt persistent constraints)
+# ---------------------------------------------------------------------------
+#
+# Codex GUI 桌面版的 Project 没有持久化 Instructions 槽位 —— 每次新会话只能
+# 靠粘贴的内容承载约束。把 governance 内联进 prompt 体内，使 Stage 1 不依赖
+# 任何"外部 system prompt 配置"，提升跨引擎 / 跨会话的稳定性。
+#
+# 内容浓缩自：AGENTS.md / CLAUDE.md / docs/research_workflow.md /
+# docs/end_to_end_workflow.md。冲突时以原始文档为准。
+
+
+def _governance_preamble() -> list[str]:
+    """Return the in-prompt governance section (lab-agnostic, engine-agnostic)."""
+
+    return [
+        "## 0. Governance（Stage 1 协议硬约束浓缩）",
+        "",
+        "完整规则见仓库 `AGENTS.md` / `CLAUDE.md` / `docs/research_workflow.md` /"
+        " `docs/end_to_end_workflow.md`。冲突时以原始文档为准。",
+        "",
+        "### 0.1 你的位置",
+        "- 当前是 Stage 1（generator + reviewer 合一）；不是 Stage 0/2/3/4/5。",
+        "- 唯一允许写入的文件：`<draft_dir>/stage1_<engine>.md`（路径见 §3）。",
+        "",
+        "### 0.2 禁止越界",
+        "- 不输出 final factor code / `factor.json` / `case_spec_payload` /"
+        " `model_candidate_payload` / ranking / single best idea —— Stage 2 网页"
+        " GPT 的事。",
+        "- 不调用 `alpha-lab` 任何子命令；不写 validator / pipeline 指令 ——"
+        " Stage 3 后端的事。",
+        "- 不做 promotion 判断 / 不引用 `factor_promotion_checklist.md` ——"
+        " Stage 4/5 的事。",
+        "- 不读对方引擎的输出；不读 `docs/templates/<lab>_stage{2_*,3_*}_*` /"
+        " `backend_draft_*workflow.md` / `factor_promotion_checklist.md`。",
+        "- 不引入 portfolio construction / execution / replay / fill simulation /"
+        " live trading 语义（Level 3 永久禁止）。",
+        "- 不修改仓库代码；不创建散落 .py / .ipynb / .yaml；不写 `<draft_dir>`"
+        " 外路径。",
+        "",
+        "### 0.3 生成纪律（vault = 素材库不是判决书）",
+        "- 候选机制只增不减；不可执行的标 `needs_extension`，**不删除**。",
+        "- 探索阶段**不做 KILL / HOLD** —— 真正的 KILL 由 Stage 3 数据决定，"
+        "不在这里下判决。",
+        '- `transferable_moves` 是主要生成原料；`operative_claims` 是弱'
+        ' hint，**不触发"先例 kill"**（知识库可能有错，硬 kill 会误杀活机制）。',
+        "- 找不到来源卡 ≠ 缺口；novel synthesis 合法，不强制 lineage。",
+        "- 机制命名禁用 canonical labels（reversal / momentum / value / quality"
+        " / size / skewness / liquidity / volatility / amplitude / crowding"
+        " 等）—— 保护假设空间，描述机制本身。",
+        "",
+        "### 0.4 PIT / future-leakage 硬约束（Part B 评审必须对照）",
+        "- factor / feature value at `t` 只用 `≤ t` 的信息。",
+        "- 禁 `shift(-n)`、负向 `pct_change`、`future_return / forward_return /"
+        " next_return / label_return / target_return` 等 future-leakage tokens。",
+        "- 禁全样本均值 / 标准差作为标准化（横截面 demean / rank 例外）。",
+        "- rolling / expanding 必须按 `asset` 分组。",
+        "- `required_columns` / `feature_columns` 必须是真实已注册列名；编造列名"
+        " = `needs_extension`。",
+        "",
+        "### 0.5 输出（与 §3 / §8 一致）",
+        "- 唯一输出：`<draft_dir>/stage1_<engine>.md`，单一 Markdown 含 Part A"
+        " + Part B；不另起 YAML / 代码文件。",
+        "- 内联 YAML code block 是 Markdown 内嵌格式的一部分，**不是**独立文件。",
+        "",
+        "---",
+        "",
+    ]
