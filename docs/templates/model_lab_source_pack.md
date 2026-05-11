@@ -84,7 +84,7 @@ required_next_input: []
 
 网页版 GPT 项目"sources" 严格只放：
 
-- `model_lab_web_gpt_source_pack.md`（本文，总入口）
+- `model_lab_source_pack.md`（本文，总入口）
 - `model_lab_stage1_reconcile_contract.md`
 - `model_lab_stage2_candidate_contract.md`
 

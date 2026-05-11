@@ -39,7 +39,7 @@ _TEMP_FILES_GLOB: tuple[str, ...] = (
     "stage2_input.md",
     "stage1_reconcile.yaml",
     "retrieval_pack.md",
-    # legacy 6-file layout (back-compat with old draft_idea output):
+    # pre-2026-05-11 temporary layout cleanup compatibility:
     "dispatch.*.md",
     "ledger_v1.*.yaml",
     "ledger_v1.yaml",

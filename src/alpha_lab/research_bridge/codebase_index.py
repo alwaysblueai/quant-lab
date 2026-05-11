@@ -1,8 +1,8 @@
 """Codebase snapshot for Stage 0 idea distribution.
 
-Stage 1 reviewer (Codex GUI, audience=codex_review) needs to see what is already
-in the repo before it can judge whether a candidate mechanism is executable in
-the v1 contract. This module produces a small, frozen snapshot used by
+Both Stage 1 engines receive the same generator + reviewer task. They need to
+see what is already in the repo before judging whether a candidate mechanism is
+executable in the v1 contract. This module produces a small, frozen snapshot used by
 ``engine_prompts.build_prompt`` to inject:
 
 - existing factor / model_candidate names (so reviewer flags duplication)

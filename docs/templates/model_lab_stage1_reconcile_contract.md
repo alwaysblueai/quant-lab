@@ -14,7 +14,7 @@ Stage 1 输出（每份都含 Part A 机制候选 + Part B 可执行性评审）
 
 当前阶段是 Stage1 mechanism reconcile：
 
-- 合并两个 agent 的机制候选。
+- 合并两个 engine 的机制候选。
 - 保留互补机制与 novel synthesis。
 - 标注每条机制的可实现性边界。
 - 给 Stage2 提供一个可落地的优先入口。
@@ -61,7 +61,7 @@ provenance: {}
 idea_title: ""
 candidate_slug_hint: ""
 base_case_spec_path: ""
-input_agents: []
+input_engines: []
 code_feasibility_review: {}
 mechanisms: []
 stage2_entry_recommendation: {}
@@ -77,7 +77,7 @@ contract_version: "model_stage1_reconcile_v1"
 stage: "stage1_reconcile"
 provenance:
   idea_id: "20260511T143000Z__turnover-conditioned-pv"
-  audience_chain: ["claude_mechanism", "codex_review"]
+  audience_chain: ["claude", "codex"]
   retrieval_pack_sha256: ""        # optional, from ideas/<id>/manifest.json
 idea_title: "Turnover-Conditioned Price-Volume Synthesis"
 candidate_slug_hint: "turnover_conditioned_pv_synthesis_v1"
@@ -107,9 +107,9 @@ mechanisms:
     family: "feature_interaction | loss_regularization | model_selection | sample_weighting | target_construction | training_window | other"
     implementation_status: "in_contract_spec_variant | partial_in_contract | needs_extension | future_enhancement"
     stage2_priority: "primary_candidate | secondary_candidate | defer"
-    source_agents: []
+    source_engines: []
     hypothesis: ""
-    agent_data_generating_story: ""
+    engine_data_generating_story: ""
     signal_sketch: ""
     touched_contract_surfaces: []
     allowed_v1_spec_changes: []

@@ -276,7 +276,7 @@ def test_validate_draft_model_accepts_complete_provenance(tmp_path: Path) -> Non
     payload["provenance"] = {
         "idea_id": "20260511T140000Z__turnover-conditioned",
         "stage2_payload_sha256": "b" * 64,
-        "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"],
+        "audience_chain": ["claude", "codex", "web_gpt_stage2"],
     }
     candidate_path = _write_candidate(tmp_path, "prov_full", payload)
     result = validate_draft_model_file(candidate_path)
@@ -301,7 +301,7 @@ def test_draft_model_source_passes_provenance_to_audit(tmp_path: Path) -> None:
     payload = dict(_legal_payload(spec_path, candidate_name="prov_audit"))
     payload["provenance"] = {
         "idea_id": "20260511T150000Z__audited",
-        "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"],
+        "audience_chain": ["claude", "codex", "web_gpt_stage2"],
     }
     candidate_path = _write_candidate(tmp_path, "prov_audit", payload)
     source = read_draft_model_source(candidate_path)

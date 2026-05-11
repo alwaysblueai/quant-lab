@@ -11,10 +11,10 @@
 1. **Stage 0** — `alpha-lab model-idea distribute --idea ... --output-dir ideas/<id>/`
    产出 retrieval pack（vault 卡 + 代码库 model_candidates 索引 +
    ModelFactorCaseSpec schema 摘录 + validator 硬约束清单）+
-   `prompt_claude_mechanism.md`（generator） + `prompt_codex_review.md`（reviewer）。
-2. **Stage 1** — Claude Code 输出 `mechanism_deepdive.md`，Codex GUI 输出
-   `code_feasibility_review.md`，互不可见。
-3. **Stage 2** — 网页版 GPT 接 reconcile + candidate 模板，输出唯一
+   两份对称 engine prompts：`prompt_claude.md` 和 `prompt_codex.md`。
+2. **Stage 1** — Claude Code 与 Codex GUI 各自输出
+   `stage1_claude.md` / `stage1_codex.md`，两份都包含 generator + reviewer。
+3. **Stage 2** — 网页版 GPT 接 `stage2_input.md` + reconcile + candidate 模板，输出唯一
    `model_candidate_payload`，含 `provenance.idea_id` /
    `provenance.stage2_payload_sha256` / `provenance.audience_chain`。
 
@@ -23,12 +23,9 @@
 网页版 GPT 项目中建议固定加入以下来源文件，确保输出从 Stage1 到 Stage3 都是
 “人可读 + 机器可提取”的固定合同：
 
-- `docs/templates/model_lab_web_gpt_source_pack.md`
+- `docs/templates/model_lab_source_pack.md`
 - `docs/templates/model_lab_stage1_reconcile_contract.md`（已加 `code_feasibility_review` 输入槽位）
 - `docs/templates/model_lab_stage2_candidate_contract.md`
-- `docs/templates/model_lab_stage3_backend_draft_prompt.md`
-- `docs/templates/codex_gui_model_stage3_execution_envelope.md`（已加 forbidden_actions / escalation_triggers）
-- `docs/templates/codex_gui_codebase_review_envelope.md`（Stage 1 reviewer 入口）
 
 当用户提供 Claude Code / Codex GUI 两份 Stage1 讨论结果时，网页版 GPT 必须先
 输出 `contract_version=model_stage1_reconcile_v1` 的
@@ -90,7 +87,7 @@ stage3_validation_focus: []
 provenance:
   idea_id: "20260511T143000Z__turnover-conditioned-pv"
   stage2_payload_sha256: "<sha256 of canonical-JSON Stage2 payload>"
-  audience_chain: ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+  audience_chain: ["claude", "codex", "web_gpt_stage2"]
 ```
 
 `case_spec_payload` 不允许只给 patch；网页 GPT 必须输出完整 case spec，避免
@@ -221,7 +218,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
     "provenance": {
       "idea_id": "20260511T143000Z__turnover-conditioned-pv",
       "stage2_payload_sha256": "...",
-      "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+      "audience_chain": ["claude", "codex", "web_gpt_stage2"]
     }
   }
 }

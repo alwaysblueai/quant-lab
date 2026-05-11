@@ -49,7 +49,7 @@ _FORBIDDEN_LEVEL3_TOKENS: tuple[str, ...] = (
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _KNOWN_AUDIENCES: frozenset[str] = frozenset(
-    {"claude_mechanism", "codex_review", "web_gpt_stage2"}
+    {"claude", "codex", "web_gpt_stage2"}
 )
 
 

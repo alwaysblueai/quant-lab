@@ -139,7 +139,7 @@ def test_validate_draft_factor_accepts_complete_provenance(tmp_path: Path) -> No
         provenance={
             "idea_id": "20260511T120000Z__signed-jump",
             "stage2_payload_sha256": "a" * 64,
-            "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"],
+            "audience_chain": ["claude", "codex", "web_gpt_stage2"],
         },
     )
     result = validate_draft_factor_file(
@@ -186,7 +186,7 @@ def test_custom_factor_source_passes_provenance_to_audit(tmp_path: Path) -> None
         VALID_CODE,
         provenance={
             "idea_id": "20260511T130000Z__audited",
-            "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"],
+            "audience_chain": ["claude", "codex", "web_gpt_stage2"],
         },
     )
     source = read_custom_factor_source(factor_json)

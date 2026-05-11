@@ -19,13 +19,9 @@ from alpha_lab.research_bridge.scoring import (
     SIGNAL_MAPPING,
 )
 from alpha_lab.research_bridge.service import (
-    ExploreIdeaCard,
-    ExploreIdeaResult,
     _build_factor_recipe_signal_mapping_prompt,
     _build_factor_recipe_validation_kill_tests_prompt,
-    _render_idea_model_dispatch,
     apply_writeback,
-    draft_idea,
     explore_idea,
     init_project,
     normalize_fast_decision_log,
@@ -894,107 +890,6 @@ def test_explore_idea_constrained_prompt_requires_score_component_rationale(
     prompt = result.to_payload()["gpt_prompt"]
 
     assert "constrained 模式下，引用某张卡片时必须说明你主要依赖哪个检索分量" in prompt
-
-
-def test_draft_idea_prepares_dual_engine_additive_artifacts(tmp_path: Path) -> None:
-    vault = _build_vault_with_uses_data(tmp_path)
-    workspace = tmp_path / "workspace"
-
-    result = draft_idea(
-        vault_root=vault,
-        idea="跨领域成交额机制",
-        models="claude,codex",
-        mode="start",
-        workspace_root=workspace,
-    )
-
-    assert result.shared_prompt_path.exists()
-    assert set(result.ledger_paths) == {"claude", "codex"}
-    assert not result.ledger_paths["claude"].exists()
-    assert not result.ledger_paths["codex"].exists()
-    assert not result.final_ledger_path.exists()
-    assert result.reconcile_path.exists()
-    assert result.retrieval_log_path.exists()
-    assert result.manifest_path.exists()
-
-    reconcile = result.reconcile_path.read_text(encoding="utf-8")
-    # New symmetric protocol: 两引擎对称执行同一任务（generator + reviewer 合一）.
-    assert "两引擎对称执行同一任务" in reconcile
-    assert "stage1_claude.md" in reconcile
-    assert "stage1_codex.md" in reconcile
-    assert "factor_json_payload" in reconcile
-    assert "## union" not in reconcile  # legacy two-ledger sections removed
-    assert "## fusion_candidates" not in reconcile
-
-    codex_dispatch = result.model_dispatch_paths["codex"].read_text(encoding="utf-8")
-    # The codex prompt now carries the same symmetric task as claude's, with
-    # only the self-identification line differing.
-    assert "Stage 1 Prompt — Codex GUI" in codex_dispatch
-    assert "你是 **Codex GUI**" in codex_dispatch
-    assert "generator + reviewer 合一" in codex_dispatch
-    assert "Part A — Mechanism candidates (generator)" in codex_dispatch
-    assert "Part B — Code feasibility review (reviewer)" in codex_dispatch
-    assert "代码库索引" in codex_dispatch
-    assert "factor.json required keys" in codex_dispatch  # lab=single_factor
-    assert "factor validator 硬规则" in codex_dispatch
-    assert f"vault_root：`{vault}`" in codex_dispatch
-    # Old asymmetric / generator-bias text must not survive.
-    assert "偏广度迁移" not in codex_dispatch
-    assert "你是 Stage 1 **reviewer**" not in codex_dispatch
-    assert "ledger_v1.codex.yaml" not in codex_dispatch
-
-
-def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> None:
-    result = ExploreIdeaResult(
-        idea="下跌冲击后承接观察",
-        mode="start",
-        related_cards=[
-            ExploreIdeaCard(
-                path="40_papers/Paper - Example.md",
-                name="Example Card",
-                type="paper",
-                lifecycle="theoretical",
-                mechanism="microstructure",
-                factor_family="liquidity",
-                summary="一张测试卡。",
-                snippet="",
-                reasons=[],
-                transferable_moves=["id: move one_line: 可迁移动作。"],
-            )
-        ],
-        constraint_report={},
-        gpt_prompt="",
-        insight_brief=[
-            "因此承接信号必须在控制普通波动率暴露后单独检验，否则是必要步骤。",
-            "建议持有期覆盖1-",
-            "提示可在月度调仓节点",
-        ],
-        retrieval_diagnostics={},
-    )
-
-    dispatch = _render_idea_model_dispatch(
-        model="claude",
-        idea=result.idea,
-        result=result,
-        draft_dir=tmp_path,
-        vault_root=tmp_path / "quant-knowledge",
-    )
-
-    # New symmetric engine prompt: header carries engine self-id, body contains
-    # both Part A (generator) and Part B (reviewer); insight-brief softening
-    # transform (收敛/可探索) still applied to cross-card synthesis lines.
-    assert "Stage 1 Prompt — Claude Code" in dispatch
-    assert "你是 **Claude Code**" in dispatch
-    assert "generator + reviewer 合一" in dispatch
-    assert "vault_root：" in dispatch
-    assert "### Cross-card synthesis" in dispatch
-    # Insight filter still drops incomplete synthesis lines.
-    assert "建议持有期覆盖1-" not in dispatch
-    assert "提示可在月度调仓节点" not in dispatch
-    # Complete sentences survive (with the generation-material softening:
-    # 必须在 → 可尝试在, 否则是 → 对应的 concern 是).
-    assert "可尝试在控制普通波动率暴露后单独检验" in dispatch
-    assert "对应的 concern 是可选构建分支" in dispatch
 
 
 def test_model_idea_exploration_prompt_matches_byte_golden() -> None:

@@ -1,4 +1,4 @@
-"""Tests for the Stage 0 audience-based distribution + Stage 4 experiment-card.
+"""Tests for the Stage 0 engine-based distribution + Stage 4 experiment-card.
 
 Covers:
 - ``engine_prompts.build_prompt`` symmetric task (Claude Code + Codex GUI

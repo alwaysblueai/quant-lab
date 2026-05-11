@@ -220,47 +220,6 @@ def test_unified_cli_routes_bridge_command(monkeypatch: pytest.MonkeyPatch) -> N
     ]
 
 
-def test_unified_cli_routes_idea_draft_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-
-    class _FakeDraftResult:
-        models = ("claude", "codex")
-        draft_dir = Path("/tmp/draft")
-        shared_prompt_path = Path("/tmp/draft/prompt.shared.md")
-        reconcile_path = Path("/tmp/draft/reconcile.md")
-
-        def to_payload(self) -> dict[str, object]:
-            return {"stage": "mechanism_discovery"}
-
-    def _fake_draft_idea(**kwargs: Any) -> _FakeDraftResult:
-        captured.update(kwargs)
-        return _FakeDraftResult()
-
-    monkeypatch.setattr("alpha_lab.research_bridge.service.draft_idea", _fake_draft_idea)
-
-    rc = main(
-        [
-            "idea",
-            "draft",
-            "--idea",
-            "跨领域成交额机制",
-            "--models",
-            "claude,codex",
-            "--mode",
-            "start",
-            "--vault-root",
-            "/tmp/vault",
-        ]
-    )
-
-    assert rc == 0
-    assert captured["idea"] == "跨领域成交额机制"
-    assert captured["models"] == "claude,codex"
-    assert captured["mode"] == "start"
-    assert captured["stage"] == "mechanism_discovery"
-    assert captured["vault_root"] == "/tmp/vault"
-
-
 def test_unified_cli_routes_vault_command(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

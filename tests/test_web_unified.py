@@ -1376,93 +1376,6 @@ def test_model_lab_source_list_tolerates_missing_registered_file(
     ]
 
 
-def test_model_lab_idea_explorer_service_round_trip(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-    specs_dir = tmp_path / "configs" / "real_cases" / "model_factor"
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    spec_path = write_demo_model_factor_case(specs_dir, factor_name="web_model_lab_idea")
-    renamed = spec_path.with_name("web_model_lab_idea.yaml")
-    spec_path.rename(renamed)
-
-    first = svc.explore_model_lab_idea(
-        {
-            "idea": "Build a turnover-aware ridge baseline with strict PIT checks.",
-            "mode": "constrained",
-            "spec_name": "web_model_lab_idea.yaml",
-            "save_session": True,
-        }
-    )
-    assert first["ok"] is True
-    assert first["session_saved"] is True
-    assert isinstance(first["session"], dict)
-    first_session_id = str(first["session"]["session_id"])
-    assert first_session_id
-
-    second = svc.explore_model_lab_idea(
-        {
-            "idea": "Try lightgbm with industry grouping and turnover penalty.",
-            "mode": "constrained",
-            "spec_name": "web_model_lab_idea.yaml",
-            "memory_limit": 3,
-            "save_session": True,
-        }
-    )
-    assert second["ok"] is True
-    extras = second["constraint_report"]["recommendations"]["extras"]
-    assert extras["session_memory_status"] == "loaded"
-    assert isinstance(extras["session_memory"], list)
-    assert len(extras["session_memory"]) >= 1
-
-    sessions = svc.list_model_lab_idea_sessions(limit=10)
-    assert any(str(item.get("session_id")) == first_session_id for item in sessions)
-
-    payload = svc.read_model_lab_idea_session(first_session_id)
-    assert payload["session_id"] == first_session_id
-    assert payload["idea"] == first["idea"]
-    assert "gpt_prompt" in payload
-
-    deleted = svc.delete_model_lab_idea_session(first_session_id)
-    assert deleted["archived"] is True
-    assert not any(
-        str(item.get("session_id")) == first_session_id
-        for item in svc.list_model_lab_idea_sessions(limit=10)
-    )
-
-
-def test_model_lab_idea_explorer_apply_patch_hint_service(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    spec_content = "\n".join(
-        [
-            "name: patch_case",
-            "factor_name: patch_factor",
-            "model:",
-            "  family: ridge",
-            "  params:",
-            "    alpha: 1.0",
-        ]
-    )
-    patch_hint = {
-        "summary": "switch model family",
-        "requires_code_change": False,
-        "patch_fields": {"model": {"family": "lightgbm"}},
-    }
-
-    result = svc.apply_model_lab_spec_patch_hint(
-        {
-            "spec_content": spec_content,
-            "patch_hint": patch_hint,
-        }
-    )
-    assert result["ok"] is True
-    merged = yaml.safe_load(result["content"])
-    assert merged["name"] == "patch_case"
-    assert merged["factor_name"] == "patch_factor"
-    assert merged["model"]["family"] == "lightgbm"
-
-
 def test_project_factor_diagnostics_returns_heatmap_and_redundancy_warnings(
     tmp_path: Path,
 ) -> None:
@@ -1785,31 +1698,33 @@ def test_index_html_factor_workshop_baseline_tables_are_constrained() -> None:
     assert "overflow-wrap: anywhere" in html
 
 
-def test_index_html_keeps_alpha_explorer_on_v1_draft_flow_only() -> None:
+def test_index_html_uses_stage0_distribute_without_legacy_idea_draft() -> None:
     html = _index_html_raw()
 
-    assert 'id="btnExploreGenerateFactorDraft"' in html
-    assert 'id="exploreMechanismIndexStatus"' in html
-    assert "/api/settings/mechanism-index" in html
-    assert "generateFactorDraftFromExplore" in html
-    assert 'id="exploreDraftAgentPanel"' in html
-    assert 'id="exploreDraftAgentPanelBody"' in html
-    assert "copyExploreDraftAgentPrompt" in html
-    assert "Markdown-only" in html
-    assert 'api("/api/vault/idea-draft", "POST"' in html
-    assert "minimal_artifacts: true" in html
-    assert "compactRetrievalCardsForPrompt" in html
-    assert "isCompletePromptBullet" in html
-    assert "compactCrossCardSynthesisForPrompt" in html
-    assert "vault_root" in html
-    assert "### Cross-card synthesis" in html
-    assert "stage1GenerationMaterialText" in html
-    assert "## 5. Markdown" in html
-    assert "/api/vault/idea-draft/final-ledger" not in html
-    assert "/api/vault/idea-draft/status" not in html
-    assert "saveExploreDraftFinalLedger" not in html
-    assert "data-role=\"idea-draft-final-ledger-input\"" not in html
-    assert "refreshIdeaDraftStatus" not in html
+    assert 'id="stage0DistributePanel"' in html
+    assert 'id="stage0IdeaInput"' in html
+    assert 'id="btnStage0Distribute"' in html
+    assert 'id="stage0Results"' in html
+    assert "/api/vault/idea-distribute" in html
+    assert "Stage 0: Idea Distribute (single_factor)" in html
+
+    assert "Stage 0 (legacy): Idea Draft" not in html
+    assert "想法探索器 / Idea Draft (legacy)" not in html
+    assert "旧 ledger-style 输出" not in html
+    assert 'id="btnExploreGenerateFactorDraft"' not in html
+    assert 'id="exploreIdea"' not in html
+    assert 'id="exploreMechanismIndexStatus"' not in html
+    assert "/api/settings/mechanism-index" not in html
+    assert "generateFactorDraftFromExplore" not in html
+    assert 'id="exploreDraftAgentPanel"' not in html
+    assert 'id="exploreDraftAgentPanelBody"' not in html
+    assert "copyExploreDraftAgentPrompt" not in html
+    assert 'api("/api/vault/idea-draft", "POST"' not in html
+    assert "minimal_artifacts: true" not in html
+    assert "compactRetrievalCardsForPrompt" not in html
+    assert "isCompletePromptBullet" not in html
+    assert "compactCrossCardSynthesisForPrompt" not in html
+    assert "stage1GenerationMaterialText" not in html
     assert "ledger_v1.${model}.yaml" not in html
 
     assert "Knowledge Writeback Queue" in html
@@ -1846,136 +1761,31 @@ def test_index_html_keeps_alpha_explorer_on_v1_draft_flow_only() -> None:
     assert "renderExploreLintReport" not in html
     assert "setExploreRecordSession" not in html
     assert "copyExploreDraftReconcilePrompt" not in html
-    assert "retrieval_log.md" not in html
 
 
-def test_idea_draft_status_detects_filled_ledgers(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    draft = svc.create_idea_draft(
-        idea="高波动下跌日之后的流动性承接",
-        models=["claude", "codex"],
-        top_k=2,
-    )
-    status = svc.read_idea_draft_status(str(draft["manifest_path"]))
-
-    assert status["ok"] is True
-    assert status["reconcile_ready"] is False
-    assert status["ledgers_ready"] is False
-    ledger_status = cast(list[dict[str, Any]], status["ledger_status"])
-    by_model = {str(item["model"]): item for item in ledger_status}
-    assert by_model["claude"]["status"] == "pending_input"
-    assert by_model["codex"]["status"] == "pending_input"
-
-    filled_ledger = """mechanisms:
-  - id: liquidity_absorption_after_selloff
-    hypothesis: "下跌日的高波动若伴随承接，后续压力可能衰减。"
-    inspired_by:
-      - card: "30_factors/Factor - Momentum Base.md"
-        what_i_took: "把动量衰减改写为承接后的压力释放。"
-    fusion_of: []
-    novel_delta: "从单纯下跌延续转为下跌后吸收。"
-    signal_sketch: "down_day * intraday_range_z * close_to_low_recovery"
-    data_needs:
-      - close
-      - volume
-    concern: "需要确认不是短期反转的换壳。"
-"""
-    for ledger_path in cast(dict[str, str], draft["ledger_paths"]).values():
-        Path(ledger_path).write_text(filled_ledger, encoding="utf-8")
-
-    refreshed = svc.read_idea_draft_status(str(draft["manifest_path"]))
-    assert refreshed["reconcile_ready"] is True
-    assert refreshed["ledgers_ready"] is True
-    refreshed_status = cast(list[dict[str, Any]], refreshed["ledger_status"])
-    for item in refreshed_status:
-        assert item["filled"] is True
-        assert item["complete_mechanism_count"] == 1
-
-
-def test_idea_draft_minimal_artifacts_returns_markdown_prompts_only(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    draft = svc.create_idea_draft(
-        idea="overnight gap absorption",
-        models=["claude", "codex"],
-        top_k=2,
-        minimal_artifacts=True,
-    )
-
-    draft_dir = Path(str(draft["draft_dir"]))
-    assert sorted(path.name for path in draft_dir.iterdir()) == []
-    assert draft["minimal_artifacts"] is True
-    assert draft["support_files_written"] is False
-    assert draft["vault_root"] == str(vault)
-    assert draft["manifest_path"] == ""
-
-    artifacts = cast(dict[str, Any], draft["artifacts"])
-    dispatch_entries = cast(list[dict[str, Any]], artifacts["model_dispatch"])
-    assert len(dispatch_entries) == 2
-    assert all(not str(entry["path"]) for entry in dispatch_entries)
-    for entry in dispatch_entries:
-        content = str(entry["content"])
-        # New symmetric engine prompts: both contain Part A + Part B contract
-        # and reference the per-engine output file (stage1_<engine>.md).
-        assert "generator + reviewer 合一" in content
-        assert "Part A" in content and "Part B" in content
-        assert "stage1_" in content
-        # Old asymmetric / generator-bias / write-anywhere phrasing must be gone.
-        assert "ledger_v1" not in content
-        assert "write files" not in content
-
-    ledger_entries = cast(list[dict[str, Any]], artifacts["ledgers"])
-    assert {entry["status"] for entry in ledger_entries} == {"pending_input"}
-    assert {entry["filled"] for entry in ledger_entries} == {False}
-
-
-def test_index_html_exposes_claude_key_settings() -> None:
+def test_index_html_has_no_frontend_idea_draft_route() -> None:
     html = _index_html_raw()
 
-    dashboard_idx = html.index('id="view-dashboard"')
-    bridge_idx = html.index('id="view-bridge"')
-    key_idx = html.index('id="claudeApiKeyInput"')
-    url_idx = html.index('id="claudeApiUrlInput"')
-    assert dashboard_idx < key_idx < bridge_idx
-    assert dashboard_idx < url_idx < bridge_idx
-    assert 'id="claudeApiKeyInput"' in html
-    assert 'id="claudeApiUrlInput"' in html
-    assert 'id="researchBridgeV2Toggle"' in html
-    assert 'id="btnSaveClaudeKey"' in html
-    assert 'id="btnClearClaudeKey"' in html
-    assert "/api/settings/llm" in html
-    assert "loadLlmSettings" in html
-    assert "saveLlmSettings" in html
-    assert "loadMechanismIndexStatus" in html
-
-
-def test_index_html_v1_draft_opens_results_without_legacy_prompt_render() -> None:
-    html = _index_html_raw()
-
-    assert 'api("/api/vault/idea-draft", "POST"' in html
-    assert 'resultsEl.style.display = "block"' in html
-    assert 'rightPane.style.display = "block"' in html
-    assert 'switchExploreRightTab("draft")' in html
-    assert "renderExploreDraftAgentPanel" in html
-    assert "copyExploreDraftAgentPrompt" in html
+    assert "/api/vault/idea-draft" not in html
+    assert "generateIdeaDraftFromExplore" not in html
+    assert "generateFactorDraftFromExplore" not in html
+    assert "renderExploreDraftAgentPanel" not in html
+    assert "copyExploreDraftAgentPrompt" not in html
     assert "const promptBox = $(\"explorePromptBox\");" not in html
     assert "previewExploreCard" not in html
 
 
-def test_index_html_uses_automatic_explore_stage_defaults() -> None:
+def test_index_html_removes_legacy_explore_stage_defaults() -> None:
     html = _index_html_raw()
 
     assert 'name="exploreMode"' not in html
     assert 'name="exploreStage"' not in html
     assert 'id="exploreInjectDrift"' not in html
     assert 'id="explorePersistSession"' not in html
-    assert "function autoExploreStage" in html
-    assert "function autoExploreMode" in html
-    assert "persist_session: true" in html
-    assert 'models: ["claude", "codex"]' in html
+    assert "function autoExploreStage" not in html
+    assert "function autoExploreMode" not in html
+    assert "persist_session: true" not in html
+    assert 'models: ["claude", "codex"]' not in html
 
 
 def test_index_html_escapes_script_close_tag_in_print_template() -> None:
@@ -2416,167 +2226,6 @@ def test_list_evaluation_profiles_has_default(tmp_path: Path) -> None:
     assert "profiles" in result
     assert "default_research" in result["profiles"]
     assert result["default_profile"] is not None
-
-
-# ---------------------------------------------------------------------------
-# Knowledge Ops: explore_idea
-# ---------------------------------------------------------------------------
-
-
-def test_explore_idea_start_mode_returns_kickoff_prompt(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea("momentum reversal 动量 反转", "start")
-
-    assert result["mode"] == "start"
-    assert isinstance(result["related_cards"], list)
-    assert isinstance(result["gpt_prompt"], str)
-    assert "Research Kickoff" in result["gpt_prompt"]
-    assert "You are in the research kickoff stage." in result["gpt_prompt"]
-    assert "Your goal is to expand the hypothesis space, not to converge." in result["gpt_prompt"]
-    assert "不允许输出最终因子定义或收敛结论" in result["gpt_prompt"]
-    assert "不要给 keep/kill 结论" in result["gpt_prompt"]
-    assert (
-        "inspired_by` / `fusion_of` / `cross_domain_jump` 都是可选溯源字段"
-        in result["gpt_prompt"]
-    )
-    assert "无来源不算缺口" in result["gpt_prompt"]
-    assert len(result["related_cards"]) >= 1
-    assert result["constraint_report"] == {}
-
-
-def test_explore_idea_free_mode_returns_structured_prompt(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea("momentum reversal 动量 反转", "free")
-
-    assert result["mode"] == "free"
-    assert isinstance(result["related_cards"], list)
-    assert isinstance(result["gpt_prompt"], str)
-    assert "Structured Exploration" in result["gpt_prompt"]
-    assert (
-        "允许写候选表达式，但不允许做最终选择、ranking 或输出 single best idea。"
-        in result["gpt_prompt"]
-    )
-    assert "[候选表达]" in result["gpt_prompt"]
-    assert "[风险识别]" in result["gpt_prompt"]
-    assert "[与已有因子的差异]" in result["gpt_prompt"]
-    assert "不要做最终选择，不要 ranking，不要收敛到单一结论。" in result["gpt_prompt"]
-    # momentum / reversal tags should match at least one card
-    assert len(result["related_cards"]) >= 1
-    assert result["constraint_report"] == {}
-
-
-def test_explore_idea_constrained_mode_returns_report(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea("动量", "constrained")
-
-    assert result["mode"] == "constrained"
-    assert "Graph 约束模式（硬约束）" in result["gpt_prompt"]
-    assert "你只能使用以下数据节点与算子构造信号，不允许引入新变量。" in result["gpt_prompt"]
-    assert "少而精但不做 kill" in result["gpt_prompt"]
-    assert "候选只增不减" in result["gpt_prompt"]
-    assert "评分只用于后续排序参考，不产生 keep/kill" in result["gpt_prompt"]
-    assert "- close" in result["gpt_prompt"]
-    assert "- volume" in result["gpt_prompt"]
-    cr = result["constraint_report"]
-    assert isinstance(cr, dict)
-    # keys must be present regardless of vault content
-    assert "primary_family" in cr
-    assert "primary_mechanism" in cr
-    assert "family_counts" in cr
-    assert "crowding_warning" in cr
-
-
-def test_explore_idea_empty_raises(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    with pytest.raises(ValueError):
-        svc.explore_idea("", "free")
-
-
-def test_record_explore_response_persists_lint_report(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea(
-        "非对称上下行 realized volatility",
-        "free",
-        stage="mechanism_discovery",
-        persist_session=True,
-    )
-    diagnostics = result["retrieval_diagnostics"]
-    assert isinstance(diagnostics, dict)
-    session_id = str(diagnostics.get("session_id") or "")
-    assert session_id
-
-    recorded = svc.record_explore_response(session_id, "这是一段缺少结构段的响应。")
-
-    assert recorded["ok"] is True
-    assert recorded["session_id"] == session_id
-    lint_report = recorded["lint_report"]
-    assert isinstance(lint_report, dict)
-    assert lint_report["stage"] == "mechanism_discovery"
-    assert lint_report["has_errors"] is True
-    assert any(v["code"] == "missing_section" for v in lint_report["violations"])
-
-    sessions = svc.list_explore_sessions(limit=10)
-    assert any(str(item.get("session_id")) == session_id for item in sessions)
-    loaded = svc.read_explore_session(session_id)
-    assert loaded["session_id"] == session_id
-    assert loaded["response"]
-    assert loaded["lint_report"]["has_errors"] is True
-    assert isinstance(loaded.get("related_cards"), list)
-
-    deleted = svc.delete_explore_session(session_id)
-    assert deleted["archived"] is True
-    assert not any(
-        str(item.get("session_id")) == session_id
-        for item in svc.list_explore_sessions(limit=10)
-    )
-
-
-def test_explore_idea_unknown_mode_defaults_to_free(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea("IC 信息系数", "banana")
-    assert result["mode"] == "free"
-
-
-def test_explore_idea_discussion_alias_maps_to_start(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-
-    result = svc.explore_idea("动量", "discussion")
-    assert result["mode"] == "start"
-
-
-def test_explore_idea_accepts_project_slug(tmp_path: Path) -> None:
-    vault = _build_vault(tmp_path)
-    svc = _make_service(tmp_path, vault)
-    svc.create_project(
-        {
-            "slug": "test-momentum",
-            "title_zh": "动量测试项目",
-            "category": "factor_recipe",
-            "owner": "test",
-            "market": "ashare",
-            "frequency": "daily",
-            "chatgpt_project_name": "Test Momentum",
-            "origin_cards": ["30_factors/Factor - Momentum Base.md"],
-        }
-    )
-
-    result = svc.explore_idea("momentum 动量", "constrained", "test-momentum")
-
-    assert result["mode"] == "constrained"
-    assert result["related_cards"]
 
 
 # ---------------------------------------------------------------------------

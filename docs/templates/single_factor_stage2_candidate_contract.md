@@ -60,7 +60,7 @@ stage: "stage2_candidate"
 provenance:
   idea_id: ""
   stage2_payload_sha256: ""           # sha256 of canonical-JSON(factor_json_payload), filled by GPT
-  audience_chain: ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+  audience_chain: ["claude", "codex", "web_gpt_stage2"]
 human_summary:
   factor_name: ""
   implemented_mechanism_ids: []
@@ -82,7 +82,7 @@ factor_json_payload:
   provenance:
     idea_id: ""
     stage2_payload_sha256: ""
-    audience_chain: ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+    audience_chain: ["claude", "codex", "web_gpt_stage2"]
 deferred_mechanisms:
   - mechanism_id: ""
     status: "needs_extension | future_enhancement | rejected_for_v1"

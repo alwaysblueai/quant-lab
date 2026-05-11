@@ -462,120 +462,31 @@ def test_evaluation_profiles_route(live_server: tuple[str, _UnifiedService]) -> 
 
 
 # ---------------------------------------------------------------------------
-# /api/vault/explore-idea
+# Removed legacy idea explorer routes
 # ---------------------------------------------------------------------------
 
 
-def test_explore_idea_free_route(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, _ = live_server
-    status, data = _post(
-        base_url, "/api/vault/explore-idea", {"idea": "momentum 动量", "mode": "free"}
-    )
-    assert status == 200
-    assert isinstance(data, dict)
-    assert data["mode"] == "free"
-    assert isinstance(data["related_cards"], list)
-    assert isinstance(data["gpt_prompt"], str)
-    assert data["gpt_prompt"].strip()
-
-
-def test_explore_idea_constrained_route(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, _ = live_server
-    status, data = _post(
-        base_url, "/api/vault/explore-idea", {"idea": "动量", "mode": "constrained"}
-    )
-    assert status == 200
-    assert isinstance(data, dict)
-    assert data["mode"] == "constrained"
-    cr = data["constraint_report"]
-    assert isinstance(cr, dict)
-    assert "crowding_warning" in cr
-
-
-def test_explore_idea_route_accepts_project_slug(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, svc = live_server
-    svc.create_project(
-        {
-            "slug": "http-momentum",
-            "title_zh": "HTTP 动量项目",
-            "category": "factor_recipe",
-            "owner": "test",
-            "market": "ashare",
-            "frequency": "daily",
-            "chatgpt_project_name": "HTTP Momentum",
-            "origin_cards": ["30_factors/Factor - Momentum Base.md"],
-        }
-    )
-
-    status, data = _post(
-        base_url,
-        "/api/vault/explore-idea",
-        {"idea": "momentum 动量", "mode": "free", "project_slug": "http-momentum"},
-    )
-    assert status == 200
-    assert isinstance(data, dict)
-    assert data["mode"] == "free"
-
-
-def test_explore_idea_empty_body_returns_error(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, _ = live_server
-    status, data = _post(base_url, "/api/vault/explore-idea", {"idea": "", "mode": "free"})
-    assert status in (400, 422, 500)
-    assert isinstance(data, dict)
-    assert data.get("ok") is False
-
-
-def test_record_explore_response_route_persists_lint(
+def test_legacy_vault_idea_explorer_routes_are_removed(
     live_server: tuple[str, _UnifiedService],
 ) -> None:
     base_url, _ = live_server
-    status, explored = _post(
-        base_url,
-        "/api/vault/explore-idea",
-        {
-            "idea": "非对称上下行 realized volatility",
-            "mode": "free",
-            "stage": "mechanism_discovery",
-            "persist_session": True,
-        },
-    )
-    assert status == 200
-    assert isinstance(explored, dict)
-    diagnostics = explored["retrieval_diagnostics"]
-    assert isinstance(diagnostics, dict)
-    session_id = str(diagnostics.get("session_id") or "")
-    assert session_id
 
-    status, recorded = _post(
-        base_url,
-        "/api/vault/record-explore-response",
-        {"session_id": session_id, "response_text": "这是一段缺少结构段的响应。"},
-    )
-
-    assert status == 200
-    assert isinstance(recorded, dict)
-    assert recorded["ok"] is True
-    assert recorded["session_id"] == session_id
-    lint_report = recorded["lint_report"]
-    assert isinstance(lint_report, dict)
-    assert lint_report["stage"] == "mechanism_discovery"
-    assert lint_report["has_errors"] is True
-    assert any(v["code"] == "missing_section" for v in lint_report["violations"])
-
-    status, sessions = _get(base_url, "/api/vault/explore-sessions?limit=10")
-    assert status == 200
-    assert isinstance(sessions, dict)
-    assert any(str(item.get("session_id")) == session_id for item in sessions["sessions"])
-
-    status, loaded = _get(base_url, f"/api/vault/explore-sessions/{session_id}")
-    assert status == 200
-    assert isinstance(loaded, dict)
-    assert loaded["session_id"] == session_id
-    assert loaded["response"]
-    assert loaded["lint_report"]["has_errors"] is True
-    assert isinstance(loaded.get("related_cards"), list)
-
-
+    for path, method in (
+        ("/api/vault/explore-idea", "POST"),
+        ("/api/vault/record-explore-response", "POST"),
+        ("/api/vault/explore-sessions?limit=10", "GET"),
+        ("/api/vault/explore-sessions/example", "GET"),
+        ("/api/vault/explore-sessions/example", "DELETE"),
+    ):
+        if method == "GET":
+            status, data = _get(base_url, path)
+        elif method == "DELETE":
+            status, data = _delete(base_url, path)
+        else:
+            status, data = _post(base_url, path, {"idea": "legacy"})
+        assert status == 404
+        assert isinstance(data, dict)
+        assert data.get("ok") is False
 # ---------------------------------------------------------------------------
 # Project-scoped routes (need a project first)
 # ---------------------------------------------------------------------------
@@ -1364,143 +1275,29 @@ def test_model_lab_spec_routes(live_server: tuple[str, _UnifiedService], tmp_pat
     assert "alpha: 3.0" in spec_path.read_text(encoding="utf-8")
 
 
-def test_model_lab_idea_explorer_routes(live_server: tuple[str, _UnifiedService]) -> None:
-    base_url, svc = live_server
-    specs_dir = svc.workspace_root / "configs" / "real_cases" / "model_factor"
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    spec_path = specs_dir / "http_model_lab_idea.yaml"
-    spec_path.write_text(
-        "\n".join(
-            [
-                "name: http_model_lab_idea_case",
-                "factor_name: http_model_lab_idea",
-                "features_path: ./features.csv",
-                "feature_columns: [feature_a]",
-                "prices_path: ./prices.csv",
-                "rebalance_frequency: W",
-                "n_quantiles: 5",
-                "direction: long",
-                "universe: {name: default}",
-                "target: {kind: forward_return, horizon: 5}",
-                "feature_preprocess: {missing_policy: median_impute, scale_features: auto}",
-                "model: {family: ridge, params: {alpha: 1.0}}",
-                "training:",
-                "  window_type: rolling",
-                "  train_window_n_dates: 60",
-                "  min_train_dates: 40",
-                "  min_train_rows: 200",
-                "  retrain_every_n_dates: 5",
-                "  min_score_assets: 5",
-                "neutralization: {enabled: false}",
-                "transaction_cost: {one_way_rate: 0.001}",
-                "output: {root_dir: ./outputs}",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
-    status, explored = _post(
-        base_url,
-        "/api/model-lab/idea-explorer/explore",
-        {
-            "idea": "Try turnover-aware ridge baseline for panel data.",
-            "mode": "constrained",
-            "spec_name": "http_model_lab_idea.yaml",
-            "save_session": True,
-        },
-    )
-    assert status == 200
-    assert isinstance(explored, dict)
-    assert explored["ok"] is True
-    assert explored["session_saved"] is True
-    assert isinstance(explored["session"], dict)
-    session_id = str(explored["session"]["session_id"])
-    assert session_id
-    assert "gpt_prompt" in explored
-    assert [row["agent"] for row in explored["agent_prompts"]] == ["claude", "codex"]
-    codex_prompt = str(explored["agent_prompts"][1]["prompt"])
-    assert "safe_bfq" in codex_prompt or "feature_columns" in codex_prompt
-    assert "已有 model-factor specs" in codex_prompt
-    assert "已有 factor 数据" in codex_prompt
-    assert "http_model_lab_idea_case" in codex_prompt
-    recommendations = explored["constraint_report"]["recommendations"]
-    extras = recommendations["extras"]
-    assert any(
-        item["name"] == "http_model_lab_idea_case"
-        for item in extras["existing_model_specs"]
-    )
-    assert extras["factor_inventory"]["baseline_factors"]
-    assert extras["factor_inventory"]["builtin_methods"]
-
-    status2, sessions = _get(base_url, "/api/model-lab/idea-explorer/sessions?limit=10")
-    assert status2 == 200
-    assert isinstance(sessions, dict)
-    assert any(str(item.get("session_id")) == session_id for item in sessions["sessions"])
-
-    status3, session_payload = _get(
-        base_url,
-        f"/api/model-lab/idea-explorer/sessions/{session_id}",
-    )
-    assert status3 == 200
-    assert isinstance(session_payload, dict)
-    assert session_payload["session_id"] == session_id
-    assert "constraint_report" in session_payload
-
-    status4, recorded = _post(
-        base_url,
-        "/api/model-lab/idea-explorer/record-response",
-        {
-            "session_id": session_id,
-            "response_text": "[模型机制候选]\n只有一段，故意缺少其余结构。",
-        },
-    )
-    assert status4 == 200
-    assert isinstance(recorded, dict)
-    assert recorded["ok"] is True
-    assert recorded["session_id"] == session_id
-    assert recorded["lint_report"]["has_errors"] is True
-
-    status5, updated_session = _get(
-        base_url,
-        f"/api/model-lab/idea-explorer/sessions/{session_id}",
-    )
-    assert status5 == 200
-    assert isinstance(updated_session, dict)
-    assert updated_session["response"]
-    assert updated_session["lint_report"]["has_errors"] is True
-
-
-def test_model_lab_idea_explorer_apply_patch_hint_route(
+def test_legacy_model_lab_idea_explorer_routes_are_removed(
     live_server: tuple[str, _UnifiedService],
 ) -> None:
     base_url, _ = live_server
-    status, payload = _post(
-        base_url,
-        "/api/model-lab/idea-explorer/apply-patch-hint",
-        {
-            "spec_content": "\n".join(
-                [
-                    "name: patch_case",
-                    "factor_name: patch_factor",
-                    "model:",
-                    "  family: ridge",
-                    "  params:",
-                    "    alpha: 1.0",
-                ]
-            ),
-            "patch_hint": {
-                "summary": "switch model family",
-                "requires_code_change": False,
-                "patch_fields": {"model": {"family": "lightgbm"}},
-            },
-        },
-    )
-    assert status == 200
-    assert isinstance(payload, dict)
-    assert payload["ok"] is True
-    assert "family: lightgbm" in str(payload["content"])
 
+    for path, method in (
+        ("/api/model-lab/idea-explorer/explore", "POST"),
+        ("/api/model-lab/idea-explorer/record-response", "POST"),
+        ("/api/model-lab/idea-explorer/apply-patch-hint", "POST"),
+        ("/api/model-lab/idea-explorer/sessions?limit=10", "GET"),
+        ("/api/model-lab/idea-explorer/sessions/example", "GET"),
+        ("/api/model-lab/idea-explorer/sessions/example", "DELETE"),
+    ):
+        if method == "GET":
+            status, data = _get(base_url, path)
+        elif method == "DELETE":
+            status, data = _delete(base_url, path)
+        else:
+            status, data = _post(base_url, path, {"idea": "legacy"})
+        assert status == 404
+        assert isinstance(data, dict)
+        assert data.get("ok") is False
 
 def test_model_lab_run_compare_route(live_server: tuple[str, _UnifiedService]) -> None:
     base_url, svc = live_server

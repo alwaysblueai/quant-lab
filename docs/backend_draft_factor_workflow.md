@@ -8,11 +8,12 @@
 本流程接的是 `ideas/<idea_id>/stage2_payload.json`（或同等内容），上游链路：
 
 1. **Stage 0** — `alpha-lab idea distribute --idea ... --output-dir ideas/<id>/`
-   产出 retrieval pack + `prompt_claude_mechanism.md`（generator 给 Claude Code）
-   + `prompt_codex_review.md`（reviewer 给 Codex GUI）。
-2. **Stage 1** — Claude Code 输出 `mechanism_deepdive.md`，Codex GUI 输出
-   `code_feasibility_review.md`，互不可见。
-3. **Stage 2** — 网页版 GPT 接 reconcile 模板（`docs/templates/single_factor_stage1_reconcile_contract.md`）
+   产出 retrieval pack + 两份对称 engine prompts：`prompt_claude.md`
+   和 `prompt_codex.md`。
+2. **Stage 1** — Claude Code 与 Codex GUI 各自输出
+   `stage1_claude.md` / `stage1_codex.md`，两份都包含 generator + reviewer。
+3. **Stage 2** — 网页版 GPT 接 Stage 2 输入模板（`stage2_input.md`）、
+   reconcile 合同（`docs/templates/single_factor_stage1_reconcile_contract.md`）
    + Stage 2 candidate 模板（`docs/templates/single_factor_stage2_candidate_contract.md`），
    输出唯一 `factor_json_payload`，含 `provenance.idea_id` /
    `provenance.stage2_payload_sha256` / `provenance.audience_chain`。
@@ -59,7 +60,7 @@ Codex GUI 只把这个 JSON 作为落盘事实来源。
   "provenance": {
     "idea_id": "20260511T143000Z__signed-jump-reversal",
     "stage2_payload_sha256": "<sha256 of canonical-JSON Stage2 payload>",
-    "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+    "audience_chain": ["claude", "codex", "web_gpt_stage2"]
   }
 }
 ```
@@ -148,7 +149,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case single-
     "provenance": {
       "idea_id": "20260511T143000Z__signed-jump-reversal",
       "stage2_payload_sha256": "...",
-      "audience_chain": ["claude_mechanism", "codex_review", "web_gpt_stage2"]
+      "audience_chain": ["claude", "codex", "web_gpt_stage2"]
     }
   }
 }

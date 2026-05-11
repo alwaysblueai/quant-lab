@@ -56,7 +56,7 @@ stage: "stage1_reconcile"
 provenance: {}
 idea_title: ""
 candidate_slug_hint: ""
-input_agents: []
+input_engines: []
 code_feasibility_review: {}
 mechanisms: []
 stage2_entry_recommendation: {}
@@ -72,7 +72,7 @@ contract_version: "single_factor_stage1_reconcile_v1"
 stage: "stage1_reconcile"
 provenance:
   idea_id: "20260511T143000Z__signed-jump-reversal"
-  audience_chain: ["claude_mechanism", "codex_review"]
+  audience_chain: ["claude", "codex"]
   retrieval_pack_sha256: ""
 idea_title: ""
 candidate_slug_hint: ""
@@ -100,9 +100,9 @@ mechanisms:
     family: "intraday_microstructure | regime_conditioned | crowding_proxy | anchor_drift | dispersion_term_structure | other"
     implementation_status: "in_contract_factor_def | partial_in_contract | needs_extension | future_enhancement"
     stage2_priority: "primary_candidate | secondary_candidate | defer"
-    source_agents: ["claude_mechanism"]
+    source_engines: ["claude"]
     hypothesis: ""
-    agent_data_generating_story: ""
+    engine_data_generating_story: ""
     signal_sketch: ""
     required_columns: []
     pit_requirements: []

@@ -903,77 +903,15 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     idea = top.add_parser(
         "idea",
-        help="Generate Stage 1 idea-explorer draft artifacts.",
+        help="Generate Stage 0 idea distribution artifacts.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     idea_commands = idea.add_subparsers(dest="idea_action", required=True)
-    idea_draft = idea_commands.add_parser(
-        "draft",
-        help="Create shared prompt, per-model ledger placeholders, and reconcile template.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    idea_draft.add_argument("--idea", required=True, help="Natural-language idea to explore.")
-    idea_draft.add_argument(
-        "--models",
-        default="claude,codex",
-        help="Comma-separated Stage 1 engines, e.g. claude,codex.",
-    )
-    idea_draft.add_argument(
-        "--mode",
-        default="start",
-        choices=["start", "free", "constrained"],
-        help="Stage 1 prompt strictness.",
-    )
-    idea_draft.add_argument(
-        "--stage",
-        default="mechanism_discovery",
-        choices=["mechanism_discovery", "signal_mapping"],
-        help="Idea-explorer stage to draft.",
-    )
-    idea_draft.add_argument("--project", default=None, help="Optional bridge project slug.")
-    idea_draft.add_argument("--top-k", type=int, default=8, help="Retrieval depth.")
-    idea_draft.add_argument(
-        "--available-data",
-        action="append",
-        default=[],
-        help="Available data identifier. May be repeated.",
-    )
-    idea_draft.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root used for artifacts/alpha_lab_explorer/drafts.",
-    )
-    idea_draft.add_argument(
-        "--output-root",
-        default=None,
-        help="Optional draft output root. Defaults under workspace artifacts.",
-    )
-    idea_draft.add_argument(
-        "--vault-root",
-        default=None,
-        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
-    )
-    idea_draft.add_argument(
-        "--persist-session",
-        action="store_true",
-        help="Persist the shared explore prompt as an alpha_lab_explorer session.",
-    )
-    idea_draft.add_argument(
-        "--inject-recent-drift",
-        action="store_true",
-        help="Inject recent lint drift into the shared prompt.",
-    )
-    idea_draft.add_argument(
-        "--parent-session-id",
-        default=None,
-        help="Optional upstream explore session id for stage chaining.",
-    )
-
     idea_distribute = idea_commands.add_parser(
         "distribute",
         help=(
-            "Stage 0: emit retrieval pack + audience-specific prompts "
-            "(claude_mechanism / codex_review) under ideas/<idea_id>/."
+            "Stage 0: emit retrieval pack + symmetric engine prompts "
+            "(claude / codex) under ideas/<idea_id>/."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -1001,7 +939,7 @@ def build_unified_parser() -> argparse.ArgumentParser:
         "--stage",
         default="mechanism_discovery",
         choices=["mechanism_discovery", "signal_mapping"],
-        help="Idea-explorer stage to draft.",
+        help="Retrieval stage used to assemble the Stage 0 pack.",
     )
     idea_distribute.add_argument(
         "--project", default=None, help="Optional bridge project slug."
@@ -1289,38 +1227,6 @@ def unified_main(argv: list[str] | None = None) -> int:
         return bridge_main(resolved_argv_for_bridge(args))
 
     if args.top_command == "idea":
-        if args.idea_action == "draft":
-            from alpha_lab.research_bridge.service import draft_idea
-
-            available_data = list(args.available_data) if args.available_data else None
-            try:
-                result = draft_idea(
-                    vault_root=args.vault_root,
-                    idea=args.idea,
-                    models=args.models,
-                    mode=args.mode,
-                    project_slug=args.project,
-                    top_k=args.top_k,
-                    available_data=available_data,
-                    stage=args.stage,
-                    workspace_root=args.workspace_root,
-                    output_root=args.output_root,
-                    persist_session=bool(args.persist_session),
-                    inject_recent_drift=bool(args.inject_recent_drift),
-                    parent_session_id=args.parent_session_id,
-                )
-            except (ValueError, FileExistsError, OSError) as exc:
-                parser.error(str(exc))
-            payload = result.to_payload()
-            print("")
-            print("  Workflow : idea-draft (legacy; prefer 'alpha-lab idea distribute')")
-            print("  Status   : success")
-            print(f"  Stage    : {payload['stage']}")
-            print(f"  Models   : {', '.join(result.models)}")
-            print(f"  Output   : {result.draft_dir}")
-            print(f"  Shared   : {result.shared_prompt_path}")
-            print(f"  Reconcile: {result.reconcile_path}")
-            return 0
         if args.idea_action == "distribute":
             from alpha_lab.research_bridge.engine_prompts import Lab
             from alpha_lab.research_bridge.service import distribute_idea
