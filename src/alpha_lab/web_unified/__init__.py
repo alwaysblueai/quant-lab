@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
@@ -100,6 +100,14 @@ from alpha_lab.research_evaluation_config import (
 from alpha_lab.splits import preflight_split_contract, rebalance_frequency_to_step
 from alpha_lab.vault_export import export_to_vault, resolve_vault_root
 
+# Plain dataclasses + type aliases live in ``_models`` so subprocess /
+# run_store / handler splits can import them without circular deps.
+from alpha_lab.web_unified._models import RunStatus as RunStatus
+from alpha_lab.web_unified._models import RunWorkflow as RunWorkflow
+from alpha_lab.web_unified._models import _ModelLabSubprocessError as _ModelLabSubprocessError
+from alpha_lab.web_unified._models import _RunTask as _RunTask
+from alpha_lab.web_unified._models import _SubprocessCaseRunResult as _SubprocessCaseRunResult
+
 # Template + asset-path helpers live in ``_templates``; re-export everything
 # that the rest of this module (and tests / monkeypatch consumers) reaches for.
 from alpha_lab.web_unified._templates import (
@@ -122,8 +130,6 @@ from alpha_lab.web_unified._templates import (
 from alpha_lab.web_unified._templates import _md_render_js as _md_render_js
 from alpha_lab.web_unified._templates import _model_lab_html as _model_lab_html
 
-RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-RunWorkflow = Literal["single_factor", "model_factor"]
 _KNOWLEDGE_WRITEBACK_STAGES: frozenset[str] = frozenset({"stage2", "stage3", "run"})
 _KNOWLEDGE_WRITEBACK_CARD_TYPES: frozenset[str] = frozenset(
     {
@@ -589,43 +595,6 @@ class _RunRecord:
             "draft_model_candidate_name": self.draft_model_candidate_name,
             "draft_model_candidate_hash": self.draft_model_candidate_hash,
         }
-
-
-@dataclass(frozen=True)
-class _RunTask:
-    run_id: str
-    project_slug: str
-    case_name: str
-    round_id: str | None
-    spec_path: str
-    evaluation_profile: str
-    output_root_dir: str | None
-    render_report: bool
-    workflow: RunWorkflow = "single_factor"
-    note: str | None = None
-    draft_model_candidate_path: str | None = None
-    draft_model_candidate_name: str | None = None
-    draft_model_candidate_hash: str | None = None
-    screening_retrain_every_n_dates: int | None = None
-
-
-@dataclass(frozen=True)
-class _SubprocessCaseRunResult:
-    output_dir: Path
-    artifact_paths: Mapping[str, Path]
-
-
-class _ModelLabSubprocessError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        returncode: int | None,
-        hint: str,
-    ) -> None:
-        super().__init__(message)
-        self.returncode = returncode
-        self.hint = hint
 
 
 RunSuccessResult = SingleFactorCaseRunResult | _SubprocessCaseRunResult
