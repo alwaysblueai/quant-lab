@@ -3438,6 +3438,84 @@ class _UnifiedService:
             "lint_report": report.to_dict(),
         }
 
+    def create_idea_distribute(
+        self,
+        idea: str,
+        *,
+        lab: str = "single_factor",
+        engines: list[str] | tuple[str, ...] | str | None = None,
+        top_k: int = 8,
+    ) -> dict[str, object]:
+        """Stage 0 entry exposed to the unified frontend.
+
+        Calls :func:`alpha_lab.research_bridge.service.distribute_idea` and
+        returns the 5-file layout. Each file's content is read back and
+        embedded in the response so the frontend can preview + copy without
+        a follow-up GET per file.
+        """
+
+        from alpha_lab.research_bridge.engine_prompts import Lab
+        from alpha_lab.research_bridge.service import distribute_idea
+
+        if not idea.strip():
+            return {"ok": False, "error": "idea must be non-empty"}
+        try:
+            target_lab = Lab(lab)
+        except ValueError:
+            return {
+                "ok": False,
+                "error": (
+                    f"lab must be one of {[lab_value.value for lab_value in Lab]}; "
+                    f"got {lab!r}"
+                ),
+            }
+        try:
+            result = distribute_idea(
+                vault_root=self.vault_root,
+                idea=idea,
+                engines=engines,
+                lab=target_lab,
+                workspace_root=self.workspace_root,
+                top_k=top_k,
+            )
+        except (ValueError, FileExistsError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+        files: list[dict[str, str]] = []
+        for label, path in (
+            ("manifest.json", result.manifest_path),
+            ("retrieval_pack.md", result.retrieval_pack_path),
+            (
+                "prompt_claude.md",
+                result.engine_prompt_paths.get(
+                    next(iter([e for e in result.engines if e.value == "claude"]), None)
+                )
+                if any(e.value == "claude" for e in result.engines)
+                else None,
+            ),
+            (
+                "prompt_codex.md",
+                result.engine_prompt_paths.get(
+                    next(iter([e for e in result.engines if e.value == "codex"]), None)
+                )
+                if any(e.value == "codex" for e in result.engines)
+                else None,
+            ),
+            ("stage2_input.md", result.stage2_input_path),
+        ):
+            if path is None:
+                continue
+            try:
+                content = Path(path).read_text(encoding="utf-8")
+            except OSError as exc:
+                content = f"<read error: {exc}>"
+            files.append({"name": label, "path": str(path), "content": content})
+
+        payload = result.to_payload()
+        payload["ok"] = True
+        payload["files"] = files
+        return payload
+
     def create_idea_draft(
         self,
         idea: str,
@@ -5295,6 +5373,33 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                         inject_recent_drift=inject_recent_drift,
                         persist_session=persist_session,
                         parent_session_id=parent_session_id,
+                    )
+                )
+                return
+            if parsed.path == "/api/vault/idea-distribute":
+                idea = str(payload.get("idea") or "").strip()
+                lab = str(payload.get("lab") or "single_factor").strip()
+                engines = payload.get("engines")
+                top_k = _as_int(payload.get("top_k"), default=8)
+                self._send_json(
+                    self.svc.create_idea_distribute(
+                        idea=idea,
+                        lab=lab,
+                        engines=engines,
+                        top_k=top_k,
+                    )
+                )
+                return
+            if parsed.path == "/api/model-lab/idea-distribute":
+                idea = str(payload.get("idea") or "").strip()
+                engines = payload.get("engines")
+                top_k = _as_int(payload.get("top_k"), default=8)
+                self._send_json(
+                    self.svc.create_idea_distribute(
+                        idea=idea,
+                        lab="model_factor",
+                        engines=engines,
+                        top_k=top_k,
                     )
                 )
                 return

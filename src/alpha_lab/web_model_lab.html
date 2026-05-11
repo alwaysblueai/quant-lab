@@ -1950,6 +1950,20 @@
       </div>
     </div>
 
+    <div class="panel" id="stage0DistributePanel" style="margin-bottom:18px">
+      <span class="idea-stage-tag">Stage 0: Idea Distribute (model_factor)</span>
+      <h2>模糊想法 → Stage 0 分发</h2>
+      <p class="idea-prompt-hint">把模糊 model idea 粘进下方文本框，点击"调用 Stage 0 分发"。后端走 <code>alpha-lab model-idea distribute</code>（Claude API 检索 + codebase 快照），产出 <code>ideas/&lt;idea_id&gt;/</code> 下 5 个文件。两份 prompt 字节级相同（generator + reviewer 合一），粘到 Claude Code / Codex GUI 即可。</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <textarea id="stage0IdeaInput" class="candidate-payload code" spellcheck="false" placeholder="例: turnover-conditioned price-volume synthesis with regime gate…"></textarea>
+        <div class="toolbar">
+          <button class="primary" id="btnStage0Distribute">调用 Stage 0 分发</button>
+          <span id="stage0Status" class="muted" style="font-size:12px"></span>
+        </div>
+        <div id="stage0Results"></div>
+      </div>
+    </div>
+
     <div class="panel">
       <span class="idea-stage-tag">Backend-first research loop</span>
       <h2>后端迭代优先</h2>
@@ -11625,6 +11639,77 @@ ${styleText}
     $("btnRunSelectedSpecs").addEventListener("click", () => startSelectedRuns().catch((err) => showFlash(err.message, true)));
     $("btnDuplicateSpec").addEventListener("click", () => duplicateSpec().catch((err) => showFlash(err.message, true)));
     $("btnDiffSpec").addEventListener("click", () => diffSpecs().catch((err) => showFlash(err.message, true)));
+    // Stage 0 distribute (model_factor)
+    function renderStage0Files(files) {
+      const target = $("stage0Results");
+      if (!target) return;
+      if (!Array.isArray(files) || files.length === 0) {
+        target.innerHTML = "<div class=\"muted\">未返回文件。</div>";
+        return;
+      }
+      const escape = (s) => String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const blocks = files.map((f, idx) => {
+        const taId = "stage0FileTextarea_" + idx;
+        return [
+          "<details" + (idx < 2 ? " open" : "") + " style=\"margin-bottom:10px;border:1px solid var(--border);padding:8px;border-radius:4px\">",
+          "<summary><strong>" + escape(f.name) + "</strong> <span class=\"muted\" style=\"font-size:11px\">" + escape(f.path) + "</span></summary>",
+          "<div class=\"toolbar\" style=\"margin-top:6px\">",
+          "<button data-copy-target=\"" + taId + "\">复制内容</button>",
+          "</div>",
+          "<textarea id=\"" + taId + "\" class=\"candidate-payload code\" readonly style=\"min-height:140px;margin-top:6px\">" + escape(f.content) + "</textarea>",
+          "</details>",
+        ].join("");
+      });
+      target.innerHTML = blocks.join("");
+      target.querySelectorAll("[data-copy-target]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const ta = document.getElementById(btn.getAttribute("data-copy-target"));
+          if (!ta) return;
+          try {
+            await navigator.clipboard.writeText(ta.value || "");
+            const orig = btn.textContent;
+            btn.textContent = "已复制";
+            setTimeout(() => { btn.textContent = orig; }, 1200);
+          } catch (err) {
+            ta.select();
+            document.execCommand("copy");
+          }
+        });
+      });
+    }
+    $("btnStage0Distribute")?.addEventListener("click", async () => {
+      const input = $("stage0IdeaInput");
+      const status = $("stage0Status");
+      const idea = (input && input.value || "").trim();
+      if (!idea) {
+        if (status) status.textContent = "请先输入想法。";
+        return;
+      }
+      if (status) status.textContent = "分发中…";
+      try {
+        const resp = await fetch("/api/model-lab/idea-distribute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idea }),
+        });
+        const data = await resp.json();
+        if (!data || !data.ok) {
+          if (status) status.textContent = "失败: " + (data && data.error || "unknown");
+          return;
+        }
+        if (status) {
+          status.textContent = "成功: idea_id=" + (data.idea_id || "")
+            + " (" + (data.draft_dir || "") + ")";
+        }
+        renderStage0Files(data.files || []);
+      } catch (err) {
+        if (status) status.textContent = "请求异常: " + (err && err.message || err);
+      }
+    });
+
     $("btnRefreshCandidates")?.addEventListener("click", () => loadCandidates().catch((err) => showFlash(err.message, true)));
     $("candidatePayloadInput")?.addEventListener("input", () => {
       state.selectedCandidateName = "";

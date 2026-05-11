@@ -3148,11 +3148,26 @@
           <!-- Left: Main Workflow -->
           <div class="bridge-flow">
             
-            <!-- Stage 0: Audience-based distribution (legacy file layout) -->
+            <!-- Stage 0: Idea Distribute (new 5-file layout, symmetric engines) -->
+            <div class="panel panel-inspiration" id="stage0DistributePanel" style="margin-bottom:18px">
+              <span class="section-tag">Stage 0: Idea Distribute (single_factor)</span>
+              <h2 style="border:0;padding:0;margin-bottom:4px">模糊想法 → Stage 0 分发</h2>
+              <p class="idea-prompt-hint">把模糊想法粘进下方文本框，点击"调用 Stage 0 分发"。后端走 <code>alpha-lab idea distribute</code>（Claude API 检索 + codebase 快照），产出 <code>ideas/&lt;idea_id&gt;/</code> 下 5 个文件。两份 prompt 字节级相同（generator + reviewer 合一），粘到 Claude Code / Codex GUI 即可。</p>
+              <div class="idea-simple-entry">
+                <textarea id="stage0IdeaInput" class="idea-textarea" placeholder="例: 下跌日高波动若伴随尾盘承接,后续压力可能衰减…"></textarea>
+                <div class="toolbar idea-toolbar">
+                  <button class="action" id="btnStage0Distribute">调用 Stage 0 分发</button>
+                  <span id="stage0Status" class="muted" style="font-size:12px"></span>
+                </div>
+              </div>
+              <div id="stage0Results" style="margin-top:12px"></div>
+            </div>
+
+            <!-- Stage 0 legacy: idea-draft (Markdown only prompts; kept for back-compat) -->
             <div class="panel panel-inspiration">
-              <span class="section-tag">Stage 0: Audience-based Distribution</span>
-              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器 / Idea Distribute</h2>
-          <p class="idea-prompt-hint">检索 vault + 代码库快照，生成两份 audience-specific Markdown prompts（claude_mechanism = generator / codex_review = reviewer）。新协议见 <code>docs/research_workflow.md</code>。需要规范 <code>ideas/&lt;idea_id&gt;/</code> 目录布局时，请改用 CLI <code>alpha-lab idea distribute</code>；Stage 3 落地的 factor.json 应保留 <code>provenance.idea_id</code>，否则 validator 会发出 <code>provenance_missing</code> warning。</p>
+              <span class="section-tag">Stage 0 (legacy): Idea Draft</span>
+              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器 / Idea Draft (legacy)</h2>
+          <p class="idea-prompt-hint">旧 ledger-style 输出（dispatch.&lt;model&gt;.md + ledger_v1.&lt;model&gt;.yaml）。新协议下推荐使用上方 Stage 0 distribute 面板。</p>
               
 		              <div class="idea-simple-entry">
 		                <textarea id="exploreIdea" class="idea-textarea" placeholder="例:下跌日波动很高,但盘中有承接,后续压力可能衰减…"></textarea>
@@ -14486,6 +14501,77 @@ ${styleText}
       }
 	      // Bridge Workspace
 	      const bind = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+
+      // Stage 0 distribute (new 5-file layout)
+      function renderStage0Files(files) {
+        const target = $("stage0Results");
+        if (!target) return;
+        if (!Array.isArray(files) || files.length === 0) {
+          target.innerHTML = "<div class=\"muted\">未返回文件。</div>";
+          return;
+        }
+        const escape = (s) => String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        const blocks = files.map((f, idx) => {
+          const taId = "stage0FileTextarea_" + idx;
+          return [
+            "<details" + (idx < 2 ? " open" : "") + " style=\"margin-bottom:10px;border:1px solid var(--border);padding:8px;border-radius:4px\">",
+            "<summary><strong>" + escape(f.name) + "</strong> <span class=\"muted\" style=\"font-size:11px\">" + escape(f.path) + "</span></summary>",
+            "<div class=\"toolbar\" style=\"margin-top:6px\">",
+            "<button class=\"action\" data-copy-target=\"" + taId + "\">复制内容</button>",
+            "</div>",
+            "<textarea id=\"" + taId + "\" class=\"idea-textarea\" readonly style=\"min-height:140px;margin-top:6px\">" + escape(f.content) + "</textarea>",
+            "</details>",
+          ].join("");
+        });
+        target.innerHTML = blocks.join("");
+        target.querySelectorAll("[data-copy-target]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const ta = document.getElementById(btn.getAttribute("data-copy-target"));
+            if (!ta) return;
+            try {
+              await navigator.clipboard.writeText(ta.value || "");
+              const orig = btn.textContent;
+              btn.textContent = "已复制";
+              setTimeout(() => { btn.textContent = orig; }, 1200);
+            } catch (err) {
+              ta.select();
+              document.execCommand("copy");
+            }
+          });
+        });
+      }
+      bind("btnStage0Distribute", "click", async () => {
+        const input = $("stage0IdeaInput");
+        const status = $("stage0Status");
+        const idea = (input && input.value || "").trim();
+        if (!idea) {
+          if (status) status.textContent = "请先输入想法。";
+          return;
+        }
+        if (status) status.textContent = "分发中…";
+        try {
+          const resp = await fetch("/api/vault/idea-distribute", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idea, lab: "single_factor" }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            if (status) status.textContent = "失败: " + (data && data.error || "unknown");
+            return;
+          }
+          if (status) {
+            status.textContent = "成功: idea_id=" + (data.idea_id || "")
+              + " (" + (data.draft_dir || "") + ")";
+          }
+          renderStage0Files(data.files || []);
+        } catch (err) {
+          if (status) status.textContent = "请求异常: " + (err && err.message || err);
+        }
+      });
 
 	      const ideaDraftButton = $("btnExploreGenerateFactorDraft");
       if (ideaDraftButton) ideaDraftButton.textContent = "生成 Markdown-only prompts";
