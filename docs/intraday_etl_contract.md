@@ -1,5 +1,7 @@
 # 分钟数据 ETL 契约 v1
 
+研究侧用法：因子要在前端跑回测时同时消费日频 + 日内派生列，请走 `docs/intraday_factor_workflow.md` 与 `scripts/etl/build_factor_run_inputs.py` 的 slim slice + `mode=file` 流程，不要直接把 case YAML 指向完整 joined dataset，否则会 OOM。
+
 本文档是 `ashare_institutional_20160418_20260415_supplemented` 这批分钟数据接入的单一真理源。范围只覆盖：
 
 - `data/processed/real_case_inputs/ashare_institutional_20160418_20260415_supplemented/prices.parquet`

@@ -1,0 +1,54 @@
+# First Stage 3 case using the joined prices+intraday dataset.
+#
+# Hypothesis: realized-volatility signed jump tends to revert within 1-5 days.
+# Sanity_IC over 2016-2025 was IC=-0.032 with t=-13.3 vs next-day return,
+# so the factor uses negated 5-day rolling mean to make "long" the high-value side.
+#
+# Dataset (joined view): drop intraday OHLCV (overlap with prices.qfq/raw_*),
+# keep 60 derived intraday features + 5 status flags + 2 quality flags.
+# See scripts/etl/build_prices_with_intraday.py.
+#
+# Workflow:
+#   alpha-lab real-case single-factor run \
+#     configs/real_cases/single_factor/signed_jump_neg_5d_v1.yaml \
+#     --evaluation-profile exploratory_screening
+# Iteration log: custom_factors/research/signed_jump_neg_5d/research_log.md
+
+name: signed_jump_neg_5d_v1_default
+factor_name: signed_jump_neg_5d
+factor_path: ../../../custom_factors/research/signed_jump_neg_5d/factor_signed_jump_neg_5d_v1.parquet
+prices_path: ../../../data/processed/real_case_inputs/ashare_institutional_minimal_v1/prices.parquet
+
+# mode=file path: factor pre-computed by scripts/etl/precompute_signed_jump_neg_5d.py.
+# Reason: the joined dataset's full recipe path peaks at ~12GB pandas RSS and
+# OOM-kills under the WSL2 user-cgroup budget. Pre-computing yields a 57MB
+# factor parquet + a 17-col, 435MB minimal prices slice; combined peak ~3-4GB.
+factor_input:
+  mode: file
+  disable_pipeline_preprocess: true
+
+rebalance_frequency: W
+n_quantiles: 5
+direction: long
+
+universe:
+  name: institutional_ashare
+  path: ../../../data/processed/real_case_inputs/ashare_institutional_minimal_v1/universe_mask.parquet
+  in_universe_column: in_universe
+
+target:
+  kind: forward_return
+  horizon: 5
+
+preprocess:
+  winsorize: false
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  standardization: none
+  min_group_size: 5
+
+transaction_cost:
+  one_way_rate: 0.001
+
+output:
+  root_dir: ../../../outputs/real_cases
