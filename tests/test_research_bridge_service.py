@@ -918,30 +918,33 @@ def test_draft_idea_prepares_dual_engine_additive_artifacts(tmp_path: Path) -> N
     assert result.manifest_path.exists()
 
     reconcile = result.reconcile_path.read_text(encoding="utf-8")
-    assert "## union" in reconcile
-    assert "## fusion_candidates" in reconcile
-    assert "## notes" in reconcile
-    assert "keep / kill / add" not in reconcile
+    # New protocol: 1 generator (claude_mechanism) × 1 reviewer (codex_review),
+    # not 2 generators. Reconcile template points at the Stage 2 contracts and
+    # spells out the "加法不减法" rule.
+    assert "Stage 1 = generator + reviewer" in reconcile
+    assert "claude_mechanism" in reconcile
+    assert "codex_review" in reconcile
+    assert "mechanism_deepdive.md" in reconcile
+    assert "code_feasibility_review.md" in reconcile
+    assert "provenance.idea_id" in reconcile
+    assert "## union" not in reconcile  # legacy two-ledger sections removed
+    assert "## fusion_candidates" not in reconcile
 
     codex_dispatch = result.model_dispatch_paths["codex"].read_text(encoding="utf-8")
-    assert "## 1. 新 idea" in codex_dispatch
-    assert "## 2. 工作目录与资料位置" in codex_dispatch
-    assert "## 3. Stage 1 纪律" in codex_dispatch
-    assert "## 4. 相关卡片列表" in codex_dispatch
-    assert "## 5. 输出流程 + YAML schema + 生成偏好" in codex_dispatch
-    assert "第一轮回复必须是 Markdown 研究草稿" in codex_dispatch
-    assert "不要输出 YAML，不要写文件" in codex_dispatch
-    assert "用户明确同意后，再输出最终 YAML" in codex_dispatch
-    assert "只写自己的输出文件" not in codex_dispatch
+    # The codex prompt is now the reviewer prompt; old generator bias is gone.
+    assert "Stage 1 Reviewer Prompt" in codex_dispatch
+    assert "codex_review" in codex_dispatch
+    assert "lab=single_factor" in codex_dispatch
+    assert "你是 Stage 1 **reviewer**" in codex_dispatch
+    assert "你**不写**新机制" in codex_dispatch
+    assert "code_feasibility_review.md" in codex_dispatch
+    assert "代码库索引（reviewer 专用上下文）" in codex_dispatch
+    assert "factor.json required keys" in codex_dispatch  # lab=single_factor
+    assert "factor validator 硬规则" in codex_dispatch
+    assert f"vault_root：`{vault}`" in codex_dispatch
+    # Old generator bias text must not survive the refactor.
+    assert "偏广度迁移" not in codex_dispatch
     assert "ledger_v1.codex.yaml" not in codex_dispatch
-    assert "ledger_v1.claude.yaml" not in codex_dispatch
-    assert "偏广度迁移" in codex_dispatch
-    assert f"- vault_root：`{vault}`" in codex_dispatch
-    assert "### Cross-card synthesis" in codex_dispatch
-    assert "不是约束或 keep/kill 规则" in codex_dispatch
-    assert "score_components_by_name" not in codex_dispatch
-    assert "dropped_cards" not in codex_dispatch
-    assert "输出自检" not in codex_dispatch
 
 
 def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> None:
@@ -980,15 +983,19 @@ def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> Non
         vault_root=tmp_path / "quant-knowledge",
     )
 
-    assert "- vault_root：" in dispatch
+    # New audience-based generator prompt: header, role, no insight-brief
+    # softening helpers (those were tied to the old 收敛/可探索 transform).
+    assert "Stage 1 Generator Prompt" in dispatch
+    assert "claude_mechanism" in dispatch
+    assert "vault_root：" in dispatch
     assert "### Cross-card synthesis" in dispatch
-    assert "不是约束或 keep/kill 规则" in dispatch
-    assert "必须在控制普通波动率暴露" not in dispatch
-    assert "否则是必要步骤" not in dispatch
-    assert "可尝试在控制普通波动率暴露" in dispatch
-    assert "对应的 concern 是可选构建分支" in dispatch
+    # Insight filter still drops incomplete synthesis lines.
     assert "建议持有期覆盖1-" not in dispatch
     assert "提示可在月度调仓节点" not in dispatch
+    # Complete sentences survive (with the generation-material softening:
+    # 必须在 → 可尝试在, 否则是 → 对应的 concern 是).
+    assert "可尝试在控制普通波动率暴露后单独检验" in dispatch
+    assert "对应的 concern 是可选构建分支" in dispatch
 
 
 def test_model_idea_exploration_prompt_matches_byte_golden() -> None:
