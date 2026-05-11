@@ -80,15 +80,16 @@ required_next_input: []
 - “条件信任 / turnover-conditioned”可以作为机制解释框架，但进入 Stage3 的
   机器事实必须落在 `case_spec_payload` 已支持字段上。
 
-## 推荐来源文件清单
+## 来源文件清单（**只放 3 个**）
 
-网页版 GPT 项目中建议固定放入：
+网页版 GPT 项目"sources" 严格只放：
 
-- `model_lab_web_gpt_source_pack.md`
+- `model_lab_web_gpt_source_pack.md`（本文，总入口）
 - `model_lab_stage1_reconcile_contract.md`
 - `model_lab_stage2_candidate_contract.md`
-- `model_lab_stage3_backend_draft_prompt.md`
-- `codex_gui_model_stage3_execution_envelope.md`
-- `backend_draft_model_workflow.md`
 
-Stage3 执行由本地 Codex GUI / Web Model-Lab 完成。网页版 GPT 不应伪造本地实验结果。
+**不要**把 Stage 3 envelope / backend_draft_model_workflow / stage3_backend_draft_prompt
+放进网页 GPT 项目 —— 那些是 Codex GUI 的开场提示，放进 GPT 会让它越界
+"自己跑实验"或写代码。
+
+详见 `docs/end_to_end_workflow.md` Stage 2。

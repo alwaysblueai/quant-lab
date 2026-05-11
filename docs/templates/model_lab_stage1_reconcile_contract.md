@@ -1,14 +1,14 @@
 # Model-Lab Stage1 Reconcile Contract
 
-本文件用于放入网页版 GPT 项目的“来源”。当用户提供 Claude Code 的
-**机制候选**（`mechanism_deepdive.md`）和 Codex GUI 的**代码可执行性评审**
-（`code_feasibility_review.md`）两份 Stage 1 输出时，网页版 GPT 必须按本合同输出
-`model_stage1_reconcile_payload`，不能只做命名、摘要或主观点评。
+本文件用于放入网页版 GPT 项目的"来源"。当用户提供 Claude Code 与 Codex GUI 两份
+Stage 1 输出（每份都含 Part A 机制候选 + Part B 可执行性评审）时，网页版 GPT 必须
+按本合同输出 `model_stage1_reconcile_payload`，不能只做命名、摘要或主观点评。
 
-> 协议变更（2026-05-11）：之前协议把 Claude / Codex 都当 generator（深度组合 vs
-> 广度迁移）；新协议下 **Claude = generator（机制候选 ledger），Codex = reviewer
-> （代码库可执行性评审）**。reconcile 不再是"两份 ledger 并集"，而是**机制候选
-> 矩阵 × 可执行性评审**的合并；详见 `docs/research_workflow.md`。
+> 协议（2026-05-11，见 `docs/end_to_end_workflow.md`）：Stage 1 两引擎**任务相同**
+> （generator + reviewer 合一），不是分工。Claude Code 和 Codex GUI 各自产出
+> `stage1_claude.md` / `stage1_codex.md`，每份都含 Part A + Part B。模型特点不同
+> → 输出各有优劣 → 网页 GPT 综合取长补短。reconcile 是**两份对称输出的取长补短
+> 综合**，不是"机制 × 评审"矩阵。
 
 ## 任务边界
 
@@ -34,22 +34,19 @@
 
 用户会提供（来自 `ideas/<idea_id>/`）：
 
-- `mechanism_deepdive.md`（Claude Code generator 输出）：候选机制 ledger。
-- `code_feasibility_review.md`（Codex GUI reviewer 输出）：每条候选机制是否在 v1
-  `ModelFactorCaseSpec` schema 内可执行；含 `implementation_status`、
-  `validator_blockers`、`required_columns_missing`、`spec_fields_touched`。
-- `retrieval_pack.md` / `retrieval_log.md`：vault 卡 + 代码库索引快照。
-- `manifest.json`：含 `idea_id`、audiences、created_at。
+- `stage1_claude.md`：Claude Code 输出，含 Part A 机制候选 + Part B 可执行性评审。
+- `stage1_codex.md`：Codex GUI 输出，含 Part A 机制候选 + Part B 可执行性评审。
+- `retrieval_pack.md`：vault 卡 + 代码库索引快照（与两引擎看到的字节级相同）。
+- `manifest.json`：含 `idea_id`、engines、created_at。
 - 当前 base model spec 摘要或路径。
 - 当前 feature inventory 摘要。
 
 reconcile 顶层必须保留 `provenance.idea_id`（取自 `manifest.json::idea_id`），
 让 Stage 3 artifact 可以反查。
 
-如果缺少 base spec 或 feature inventory，也必须输出 payload，但在
-`unresolved_questions` 中标注缺口。如果 reviewer 输出缺失，也必须输出
-payload，但 `mechanisms[].implementation_status` 必须保守标注
-`needs_extension` 直到下一轮补齐评审。
+如果只有单边输出（另一引擎漏了），也必须输出 payload，但 `unresolved_questions`
+中显式标注"待补另一引擎"，且 `mechanisms[].implementation_status` 不要单方
+upgrade（仅来自单边的"in_contract"必须保守降级至 `partial_in_contract`）。
 
 ## 输出格式
 
@@ -85,25 +82,25 @@ provenance:
 idea_title: "Turnover-Conditioned Price-Volume Synthesis"
 candidate_slug_hint: "turnover_conditioned_pv_synthesis_v1"
 base_case_spec_path: "configs/real_cases/model_factor/..."
-input_agents:
-  - audience: "claude_mechanism"
-    role: "mechanism_generator"
-    artifact: "ideas/<idea_id>/mechanism_deepdive.md"
-  - audience: "codex_review"
-    role: "code_feasibility_reviewer"
-    artifact: "ideas/<idea_id>/code_feasibility_review.md"
+input_engines:
+  - engine: "claude"
+    artifact: "ideas/<idea_id>/stage1_claude.md"
+  - engine: "codex"
+    artifact: "ideas/<idea_id>/stage1_codex.md"
 code_feasibility_review:
-  reviewer_audience: "codex_review"
-  spec_schema_version: ""           # ModelFactorCaseSpec parser version reviewer saw
-  validator_rules_seen: []          # validator hard rules reviewer was briefed with
+  spec_schema_version: ""
+  validator_rules_seen: []
   per_mechanism:
     M1:
+      # implementation_status 取自两引擎 Part B 的更保守那方
       in_v1_contract: true
       implementation_status: "in_contract_spec_variant"
       required_columns_missing: []
       spec_fields_touched: ["feature_columns", "model.family"]
       validator_blockers: []
-      reviewer_note: ""
+      reviewer_notes_by_engine:
+        claude: ""
+        codex: ""
 mechanisms:
   - id: "M1"
     name: ""
@@ -171,12 +168,12 @@ quality_gate:
   Stage2 主候选。
 - `mechanisms[].implementation_status` 必须以 `code_feasibility_review.per_mechanism.<id>.implementation_status`
   为准；不要凭机制名字主观判定。
-- `mechanisms[].source_agents` 始终为 `["claude_mechanism"]`（机制候选只来自 generator）；
-  reviewer 的输入通过 `code_feasibility_review` 反映，不写进 `source_agents`。
-- 如果 Claude 提出高创造性机制但 Codex 判断当前合同不可执行，保留为
-  `needs_extension`，并把 `validator_blockers` / `required_columns_missing` 写进 reviewer note。
-- 如果某条机制在 generator 输出中存在、但在 reviewer 评审中缺失，必须保守降级为
-  `needs_extension` 直到补齐评审。
+- `mechanisms[].source_engines` 标注每条机制来自 `["claude"]` / `["codex"]` / `["claude", "codex"]`；
+  如果只有一引擎提到，要明确单边来源。
+- 两引擎都提到同一机制 → 合并描述，保留双方的 inspired_by / hypothesis 措辞差异作 reviewer note。
+- 两引擎对同一机制的 `implementation_status` 冲突 → 取**更保守**那方（reviewer 严格优先）。
+- 一引擎提出高创造性机制但另一引擎判断当前合同不可执行 → 保留为 `needs_extension`，
+  把 `validator_blockers` / `required_columns_missing` 写进 `reviewer_notes_by_engine`。
 
 ## Model-Lab v1 硬约束
 
