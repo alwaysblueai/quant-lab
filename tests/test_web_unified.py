@@ -1918,10 +1918,13 @@ def test_idea_draft_minimal_artifacts_returns_markdown_prompts_only(tmp_path: Pa
     assert all(not str(entry["path"]) for entry in dispatch_entries)
     for entry in dispatch_entries:
         content = str(entry["content"])
-        assert "Markdown" in content
+        # New symmetric engine prompts: both contain Part A + Part B contract
+        # and reference the per-engine output file (stage1_<engine>.md).
+        assert "generator + reviewer 合一" in content
+        assert "Part A" in content and "Part B" in content
+        assert "stage1_" in content
+        # Old asymmetric / generator-bias / write-anywhere phrasing must be gone.
         assert "ledger_v1" not in content
-        assert "YAML schema" not in content
-        assert "YAML" in content
         assert "write files" not in content
 
     ledger_entries = cast(list[dict[str, Any]], artifacts["ledgers"])
