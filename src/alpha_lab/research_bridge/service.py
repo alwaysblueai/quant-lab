@@ -67,14 +67,16 @@ from alpha_lab.vault_export_graph_feedback import (
 from . import loaders as bridge_loaders
 from . import mechanism_index
 from . import sessions as bridge_sessions
-from .audience_prompts import (
-    Audience,
+from .engine_prompts import (
     CardForPrompt,
-    DEFAULT_AUDIENCES,
+    DEFAULT_ENGINES,
+    Engine,
     Lab,
     PromptContext,
-    build_prompt as _build_audience_prompt,
-    normalize_audiences,
+    build_prompt as _build_engine_prompt,
+    normalize_engines,
+    output_filename_for as _engine_output_filename,
+    prompt_filename_for as _engine_prompt_filename,
 )
 from .codebase_index import CodebaseSnapshot, build_codebase_snapshot
 from .llm_rerank import (
@@ -1015,11 +1017,14 @@ def explore_idea(
 
 @dataclass(frozen=True)
 class IdeaDistributeResult:
-    """New audience-based Stage 0 distribution result.
+    """Stage 0 distribution result (5-file layout).
 
-    Lives next to :class:`IdeaDraftResult` (legacy) so callers can migrate
-    incrementally. The on-disk layout is the canonical ``ideas/<idea_id>/``
-    described in ``docs/research_workflow.md``.
+    Layout under ``ideas/<idea_id>/`` per ``docs/end_to_end_workflow.md``:
+
+    - manifest.json         — idea_id, retrieval diagnostics, codebase snapshot
+    - retrieval_pack.md     — shared context复印件 (vault cards + codebase)
+    - prompt_<engine>.md    — symmetric Stage 1 prompts (generator + reviewer)
+    - stage2_input.md       — web GPT入口 (reconcile + Stage 2 contract pointer)
     """
 
     idea: str
@@ -1027,15 +1032,13 @@ class IdeaDistributeResult:
     lab: Lab
     mode: str
     stage: str
-    audiences: tuple[Audience, ...]
+    engines: tuple[Engine, ...]
     draft_dir: Path
-    retrieval_pack_path: Path
-    retrieval_log_path: Path
-    audience_prompt_paths: dict[Audience, Path]
-    audience_output_paths: dict[Audience, Path]
-    final_ledger_path: Path
-    reconcile_path: Path
     manifest_path: Path
+    retrieval_pack_path: Path
+    engine_prompt_paths: dict[Engine, Path]
+    engine_output_paths: dict[Engine, Path]
+    stage2_input_path: Path
     retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, object]:
@@ -1045,34 +1048,26 @@ class IdeaDistributeResult:
             "lab": self.lab.value,
             "mode": self.mode,
             "stage": self.stage,
-            "audiences": [a.value for a in self.audiences],
+            "engines": [e.value for e in self.engines],
             "draft_dir": str(self.draft_dir),
-            "retrieval_pack_path": str(self.retrieval_pack_path),
-            "retrieval_log_path": str(self.retrieval_log_path),
-            "audience_prompt_paths": {
-                a.value: str(p) for a, p in self.audience_prompt_paths.items()
-            },
-            "audience_output_paths": {
-                a.value: str(p) for a, p in self.audience_output_paths.items()
-            },
-            "final_ledger_path": str(self.final_ledger_path),
-            "reconcile_path": str(self.reconcile_path),
             "manifest_path": str(self.manifest_path),
+            "retrieval_pack_path": str(self.retrieval_pack_path),
+            "engine_prompt_paths": {
+                e.value: str(p) for e, p in self.engine_prompt_paths.items()
+            },
+            "engine_output_paths": {
+                e.value: str(p) for e, p in self.engine_output_paths.items()
+            },
+            "stage2_input_path": str(self.stage2_input_path),
             "retrieval_diagnostics": dict(self.retrieval_diagnostics),
         }
-
-
-_AUDIENCE_OUTPUT_FILENAME: dict[Audience, str] = {
-    Audience.CLAUDE_MECHANISM: "mechanism_deepdive.md",
-    Audience.CODEX_REVIEW: "code_feasibility_review.md",
-}
 
 
 def distribute_idea(
     *,
     vault_root: str | Path | None,
     idea: str,
-    audiences: list[str] | tuple[str, ...] | tuple[Audience, ...] | str | None = None,
+    engines: list[str] | tuple[str, ...] | tuple[Engine, ...] | str | None = None,
     lab: Lab | str = Lab.SINGLE_FACTOR,
     mode: str = "start",
     project_slug: str | None = None,
@@ -1085,18 +1080,20 @@ def distribute_idea(
     inject_recent_drift: bool = False,
     parent_session_id: str | None = None,
 ) -> IdeaDistributeResult:
-    """Stage 0 distribution: emit retrieval pack + audience-specific prompts.
+    """Stage 0 distribution: emit retrieval pack + symmetric engine prompts.
 
-    This is the primary new entry point. It does **not** call any LLM; it only
-    writes Markdown files under ``ideas/<idea_id>/`` that the user pastes into
-    Claude Code (audience=claude_mechanism, generator) and Codex GUI
-    (audience=codex_review, reviewer).
+    Calls Claude API (via :func:`explore_idea` → mechanism_index / llm_rerank
+    / query_expansion) to retrieve the most useful vault cards for the idea,
+    then writes the 5-file layout described in
+    ``docs/end_to_end_workflow.md``. Does not run the Stage 1 engines —
+    the user pastes ``prompt_claude.md`` / ``prompt_codex.md`` into Claude
+    Code / Codex GUI manually.
     """
 
-    if isinstance(audiences, tuple) and audiences and isinstance(audiences[0], Audience):
-        selected_audiences: tuple[Audience, ...] = tuple(audiences)
+    if isinstance(engines, tuple) and engines and isinstance(engines[0], Engine):
+        selected_engines: tuple[Engine, ...] = tuple(engines)
     else:
-        selected_audiences = normalize_audiences(audiences)
+        selected_engines = normalize_engines(engines)
     target_lab = Lab(lab) if isinstance(lab, str) else lab
     resolved_workspace = Path(workspace_root).expanduser().resolve()
     resolved_vault = _resolve_bridge_vault_root(vault_root)
@@ -1138,44 +1135,34 @@ def distribute_idea(
         mode=explore_result.mode,
     )
 
-    audience_prompt_paths: dict[Audience, Path] = {}
-    audience_output_paths: dict[Audience, Path] = {}
-    for audience in selected_audiences:
-        prompt_path = draft_dir / f"prompt_{audience.value}.md"
+    engine_prompt_paths: dict[Engine, Path] = {}
+    engine_output_paths: dict[Engine, Path] = {}
+    for engine in selected_engines:
+        prompt_path = draft_dir / _engine_prompt_filename(engine)
         prompt_path.write_text(
-            _build_audience_prompt(audience=audience, ctx=ctx),
+            _build_engine_prompt(engine=engine, ctx=ctx),
             encoding="utf-8",
         )
-        audience_prompt_paths[audience] = prompt_path
-        audience_output_paths[audience] = draft_dir / _AUDIENCE_OUTPUT_FILENAME.get(
-            audience, f"{audience.value}_output.md"
-        )
+        engine_prompt_paths[engine] = prompt_path
+        engine_output_paths[engine] = draft_dir / _engine_output_filename(engine)
 
     retrieval_pack_path = draft_dir / "retrieval_pack.md"
     retrieval_pack_path.write_text(
         _render_retrieval_pack(
             ctx=ctx,
-            audiences=selected_audiences,
-            audience_prompt_paths=audience_prompt_paths,
+            engines=selected_engines,
+            engine_prompt_paths=engine_prompt_paths,
         ),
         encoding="utf-8",
     )
 
-    retrieval_log_path = draft_dir / "retrieval_log.md"
-    retrieval_log_path.write_text(
-        _render_stage1_retrieval_log(explore_result),
-        encoding="utf-8",
-    )
-
-    final_ledger_path = draft_dir / "ledger_v1.yaml"
-    reconcile_path = draft_dir / "reconcile.md"
-    reconcile_path.write_text(
-        _render_reconcile_template(
+    stage2_input_path = draft_dir / "stage2_input.md"
+    stage2_input_path.write_text(
+        _render_stage2_input(
             idea=explore_result.idea,
-            audiences=selected_audiences,
-            audience_prompt_paths=audience_prompt_paths,
-            audience_output_paths=audience_output_paths,
-            final_ledger_path=final_ledger_path,
+            engines=selected_engines,
+            engine_prompt_paths=engine_prompt_paths,
+            engine_output_paths=engine_output_paths,
             lab=target_lab,
             idea_id=idea_id,
         ),
@@ -1191,17 +1178,15 @@ def distribute_idea(
         "lab": target_lab.value,
         "mode": explore_result.mode,
         "stage": normalized_stage,
-        "audiences": [a.value for a in selected_audiences],
+        "engines": [e.value for e in selected_engines],
         "retrieval_pack_path": str(retrieval_pack_path),
-        "retrieval_log_path": str(retrieval_log_path),
-        "audience_prompt_paths": {
-            a.value: str(p) for a, p in audience_prompt_paths.items()
+        "engine_prompt_paths": {
+            e.value: str(p) for e, p in engine_prompt_paths.items()
         },
-        "audience_output_paths": {
-            a.value: str(p) for a, p in audience_output_paths.items()
+        "engine_output_paths": {
+            e.value: str(p) for e, p in engine_output_paths.items()
         },
-        "final_ledger_path": str(final_ledger_path),
-        "reconcile_path": str(reconcile_path),
+        "stage2_input_path": str(stage2_input_path),
         "retrieval_diagnostics": diagnostics,
         "codebase_snapshot": codebase.to_payload(),
     }
@@ -1216,15 +1201,13 @@ def distribute_idea(
         lab=target_lab,
         mode=explore_result.mode,
         stage=normalized_stage,
-        audiences=selected_audiences,
+        engines=selected_engines,
         draft_dir=draft_dir,
-        retrieval_pack_path=retrieval_pack_path,
-        retrieval_log_path=retrieval_log_path,
-        audience_prompt_paths=audience_prompt_paths,
-        audience_output_paths=audience_output_paths,
-        final_ledger_path=final_ledger_path,
-        reconcile_path=reconcile_path,
         manifest_path=manifest_path,
+        retrieval_pack_path=retrieval_pack_path,
+        engine_prompt_paths=engine_prompt_paths,
+        engine_output_paths=engine_output_paths,
+        stage2_input_path=stage2_input_path,
         retrieval_diagnostics=diagnostics,
     )
 
@@ -1232,9 +1215,16 @@ def distribute_idea(
 def _render_retrieval_pack(
     *,
     ctx: PromptContext,
-    audiences: tuple[Audience, ...],
-    audience_prompt_paths: dict[Audience, Path],
+    engines: tuple[Engine, ...],
+    engine_prompt_paths: dict[Engine, Path],
 ) -> str:
+    """Render the human-readable shared-context copy for web GPT.
+
+    Same content the two engine prompts have embedded — kept as a separate
+    file so the web GPT can be given a clean reference without re-reading
+    the engine prompts themselves.
+    """
+
     lines: list[str] = [
         f"# Retrieval Pack — {ctx.idea}",
         "",
@@ -1242,21 +1232,21 @@ def _render_retrieval_pack(
         f"lab: `{ctx.lab.value}`",
         f"mode: `{ctx.mode}`",
         "",
-        "## Audiences (Stage 1)",
+        "## Engines (Stage 1, symmetric task)",
+        "Both engines run the same generator + reviewer task and produce one",
+        "markdown each. Web GPT综合两份输出取长补短 in Stage 2.",
+        "",
     ]
-    for audience in audiences:
-        prompt = audience_prompt_paths.get(audience)
-        prompt_name = prompt.name if prompt is not None else f"prompt_{audience.value}.md"
-        role = (
-            "generator (机制候选 ledger)"
-            if audience is Audience.CLAUDE_MECHANISM
-            else "reviewer (代码可执行性评审)"
+    for engine in engines:
+        prompt = engine_prompt_paths.get(engine)
+        prompt_name = (
+            prompt.name if prompt is not None else _engine_prompt_filename(engine)
         )
-        lines.append(f"- `{audience.value}` — {role} → `{prompt_name}`")
+        lines.append(f"- `{engine.value}` → `{prompt_name}`")
     lines.extend(
         [
             "",
-            "## Vault cards (shared retrieval; identical between audiences)",
+            "## Vault cards (shared retrieval; identical between engines)",
             f"- vault_root: `{ctx.vault_root}`",
         ]
     )
@@ -1285,13 +1275,98 @@ def _render_retrieval_pack(
     lines.extend(
         [
             "",
-            "## Codebase snapshot (reviewer-only context)",
+            "## Codebase snapshot",
             f"- single-factor promoted: {len(ctx.codebase.factors_promoted)}",
             f"- single-factor research: {len(ctx.codebase.factors_research)}",
             f"- model candidates promoted: {len(ctx.codebase.model_candidates_promoted)}",
             f"- model candidates research: {len(ctx.codebase.model_candidates_research)}",
             f"- single-factor cases registered: {len(ctx.codebase.single_factor_cases)}",
             f"- model-factor cases registered: {len(ctx.codebase.model_factor_cases)}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_stage2_input(
+    *,
+    idea: str,
+    engines: tuple[Engine, ...],
+    engine_prompt_paths: dict[Engine, Path],
+    engine_output_paths: dict[Engine, Path],
+    lab: Lab,
+    idea_id: str,
+) -> str:
+    """Render the web GPT Stage 2 entry template.
+
+    Replaces the legacy ``reconcile.md`` — collapses the reconcile slots and
+    Stage 2 contract pointer into one file (per ``docs/end_to_end_workflow.md``
+    Stage 0 5-file layout).
+    """
+
+    if lab is Lab.SINGLE_FACTOR:
+        source_pack = "docs/templates/single_factor_source_pack.md"
+        stage1_contract = "docs/templates/single_factor_stage1_reconcile_contract.md"
+        stage2_contract = "docs/templates/single_factor_stage2_candidate_contract.md"
+        payload_label = "factor_json_payload"
+    else:
+        source_pack = "docs/templates/model_lab_web_gpt_source_pack.md"
+        stage1_contract = "docs/templates/model_lab_stage1_reconcile_contract.md"
+        stage2_contract = "docs/templates/model_lab_stage2_candidate_contract.md"
+        payload_label = "model_candidate_payload"
+
+    lines: list[str] = [
+        f"# Stage 2 Input — {idea}",
+        "",
+        f"idea_id: `{idea_id}`",
+        f"lab: `{lab.value}`",
+        "",
+        "## 协议（2026-05-11，docs/end_to_end_workflow.md）",
+        "Stage 1 = 两引擎并行执行**同一任务**（generator + reviewer 合一）。",
+        "网页 GPT 在 Stage 2 综合两份输出取长补短，输出唯一 `" + payload_label + "`。",
+        "",
+        "## 网页 GPT 项目 'sources' 必须包含（且只包含）",
+        f"- `{source_pack}`",
+        f"- `{stage1_contract}`",
+        f"- `{stage2_contract}`",
+        "",
+        "Stage 3 envelope 是给 Codex GUI 的开场提示，**不**放网页 GPT 项目。",
+        "",
+        "## 输入产物（Stage 1）",
+    ]
+    for engine in engines:
+        prompt = engine_prompt_paths.get(engine)
+        out = engine_output_paths.get(engine)
+        lines.extend(
+            [
+                f"- `{engine.value}` prompt: `{prompt.name if prompt else _engine_prompt_filename(engine)}`",
+                f"  output: `{out.name if out else _engine_output_filename(engine)}`",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 输出产物（Stage 2）",
+            "- Step 2.1 reconcile → 写入 `ideas/<idea_id>/stage1_reconcile.yaml`",
+            "  - 输入：两份 stage1_<engine>.md（含 Part A 机制 + Part B 评审）+ retrieval_pack.md",
+            "  - 输出 YAML 顶层含 `provenance.idea_id`、`mechanisms[]`、合并的 `code_feasibility_review`、`stage2_entry_recommendation`",
+            "  - 取两引擎机制并集；implementation_status 冲突时取更保守那方",
+            "- Step 2.2 candidate → 写入 `ideas/<idea_id>/stage2_payload_v<n>.json`",
+            "  - 输出完整 `" + payload_label + "`（不接受 patch）",
+            "  - 必填 `provenance.{idea_id, stage2_payload_sha256, audience_chain}`",
+            "  - `audience_chain` 固定为 `[\"claude\", \"codex\", \"web_gpt_stage2\"]`（两引擎对称协议）",
+            "",
+            "## 迭代回灌（Stage 3 → Stage 2）",
+            "Stage 3 每轮跑完后，Codex GUI 直接把摘要段落粘回同一个网页 GPT 项目。",
+            "网页 GPT 出 v<n+1> payload，`idea_id` 不变，`stage2_payload_sha256` 更新。",
+            "不需要中转文件。",
+            "",
+            "## quality gate",
+            "- mechanisms 至少 1 条",
+            "- code_feasibility_review 必须覆盖每条机制的 implementation_status",
+            "- payload provenance.idea_id 与 `manifest.json::idea_id` 一致",
+            "- 不把 `operative_claims` 当作 kill 条件",
             "",
         ]
     )
@@ -1353,9 +1428,9 @@ def draft_idea(
     shared_prompt_path.write_text(explore_result.gpt_prompt, encoding="utf-8")
 
     codebase = build_codebase_snapshot(resolved_workspace)
-    audiences_used: list[Audience] = []
-    audience_prompt_paths: dict[Audience, Path] = {}
-    audience_output_paths: dict[Audience, Path] = {}
+    engines_used: list[Engine] = []
+    engine_prompt_paths: dict[Engine, Path] = {}
+    engine_output_paths: dict[Engine, Path] = {}
     model_dispatch_paths: dict[str, Path] = {}
     ledger_paths: dict[str, Path] = {}
     for model in selected_models:
@@ -1375,22 +1450,20 @@ def draft_idea(
         )
         model_dispatch_paths[model] = dispatch_path
         ledger_paths[model] = draft_dir / f"ledger_v1.{model}.yaml"
-        audience = _audience_for_legacy_model(model)
-        if audience not in audiences_used:
-            audiences_used.append(audience)
-        audience_prompt_paths[audience] = dispatch_path
-        audience_output_paths[audience] = draft_dir / _AUDIENCE_OUTPUT_FILENAME.get(
-            audience, f"{audience.value}_output.md"
-        )
+        engine = _engine_for_legacy_model(model)
+        if engine not in engines_used:
+            engines_used.append(engine)
+        engine_prompt_paths[engine] = dispatch_path
+        engine_output_paths[engine] = draft_dir / _engine_output_filename(engine)
 
     final_ledger_path = draft_dir / "ledger_v1.yaml"
     reconcile_path = draft_dir / "reconcile.md"
     reconcile_path.write_text(
         _render_reconcile_template(
             idea=explore_result.idea,
-            audiences=tuple(audiences_used),
-            audience_prompt_paths=audience_prompt_paths,
-            audience_output_paths=audience_output_paths,
+            engines=tuple(engines_used),
+            engine_prompt_paths=engine_prompt_paths,
+            engine_output_paths=engine_output_paths,
             final_ledger_path=final_ledger_path,
             lab=Lab.SINGLE_FACTOR,
             idea_id=draft_dir.name,
@@ -1410,7 +1483,7 @@ def draft_idea(
         "mode": explore_result.mode,
         "stage": normalized_stage,
         "models": list(selected_models),
-        "audiences": [a.value for a in audiences_used],
+        "engines": [e.value for e in engines_used],
         "shared_prompt_path": str(shared_prompt_path),
         "model_dispatch_paths": {
             key: str(value) for key, value in model_dispatch_paths.items()
@@ -1489,28 +1562,28 @@ def _allocate_unique_draft_dir(base_dir: Path, draft_name: str) -> Path:
     raise FileExistsError(f"unable to allocate unique draft directory under {base_dir}")
 
 
-_LEGACY_MODEL_TO_AUDIENCE: dict[str, Audience] = {
-    "claude": Audience.CLAUDE_MECHANISM,
-    "codex": Audience.CODEX_REVIEW,
+_LEGACY_MODEL_TO_ENGINE: dict[str, Engine] = {
+    "claude": Engine.CLAUDE,
+    "codex": Engine.CODEX,
 }
 
 
-def _audience_for_legacy_model(model: str) -> Audience:
-    """Map old ``--models claude,codex`` tokens onto the audience enum.
+def _engine_for_legacy_model(model: str) -> Engine:
+    """Map old ``--models claude,codex`` tokens onto the engine enum.
 
     Used by the deprecated ``draft_idea`` entry; new code should pass
-    :class:`Audience` directly.
+    :class:`Engine` directly.
     """
 
     key = model.strip().lower()
-    if key in _LEGACY_MODEL_TO_AUDIENCE:
-        return _LEGACY_MODEL_TO_AUDIENCE[key]
+    if key in _LEGACY_MODEL_TO_ENGINE:
+        return _LEGACY_MODEL_TO_ENGINE[key]
     try:
-        return Audience(key)
+        return Engine(key)
     except ValueError as exc:
         raise ValueError(
             f"unknown legacy model name {model!r}; expected one of "
-            f"{sorted(_LEGACY_MODEL_TO_AUDIENCE)} or a valid audience"
+            f"{sorted(_LEGACY_MODEL_TO_ENGINE)}"
         ) from exc
 
 
@@ -1570,14 +1643,14 @@ def _render_idea_model_dispatch(
     lab: Lab = Lab.SINGLE_FACTOR,
     mode: str = "start",
 ) -> str:
-    """Render the audience-specific Stage 1 prompt body.
+    """Render the engine-specific Stage 1 prompt body (legacy back-compat).
 
-    Replaces the old "Claude=深度组合 / Codex=广度迁移" generator dispatch with
-    the new generator+reviewer split (see ``docs/research_workflow.md``). The
-    function name is preserved for back-compat with existing call sites.
+    Both engines now receive the **same** symmetric prompt (generator +
+    reviewer合一); the only difference is the self-identification line. Kept
+    behind the old function name for the legacy ``draft_idea`` callers.
     """
 
-    audience = _audience_for_legacy_model(model)
+    engine = _engine_for_legacy_model(model)
     snapshot = codebase if codebase is not None else build_codebase_snapshot(Path("."))
     ctx = _build_prompt_context(
         idea=idea,
@@ -1588,7 +1661,7 @@ def _render_idea_model_dispatch(
         lab=lab,
         mode=mode,
     )
-    return _build_audience_prompt(audience=audience, ctx=ctx)
+    return _build_engine_prompt(engine=engine, ctx=ctx)
 
 
 def _complete_stage1_prompt_briefs(values: list[str], *, limit: int = 6) -> list[str]:
@@ -1630,24 +1703,28 @@ def _idea_draft_model_label(model: str) -> str:
     """Human-friendly label for legacy model tokens."""
 
     key = model.strip().lower()
-    if key in {"claude", Audience.CLAUDE_MECHANISM.value}:
-        return "Claude Code (claude_mechanism — generator)"
-    if key in {"codex", Audience.CODEX_REVIEW.value}:
-        return "Codex GUI (codex_review — reviewer)"
+    if key == Engine.CLAUDE.value:
+        return "Claude Code"
+    if key == Engine.CODEX.value:
+        return "Codex GUI"
     return model.strip() or "Agent"
 
 
 def _render_reconcile_template(
     *,
     idea: str,
-    audiences: tuple[Audience, ...],
-    audience_prompt_paths: dict[Audience, Path],
-    audience_output_paths: dict[Audience, Path],
+    engines: tuple[Engine, ...],
+    engine_prompt_paths: dict[Engine, Path],
+    engine_output_paths: dict[Engine, Path],
     final_ledger_path: Path,
     lab: Lab,
     idea_id: str,
 ) -> str:
-    """Render a Stage 2 reconcile entry template for "1 ledger × 1 review"."""
+    """Legacy reconcile template (kept for back-compat with ``draft_idea``).
+
+    New flow uses :func:`_render_stage2_input` instead — see Stage 0 layout
+    in ``docs/end_to_end_workflow.md``.
+    """
 
     contract_template = (
         "docs/templates/single_factor_stage1_reconcile_contract.md"
@@ -1663,9 +1740,6 @@ def _render_reconcile_template(
         else "docs/templates/model_lab_stage2_candidate_contract.md"
     )
 
-    has_generator = Audience.CLAUDE_MECHANISM in audiences
-    has_reviewer = Audience.CODEX_REVIEW in audiences
-
     lines: list[str] = [
         f"# Reconcile — {idea}",
         "",
@@ -1673,31 +1747,20 @@ def _render_reconcile_template(
         f"lab: `{lab.value}`",
         "",
         "## 协议（2026-05-11）",
-        "Stage 1 = generator + reviewer，不是 2 个 generator。",
-        "- generator (audience=claude_mechanism) → mechanism candidate ledger",
-        "- reviewer (audience=codex_review) → code-feasibility review",
-        "网页版 GPT 在 Stage 2 把两侧合并为 `" + payload_label + "`，详见：",
+        "Stage 1 = 两引擎对称执行同一任务（generator + reviewer 合一）。",
+        "网页版 GPT 在 Stage 2 综合两份输出取长补短，输出唯一 `" + payload_label + "`。",
         f"- {contract_template}",
         f"- {candidate_contract}",
         "",
         "## 输入产物（Stage 1 输出）",
     ]
-    if has_generator:
-        prompt = audience_prompt_paths.get(Audience.CLAUDE_MECHANISM)
-        out = audience_output_paths.get(Audience.CLAUDE_MECHANISM)
+    for engine in engines:
+        prompt = engine_prompt_paths.get(engine)
+        out = engine_output_paths.get(engine)
         lines.extend(
             [
-                f"- generator prompt: `{prompt.name if prompt else 'prompt_claude_mechanism.md'}`",
-                f"- generator output: `{out.name if out else 'mechanism_deepdive.md'}`（用户保存 Claude Code 输出）",
-            ]
-        )
-    if has_reviewer:
-        prompt = audience_prompt_paths.get(Audience.CODEX_REVIEW)
-        out = audience_output_paths.get(Audience.CODEX_REVIEW)
-        lines.extend(
-            [
-                f"- reviewer prompt: `{prompt.name if prompt else 'prompt_codex_review.md'}`",
-                f"- reviewer output: `{out.name if out else 'code_feasibility_review.md'}`（用户保存 Codex GUI 输出）",
+                f"- `{engine.value}` prompt: `{prompt.name if prompt else _engine_prompt_filename(engine)}`",
+                f"  output: `{out.name if out else _engine_output_filename(engine)}`",
             ]
         )
 
@@ -1705,21 +1768,13 @@ def _render_reconcile_template(
         [
             "",
             "## 输出产物（Stage 2 网页 GPT 写入）",
-            f"- `{final_ledger_path.name}`：合并后的最终 ledger（机制候选 × 可执行性评审）",
+            f"- `{final_ledger_path.name}`：合并后的最终 ledger",
             "- `stage2_payload.json`：网页 GPT 输出的 `" + payload_label + "`，含必填 `provenance` 块",
             "",
-            "## 槽位（reviewer 决定 implementation_status，不是 generator）",
-            "- mechanisms[].source_agents 始终为 `[claude_mechanism]`；reviewer 的输入通过 `code_feasibility_review` 反映。",
-            "- mechanisms[].implementation_status 必须取自 `code_feasibility_review.per_mechanism.<id>.implementation_status`。",
-            '- 不做"互审淘汰"——不可执行机制保留为 `needs_extension`。',
-            "- generator 输出缺失：reconcile 仍可输出 payload，但所有机制保守标 `needs_extension`。",
-            '- reviewer 输出缺失：reconcile 仍可输出 payload，但所有机制保守标 `needs_extension`，并在 `unresolved_questions` 标"待补评审"。',
-            "",
             "## quality gate",
-            "- mechanism_candidates 至少 1 条。",
-            "- code_feasibility_review 必须包含每条机制的 implementation_status。",
-            "- payload 必须含 provenance.idea_id（取自 manifest.json::idea_id）。",
-            "- 不把 `operative_claims` 当作 kill 条件。",
+            "- mechanism_candidates 至少 1 条",
+            "- code_feasibility_review 必须覆盖每条机制的 implementation_status",
+            "- payload provenance.idea_id 与 manifest 一致",
             "",
         ]
     )

@@ -3,7 +3,7 @@
 Stage 1 reviewer (Codex GUI, audience=codex_review) needs to see what is already
 in the repo before it can judge whether a candidate mechanism is executable in
 the v1 contract. This module produces a small, frozen snapshot used by
-``audience_prompts.build_prompt`` to inject:
+``engine_prompts.build_prompt`` to inject:
 
 - existing factor / model_candidate names (so reviewer flags duplication)
 - existing case yaml names

@@ -981,9 +981,9 @@ def build_unified_parser() -> argparse.ArgumentParser:
         "--idea", required=True, help="Natural-language idea to distribute."
     )
     idea_distribute.add_argument(
-        "--audiences",
-        default="claude_mechanism,codex_review",
-        help="Comma-separated Stage 1 audiences.",
+        "--engines",
+        default="claude,codex",
+        help="Comma-separated Stage 1 engines (claude / codex).",
     )
     idea_distribute.add_argument(
         "--lab",
@@ -1044,6 +1044,35 @@ def build_unified_parser() -> argparse.ArgumentParser:
         "--parent-session-id",
         default=None,
         help="Optional upstream explore session id for stage chaining.",
+    )
+
+    idea_card = idea_commands.add_parser(
+        "experiment-card",
+        help=(
+            "Stage 4: scaffold experiment_card.md under ideas/<idea_id>/, "
+            "optionally cleanup Stage 0/1/2/3 temp files."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    idea_card.add_argument("--idea-id", required=True, help="ideas/<idea_id>/ basename.")
+    idea_card.add_argument(
+        "--outcome",
+        required=True,
+        choices=["promoted", "killed", "parked"],
+        help="Final outcome for this idea.",
+    )
+    idea_card.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root containing the ideas/ directory.",
+    )
+    idea_card.add_argument(
+        "--cleanup",
+        action="store_true",
+        help=(
+            "After writing the card, delete Stage 0/1/2/3 temp files under "
+            "ideas/<idea_id>/ (keeps manifest.json + experiment_card.md only)."
+        ),
     )
 
     vault = top.add_parser(
@@ -1293,7 +1322,7 @@ def unified_main(argv: list[str] | None = None) -> int:
             print(f"  Reconcile: {result.reconcile_path}")
             return 0
         if args.idea_action == "distribute":
-            from alpha_lab.research_bridge.audience_prompts import Lab
+            from alpha_lab.research_bridge.engine_prompts import Lab
             from alpha_lab.research_bridge.service import distribute_idea
 
             available_data = (
@@ -1303,7 +1332,7 @@ def unified_main(argv: list[str] | None = None) -> int:
                 result = distribute_idea(
                     vault_root=args.vault_root,
                     idea=args.idea,
-                    audiences=args.audiences,
+                    engines=args.engines,
                     lab=Lab(args.lab),
                     mode=args.mode,
                     project_slug=args.project,
@@ -1324,13 +1353,42 @@ def unified_main(argv: list[str] | None = None) -> int:
             print(f"  Lab      : {result.lab.value}")
             print(f"  Idea ID  : {result.idea_id}")
             print(f"  Stage    : {result.stage}")
-            print(
-                f"  Audiences: {', '.join(a.value for a in result.audiences)}"
-            )
+            print(f"  Engines  : {', '.join(e.value for e in result.engines)}")
             print(f"  Output   : {result.draft_dir}")
             print(f"  Retrieval: {result.retrieval_pack_path}")
-            print(f"  Reconcile: {result.reconcile_path}")
+            print(f"  Stage2In : {result.stage2_input_path}")
             print(f"  Manifest : {result.manifest_path}")
+            return 0
+        if args.idea_action == "experiment-card":
+            from alpha_lab.research_bridge.experiment_card import (
+                ExperimentCardOutcome,
+                scaffold_experiment_card,
+            )
+
+            try:
+                outcome = ExperimentCardOutcome(args.outcome)
+            except ValueError:
+                parser.error(
+                    f"--outcome must be one of "
+                    f"{[o.value for o in ExperimentCardOutcome]}"
+                )
+            try:
+                card_path = scaffold_experiment_card(
+                    idea_id=args.idea_id,
+                    outcome=outcome,
+                    workspace_root=args.workspace_root,
+                    cleanup=bool(args.cleanup),
+                )
+            except (FileNotFoundError, FileExistsError, OSError) as exc:
+                parser.error(str(exc))
+            print("")
+            print("  Workflow : idea-experiment-card")
+            print("  Status   : success")
+            print(f"  Idea ID  : {args.idea_id}")
+            print(f"  Outcome  : {outcome.value}")
+            print(f"  Card     : {card_path}")
+            if bool(args.cleanup):
+                print("  Cleanup  : removed Stage 0/1/2/3 temp files")
             return 0
         parser.error(f"unsupported idea command: {args.idea_action!r}")
 

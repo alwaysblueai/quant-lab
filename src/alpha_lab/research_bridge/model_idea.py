@@ -229,9 +229,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Natural-language model idea to distribute.",
     )
     distribute.add_argument(
-        "--audiences",
-        default="claude_mechanism,codex_review",
-        help="Comma-separated Stage 1 audiences.",
+        "--engines",
+        default="claude,codex",
+        help="Comma-separated Stage 1 engines (claude / codex).",
     )
     distribute.add_argument(
         "--mode",
@@ -298,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
 def distribute_model_idea(
     *,
     idea: str,
-    audiences: str | tuple[str, ...] | list[str] | None = None,
+    engines: str | tuple[str, ...] | list[str] | None = None,
     mode: str = "start",
     project_slug: str | None = None,
     top_k: int = 8,
@@ -311,19 +311,19 @@ def distribute_model_idea(
     """Stage 0 distribute for the model lab.
 
     Thin wrapper around :func:`alpha_lab.research_bridge.service.distribute_idea`
-    with ``lab=Lab.MODEL_FACTOR``. Codex review prompt is automatically
-    populated with the model-side schema (ModelFactorCaseSpec top-level fields)
-    and validator hard rules.
+    with ``lab=Lab.MODEL_FACTOR``. Both engines receive the same symmetric
+    prompt (generator + reviewer合一); the reviewer section is populated with
+    ModelFactorCaseSpec top-level fields + model validator hard rules.
     """
 
     # Local import to avoid circulars (service imports model_idea via CLI bridge).
-    from alpha_lab.research_bridge.audience_prompts import Lab
+    from alpha_lab.research_bridge.engine_prompts import Lab
     from alpha_lab.research_bridge.service import distribute_idea
 
     return distribute_idea(
         vault_root=vault_root,
         idea=idea,
-        audiences=audiences,
+        engines=engines,
         lab=Lab.MODEL_FACTOR,
         mode=mode,
         project_slug=project_slug,
@@ -342,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             result = distribute_model_idea(
                 idea=str(args.idea),
-                audiences=str(args.audiences) if args.audiences else None,
+                engines=str(args.engines) if args.engines else None,
                 mode=str(args.mode),
                 project_slug=(
                     str(args.project) if getattr(args, "project", None) else None
