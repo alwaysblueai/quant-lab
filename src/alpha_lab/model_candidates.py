@@ -36,6 +36,7 @@ class DraftModelSource:
     feature_availability_safety_lag_days: int | None = None
     model_family: str | None = None
     description: str = ""
+    provenance: dict[str, Any] | None = None
 
     def to_audit_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -67,6 +68,8 @@ class DraftModelSource:
             payload["model_family"] = self.model_family
         if self.description:
             payload["description"] = self.description
+        if self.provenance:
+            payload["provenance"] = dict(self.provenance)
         return payload
 
 
@@ -132,6 +135,13 @@ def read_draft_model_source(path: str | Path) -> DraftModelSource:
     else:
         safety_lag_days = int(safety_lag_raw)
 
+    provenance_raw = payload.get("provenance")
+    provenance: dict[str, Any] | None
+    if isinstance(provenance_raw, dict):
+        provenance = dict(provenance_raw)
+    else:
+        provenance = None
+
     return DraftModelSource(
         name=candidate_name,
         scope=_infer_scope(candidate_path),
@@ -158,6 +168,7 @@ def read_draft_model_source(path: str | Path) -> DraftModelSource:
         feature_availability_safety_lag_days=safety_lag_days,
         model_family=model_family,
         description=str(payload.get("human_summary") or payload.get("description") or "").strip(),
+        provenance=provenance,
     )
 
 
