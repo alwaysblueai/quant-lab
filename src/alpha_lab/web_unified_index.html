@@ -3148,11 +3148,11 @@
           <!-- Left: Main Workflow -->
           <div class="bridge-flow">
             
-            <!-- Stage 1: Vault Retrieval + Markdown Prompts -->
+            <!-- Stage 0: Audience-based distribution (legacy file layout) -->
             <div class="panel panel-inspiration">
-              <span class="section-tag">Stage 1: Vault Retrieval + Markdown Prompts</span>
-              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器 / Model Idea Explore</h2>
-          <p class="idea-prompt-hint">只检索 vault 并生成两份 Markdown-only prompts；不生成 YAML，不生成代码</p>
+              <span class="section-tag">Stage 0: Audience-based Distribution</span>
+              <h2 style="border:0;padding:0;margin-bottom:4px">想法探索器 / Idea Distribute</h2>
+          <p class="idea-prompt-hint">检索 vault + 代码库快照，生成两份 audience-specific Markdown prompts（claude_mechanism = generator / codex_review = reviewer）。新协议见 <code>docs/research_workflow.md</code>。需要规范 <code>ideas/&lt;idea_id&gt;/</code> 目录布局时，请改用 CLI <code>alpha-lab idea distribute</code>；Stage 3 落地的 factor.json 应保留 <code>provenance.idea_id</code>，否则 validator 会发出 <code>provenance_missing</code> warning。</p>
               
 		              <div class="idea-simple-entry">
 		                <textarea id="exploreIdea" class="idea-textarea" placeholder="例:下跌日波动很高,但盘中有承接,后续压力可能衰减…"></textarea>

@@ -1953,19 +1953,23 @@
     <div class="panel">
       <span class="idea-stage-tag">Backend-first research loop</span>
       <h2>后端迭代优先</h2>
-      <p class="idea-prompt-hint">模糊 model idea 的初步探索、草稿实验和下一轮点评默认在 Codex GUI 后端完成；本页面只接收已经迭代到较成熟的 `model_candidate_payload`，用于标准验证、完整报告和 artifact 可视化。</p>
+      <p class="idea-prompt-hint">模糊 model idea 的初步探索、草稿实验和下一轮点评默认在 Codex GUI 后端完成；本页面只接收已经迭代到较成熟的 `model_candidate_payload`，用于标准验证、完整报告和 artifact 可视化。新 idea 请先在终端跑 <code>alpha-lab model-idea distribute --idea "..."</code> 生成 <code>ideas/&lt;idea_id&gt;/</code>（含 generator + reviewer prompts），再把网页版 GPT 输出粘到下方。粘贴的 payload 没有 <code>provenance.idea_id</code> 时 validator 会发出 <code>provenance_missing</code> warning。</p>
       <div class="idea-workflow-strip">
         <div class="idea-workflow-step active">
+          <strong>0. Stage 0 分发</strong>
+          <span>终端 <code>alpha-lab model-idea distribute</code> 产出 retrieval pack + 两份 audience prompts（claude_mechanism / codex_review）。</span>
+        </div>
+        <div class="idea-workflow-step active">
           <strong>1. 后端探索</strong>
-          <span>Codex GUI 读取网页版 GPT 方案，保存 candidate，运行快速实验并写实验点评。</span>
+          <span>Claude Code 出机制 ledger；Codex GUI 出可执行性评审；两者互不可见。</span>
         </div>
         <div class="idea-workflow-step active">
           <strong>2. 网页版 GPT 迭代</strong>
-          <span>把后端实验报告交给网页版 GPT，产出下一版 `model_candidate_payload`。</span>
+          <span>把两份 Stage 1 输出 + reconcile 模板交给网页版 GPT，产出含 provenance 的 `model_candidate_payload`。</span>
         </div>
         <div class="idea-workflow-step active">
           <strong>3. 前端完整报告</strong>
-          <span>候选足够成熟后，在下方 Draft Candidates 面板运行完整报告并检查审计 hash。</span>
+          <span>候选足够成熟后，在下方 Draft Candidates 面板运行完整报告并检查审计 hash + provenance.idea_id。</span>
         </div>
       </div>
     </div>
