@@ -3,20 +3,21 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from pathlib import Path
-
-import pandas as pd
+from typing import TYPE_CHECKING
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 
-from .catalog import DataCatalog, SliceSpec
-from .local_zip import LocalZipAshareDailyIngestor
 from .slice_presets import (
     DEFAULT_SLICE_PRESET,
     SLICE_PRESETS,
     SlicePresetConfig,
     resolve_slice_window,
 )
-from .tushare import TushareIngestor
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from .catalog import DataCatalog, SliceSpec
 
 UNIVERSE_CHOICES = [
     "all_ashare",
@@ -313,6 +314,13 @@ def build_data_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Heavy imports moved here so ``build_data_parser`` (called from
+    # ``alpha_lab.cli.build_unified_parser``) doesn't drag pandas + pyarrow
+    # into ``alpha-lab --help`` cold start.
+    from .catalog import DataCatalog
+    from .local_zip import LocalZipAshareDailyIngestor
+    from .tushare import TushareIngestor
+
     parser = argparse.ArgumentParser(
         prog="alpha-lab data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -575,6 +583,8 @@ def _resolve_export_slice_spec(
     args: argparse.Namespace,
     catalog: DataCatalog,
 ) -> tuple[SliceSpec, SlicePresetConfig]:
+    from .catalog import SliceSpec
+
     fallback_end_date = args.end_date or catalog.latest_date("daily_bars")
     if fallback_end_date is None:
         raise AlphaLabDataError(

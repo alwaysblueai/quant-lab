@@ -2,17 +2,11 @@ from __future__ import annotations
 
 import argparse
 
-from alpha_lab.research_bridge.exploration import ExplorationMap
-from alpha_lab.research_bridge.graph_view import VaultGraph
-from alpha_lab.research_bridge.models import AlphaLabDefaults, ProjectStatus, WritebackPolicy
-from alpha_lab.research_bridge.service import (
-    init_project,
-    refresh_project_pack,
-    scaffold_case,
-    start_round,
-    structure_candidates,
-    summarize_run,
-)
+# All heavy imports (``service``, ``models``, ``exploration``, ``graph_view``)
+# are deferred to ``main()`` and the handlers that need them. ``service`` in
+# particular pulls in pandas + networkx + embeddings (~250ms cold). Keeping
+# this module light makes ``alpha-lab --help`` register the bridge subparser
+# without paying that cost.
 
 
 def build_bridge_parser(parser: argparse.ArgumentParser) -> None:
@@ -251,6 +245,22 @@ def build_bridge_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Deferred heavy imports — keep ``build_bridge_parser`` cold-start fast.
+    from alpha_lab.research_bridge.exploration import ExplorationMap
+    from alpha_lab.research_bridge.models import (
+        AlphaLabDefaults,
+        ProjectStatus,
+        WritebackPolicy,
+    )
+    from alpha_lab.research_bridge.service import (
+        init_project,
+        refresh_project_pack,
+        scaffold_case,
+        start_round,
+        structure_candidates,
+        summarize_run,
+    )
+
     parser = argparse.ArgumentParser(
         prog="alpha-lab bridge",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -384,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.bridge_action == "factor-coverage":
+        from alpha_lab.research_bridge.graph_view import VaultGraph
+
         graph = VaultGraph.from_vault_root(args.vault_root)
         graph.build(vault_root=args.vault_root)
         coverage = graph.coverage_by_type().get(

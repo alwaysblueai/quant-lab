@@ -8,8 +8,10 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.exceptions import AlphaLabConfigError
@@ -265,6 +267,8 @@ def _safe_filename(name: str) -> str:
 
 def _load_prices(input_path: Path) -> pd.DataFrame:
     """Read and minimally validate the input price CSV."""
+    import pandas as pd
+
     try:
         df = pd.read_csv(input_path)
     except Exception as exc:
