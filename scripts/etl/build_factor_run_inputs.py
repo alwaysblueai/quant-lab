@@ -4,7 +4,7 @@ Why this exists
 ---------------
 ``alpha-lab real-case single-factor run`` loads the entire ``prices_path`` into
 pandas memory and then layers diagnostics on top. The joined prices+intraday
-dataset (101 cols × 7.5M rows) blows past the WSL2 user-cgroup budget under
+dataset (101 cols × 7.21M rows post intraday-cutoff 2025-12-31) blows past the WSL2 user-cgroup budget under
 ``default_research`` because diagnostics like ``run_param_sensitivity`` and
 ``run_lag_sensitivity`` re-run the backtest on perturbed inputs and duplicate
 the working set several times.

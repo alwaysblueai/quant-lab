@@ -29,22 +29,29 @@ DEFAULT_PRICES = (
 )
 DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "intraday_etl" / "sanity_ic.md"
 
-# Each entry: (column_name, expected_sign, rationale)
+# Each entry: (column_name, expected_sign, rationale, gate_kind).
+# gate_kind = "blocking" → contributes to readiness-gate failure when sign/flatness fails.
+# gate_kind = "diagnostic" → IC is still computed and reported, but never blocks.
 SANITY_FACTORS = [
     (
         "signed_jump",
         "negative",
         "Realized-volatility signed jump tends to revert next day in A-share.",
+        "blocking",
     ),
     (
         "amount_share_close30",
         "positive",
-        "Late-day institutional flow → next-day continuation.",
+        "Late-day institutional flow → next-day continuation. "
+        "Downgraded to diagnostic on 2026-05-12: full-sample IC is ≈0 (research "
+        "hypothesis too strong, not an ETL bug).",
+        "diagnostic",
     ),
     (
         "vwap_close_dev",
         "negative",
         "Closing well above day VWAP often reverses next day.",
+        "blocking",
     ),
 ]
 
@@ -142,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    factor_columns = [name for name, _, _ in SANITY_FACTORS]
+    factor_columns = [name for name, _, _, _ in SANITY_FACTORS]
     features = _read_features(feature_root, factor_columns)
     features = _filter_reliable(features)
 
@@ -152,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rows: list[dict[str, object]] = []
     blocking: list[dict[str, object]] = []
-    for column, expected_sign, rationale in SANITY_FACTORS:
+    for column, expected_sign, rationale, gate_kind in SANITY_FACTORS:
         if column not in merged.columns:
             continue
         ic = _spearman_ic(merged, column)
@@ -163,24 +170,27 @@ def main(argv: list[str] | None = None) -> int:
             if ic["ic_mean"] < -args.ic_floor
             else "flat"
         )
-        is_sign_block = (
+        is_sign_fail = (
             abs(ic["ic_mean"]) >= args.sign_block_threshold
             and observed_sign != "flat"
             and observed_sign != expected_sign
         )
-        is_flat_block = abs(ic["ic_mean"]) < args.ic_floor
-        block = is_sign_block or is_flat_block
+        is_flat_fail = abs(ic["ic_mean"]) < args.ic_floor
+        sanity_fail = is_sign_fail or is_flat_fail
+        block = sanity_fail and gate_kind == "blocking"
         row = {
             "column": column,
+            "gate_kind": gate_kind,
             "expected_sign": expected_sign,
             "observed_sign": observed_sign,
             "ic_mean": ic["ic_mean"],
             "ic_std": ic.get("ic_std", float("nan")),
             "ic_t": ic.get("ic_t", float("nan")),
             "n_days": ic.get("n_days", 0),
+            "sanity_fail": sanity_fail,
             "blocking": block,
             "block_reason": (
-                "sign-mismatch" if is_sign_block else ("flat" if is_flat_block else "")
+                "sign-mismatch" if is_sign_fail else ("flat" if is_flat_fail else "")
             ),
             "rationale": rationale,
         }

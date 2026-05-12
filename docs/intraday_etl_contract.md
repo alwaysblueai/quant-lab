@@ -14,15 +14,17 @@ Stage B 保留 lookback，Stage C 保持正式研究边界：
 
 ```text
 Stage B: data/processed/minute_panel/year=YYYY/part-0.parquet
-  date range: 2016-04-18 -> 2026-04-15
+  date range: 2016-04-18 -> 2025-12-31
   asset set : universe_mask.asset 去重后的 5416 只
   content   : raw minute bars，按 asset, datetime 排序
 
 Stage C: data/processed/intraday_features/year=YYYY/part-0.parquet
-  date range: 2016-10-17 -> 2026-04-15
+  date range: 2016-10-17 -> 2025-12-31
   asset set : prices.parquet 中存在的 (date, asset)
   content   : Group A daily PV + status flags + 已 promote 的 intraday feature batches
 ```
+
+> Intraday-cutoff = 2025-12-31。上游 daily-PV (`ashare_institutional_20160418_20260415_supplemented`) 仍保留到 2026-04-15；但 Stage B 的 1min 源仅到 2025-12-31，因此 Stage C / `ashare_institutional_intraday_v1` 也截到 2025-12-31，避免下游训练吃到 intraday 列全 NaN 的尾巴。
 
 `universe_mask.parquet` 是稀疏长表，只存 `in_universe=1` 的行。ETL 不按 daily universe mask 删除分钟行；研究侧使用 mask 时必须 reindex 到完整 `(date, asset)` 网格，并把缺失解释为 `False`。
 

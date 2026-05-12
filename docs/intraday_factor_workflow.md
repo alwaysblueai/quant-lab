@@ -13,7 +13,9 @@ this machine when the factor consumes any combination of:
 
 It exists because the joined dataset under
 ``data/processed/real_case_inputs/ashare_institutional_intraday_v1/`` is
-**101 cols × 7.5M rows × 3.1 GB on disk**. Loading it whole into pandas peaks
+**101 cols × 7.21M rows × 3.4 GB on disk** (intraday-cutoff 2025-12-31; the
+upstream daily-PV dataset still extends to 2026-04-15 but Stage B/C stop at
+2025-12-31). Loading it whole into pandas peaks
 at 12–18 GB — well above the WSL2 user-cgroup memory budget on this laptop —
 and ``--evaluation-profile default_research`` adds 9 diagnostics
 (``run_param_sensitivity``, ``run_lag_sensitivity``,
@@ -59,10 +61,10 @@ locked and you want ``default_research``.
 
 | Pressure point | Lever | Expected pandas peak |
 |---|---|---|
-| Full joined dataset (101 cols, 7.5M rows) | none | 12–18 GB → OOM |
+| Full joined dataset (101 cols, 7.21M rows post-cutoff) | none | 12–18 GB → OOM |
 | Slim slice (17 base cols + factor's intraday cols only) | ``build_factor_run_inputs.py`` | ~3–4 GB |
 | Slim slice + ``factor_input.mode: file`` | precompute factor, drop recipe layer | ~2–3 GB |
-| Above + 4-year window (e.g. 2020-01-01 to 2026-04-15) | ``--start-date`` | ~1.5–2 GB |
+| Above + ~6-year window (e.g. 2020-01-01 to 2025-12-31) | ``--start-date`` | ~1.5–2 GB |
 | Above + ``default_research`` diagnostics | (no lever; budget for +5–8 GB peak) | ~6–10 GB |
 
 For ``default_research``: aim for the bottom half of the table.
