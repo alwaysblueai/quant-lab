@@ -1286,11 +1286,11 @@
       }
     ],
     "notes": [
+      "factor loses to simple momentum/reversal baselines",
       "fragile across rolling windows",
       "rebalance cadence is slower than IC decay",
       "single-case verdict indicates fragility",
-      "IC decays sharply after 1-day execution lag",
-      "confidence intervals remain supportive"
+      "IC decays sharply after 1-day execution lag"
     ],
     "tables": [
       {
@@ -4685,6 +4685,7 @@
   "verdict_layer": {
     "blockers": [
       "blocked by unstable rolling evidence",
+      "blocked by underperformance vs simple momentum/reversal baselines",
       "blocked by sharp IC decay under 1-day execution lag"
     ],
     "caveats": [

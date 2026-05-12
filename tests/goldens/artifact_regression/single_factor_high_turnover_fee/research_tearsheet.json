@@ -1289,8 +1289,8 @@
       "fragile across subperiods",
       "single-case verdict is weak",
       "rebalance cadence materially exceeds IC half-life",
-      "fragile across rolling windows",
-      "uncertainty remains high"
+      "factor loses to simple momentum/reversal baselines",
+      "fragile across rolling windows"
     ],
     "tables": [
       {

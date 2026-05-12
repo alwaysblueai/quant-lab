@@ -2650,7 +2650,9 @@ def test_register_custom_factor_missing_builder(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
 
-    with pytest.raises(ValueError, match="must define a callable named 'builder'"):
+    with pytest.raises(
+        ValueError, match="must define a callable named 'build_factor' or 'builder'"
+    ):
         svc.register_custom_factor({"name": "bad2", "code": "x = 42"})
 
 

@@ -13,6 +13,7 @@
   ],
   "major_risks": [
     "blocked by unstable rolling evidence",
+    "blocked by underperformance vs simple momentum/reversal baselines",
     "blocked by sharp IC decay under 1-day execution lag"
   ],
   "package_type": "alpha_lab_level2_portfolio_validation_package",
@@ -22,6 +23,7 @@
     "cost_sensitivity_note": "Cost sensitivity is inconclusive because portfolio validation did not complete.",
     "fragility_reasons": [
       "blocked by unstable rolling evidence",
+      "blocked by underperformance vs simple momentum/reversal baselines",
       "blocked by sharp IC decay under 1-day execution lag"
     ],
     "scenario_sensitivity_notes": [
@@ -67,16 +69,17 @@
   "promotion_decision_context": {
     "blockers": [
       "blocked by unstable rolling evidence",
+      "blocked by underperformance vs simple momentum/reversal baselines",
       "blocked by sharp IC decay under 1-day execution lag"
     ],
     "decision": "Blocked from Level 2",
     "reasons": [
       "blocked by unstable rolling evidence",
+      "blocked by underperformance vs simple momentum/reversal baselines",
       "blocked by sharp IC decay under 1-day execution lag",
       "factor verdict is not yet strong",
       "neutralization evidence is unavailable",
-      "uncertainty remains supportive",
-      "robust across subperiods"
+      "uncertainty remains supportive"
     ],
     "source": "level2_promotion_gate"
   },

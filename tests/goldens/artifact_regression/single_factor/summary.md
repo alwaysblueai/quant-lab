@@ -14,7 +14,7 @@
 |---|---|
 | Evaluation Profile | default_research |
 | Factor Verdict | Promising but fragile |
-| Campaign Triage | Fragile / monitor |
+| Campaign Triage | Drop for now |
 | Level 2 Promotion | Blocked from Level 2 |
 | Level 1->2 Transition | Inconclusive transition |
 | Portfolio Validation | skipped_not_promoted (Not evaluated (not promoted)) |
@@ -29,8 +29,8 @@
 | Capacity | available; upper=7063874.77; adv=119128057.53 |
 | Conditional IC | Q5-Q1=0.1476; large-small=-0.0816 |
 | 主要诊断 | positive IC and RankIC means; IC and RankIC signs are consistently positive; signal weakens materially in some periods; rebalance cadence may be too slow for IC decay; confidence interval overlaps zero: long-short; apparent edge is weak relative to estimation noise |
-| 主要阻断项 | blocked by unstable rolling evidence; blocked by sharp IC decay under 1-day execution lag |
-| 主要风险 | blocked by unstable rolling evidence; blocked by sharp IC decay under 1-day execution lag |
+| 主要阻断项 | blocked by unstable rolling evidence; blocked by underperformance vs simple momentum/reversal baselines; blocked by sharp IC decay under 1-day execution lag |
+| 主要风险 | blocked by unstable rolling evidence; blocked by underperformance vs simple momentum/reversal baselines; blocked by sharp IC decay under 1-day execution lag |
 
 ## 产物路径
 

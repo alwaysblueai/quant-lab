@@ -9,26 +9,60 @@
 - `avg_assets`: `11.98125`
 - `avg_valid_forward_return_assets`: `11.60625`
 - `avg_valid_score_assets`: `11.98125`
-- `baseline_best_mean_ic`: `-0.0162902633591915`
-- `baseline_factor_mean_ic_advantage`: `0.09313011448052301`
+- `baseline_best_mean_ic`: `0.18371307462837477`
+- `baseline_downside_vol_20d_factor_rank_corr`: `0.013604126370083814`
+- `baseline_downside_vol_20d_long_short_ir`: `-0.0338240869373984`
+- `baseline_downside_vol_20d_mean_ic`: `-0.028761990350349313`
+- `baseline_factor_mean_ic_advantage`: `-0.10687322350704326`
+- `baseline_mom_120d_skip20d_factor_rank_corr`: `-0.008216783216783211`
+- `baseline_mom_120d_skip20d_long_short_ir`: `0.8210051146483861`
+- `baseline_mom_120d_skip20d_mean_ic`: `0.18371307462837477`
+- `baseline_mom_20d_factor_rank_corr`: `-0.002682317682317685`
+- `baseline_mom_20d_long_short_ir`: `-0.0016934569613127465`
+- `baseline_mom_20d_mean_ic`: `-0.0162902633591915`
+- `baseline_mom_60d_skip5d_factor_rank_corr`: `-0.033794626426205385`
+- `baseline_mom_60d_skip5d_long_short_ir`: `-0.03882503956435396`
+- `baseline_mom_60d_skip5d_mean_ic`: `-0.06289347747643173`
 - `baseline_momentum_factor_rank_corr`: `-0.002682317682317685`
 - `baseline_momentum_long_short_ir`: `-0.0016934569613127465`
 - `baseline_momentum_mean_ic`: `-0.0162902633591915`
+- `baseline_retvol_20d_factor_rank_corr`: `-0.011088911088911095`
+- `baseline_retvol_20d_long_short_ir`: `0.07148091845276308`
+- `baseline_retvol_20d_mean_ic`: `0.001221135124988802`
+- `baseline_rev_20d_factor_rank_corr`: `0.002682317682317685`
+- `baseline_rev_20d_long_short_ir`: `0.0016934569613127465`
+- `baseline_rev_20d_mean_ic`: `0.0162902633591915`
+- `baseline_rev_3d_factor_rank_corr`: `0.02644871052514365`
+- `baseline_rev_3d_long_short_ir`: `-0.15837503164430414`
+- `baseline_rev_3d_mean_ic`: `-0.050814360336166146`
+- `baseline_rev_5d_factor_rank_corr`: `-0.004967290773742386`
+- `baseline_rev_5d_long_short_ir`: `-0.13593315866666272`
+- `baseline_rev_5d_mean_ic`: `-0.031264666877588373`
 - `baseline_reversal_factor_rank_corr`: `-0.004967290773742386`
 - `baseline_reversal_long_short_ir`: `-0.13593315866666272`
 - `baseline_reversal_mean_ic`: `-0.031264666877588373`
+- `baseline_suite_best_factor_rank_corr`: `-0.008216783216783211`
+- `baseline_suite_best_family`: `momentum`
+- `baseline_suite_best_long_short_ir`: `0.8210051146483861`
+- `baseline_suite_best_mean_ic`: `0.18371307462837477`
+- `baseline_suite_best_name`: `mom_120d_skip20d`
+- `baseline_suite_count`: `9`
+- `baseline_suite_evaluated_count`: `8`
+- `baseline_suite_evaluated_names`: `['mom_20d', 'mom_60d_skip5d', 'mom_120d_skip20d', 'rev_3d', 'rev_5d', 'rev_20d', 'retvol_20d', 'downside_vol_20d']`
+- `baseline_suite_skipped_count`: `1`
+- `baseline_suite_skipped_names`: `['amplitude_20d']`
 - `campaign_rank_primary_metric`: `0.25681515186015913`
 - `campaign_rank_primary_metric_name`: `ic_ir`
-- `campaign_rank_risk_count`: `4`
+- `campaign_rank_risk_count`: `5`
 - `campaign_rank_rule`: `triage_priority asc, ic_ir desc, mean_long_short_return desc, rolling_positive_share_min desc, risk_count asc, support_count desc`
 - `campaign_rank_secondary_metric`: `0.004855674205640039`
 - `campaign_rank_secondary_metric_name`: `mean_long_short_return`
 - `campaign_rank_stability_metric`: `0.8048780487804879`
 - `campaign_rank_stability_metric_name`: `rolling_positive_share_min`
-- `campaign_rank_support_count`: `7`
-- `campaign_triage`: `Fragile / monitor`
-- `campaign_triage_priority`: `4`
-- `campaign_triage_reasons`: `['fragile across rolling windows', 'rebalance cadence is slower than IC decay', 'single-case verdict indicates fragility', 'IC decays sharply after 1-day execution lag', 'confidence intervals remain supportive']`
+- `campaign_rank_support_count`: `6`
+- `campaign_triage`: `Drop for now`
+- `campaign_triage_priority`: `5`
+- `campaign_triage_reasons`: `['factor loses to simple momentum/reversal baselines', 'fragile across rolling windows', 'rebalance cadence is slower than IC decay', 'single-case verdict indicates fragility', 'IC decays sharply after 1-day execution lag']`
 - `capacity_adv_lookback`: `20`
 - `capacity_enabled`: `True`
 - `capacity_market_cap_column`: `total_mv`
@@ -150,8 +184,8 @@
 - `level12_transition_confirmation_note`: `No clear confirmation or degradation can be established yet.`
 - `level12_transition_interpretation`: `Transition cannot be concluded because portfolio-level evaluation is absent.`
 - `level12_transition_label`: `Inconclusive transition`
-- `level12_transition_reasons`: `['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by sharp IC decay under 1-day execution lag', 'fragility: blocked by unstable rolling evidence']`
-- `level12_transition_summary`: `{'confirmation_vs_degradation_note': 'No clear confirmation or degradation can be established yet.', 'key_transition_reasons': ['campaign triage: Fragile / monitor', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by sharp IC decay under 1-day execution lag', 'fragility: blocked by unstable rolling evidence'], 'level1_status': 'Promising but fragile', 'level2_status': 'Not evaluated (not promoted)', 'transition_interpretation': 'Transition cannot be concluded because portfolio-level evaluation is absent.', 'transition_label': 'Inconclusive transition'}`
+- `level12_transition_reasons`: `['campaign triage: Drop for now', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by underperformance vs simple momentum/reversal baselines', 'fragility: blocked by unstable rolling evidence']`
+- `level12_transition_summary`: `{'confirmation_vs_degradation_note': 'No clear confirmation or degradation can be established yet.', 'key_transition_reasons': ['campaign triage: Drop for now', 'promotion decision: Blocked from Level 2', 'portfolio recommendation: Not evaluated (not promoted)', 'promotion reason: blocked by unstable rolling evidence', 'promotion reason: blocked by underperformance vs simple momentum/reversal baselines', 'fragility: blocked by unstable rolling evidence'], 'level1_status': 'Promising but fragile', 'level2_status': 'Not evaluated (not promoted)', 'transition_interpretation': 'Transition cannot be concluded because portfolio-level evaluation is absent.', 'transition_label': 'Inconclusive transition'}`
 - `long_short_hit_rate`: `0.5666666666666667`
 - `long_short_hit_rate_full`: `0.5806451612903226`
 - `long_short_hit_rate_is`: `0.5888888888888889`
@@ -337,8 +371,8 @@
 - `portfolio_validation_benchmark_tracking_error`: `None`
 - `portfolio_validation_concentration_turnover_note`: `Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.`
 - `portfolio_validation_cost_sensitivity_note`: `Cost sensitivity is inconclusive because portfolio validation did not complete.`
-- `portfolio_validation_fragility_reasons`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
-- `portfolio_validation_major_risks`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
+- `portfolio_validation_fragility_reasons`: `['blocked by unstable rolling evidence', 'blocked by underperformance vs simple momentum/reversal baselines', 'blocked by sharp IC decay under 1-day execution lag']`
+- `portfolio_validation_major_risks`: `['blocked by unstable rolling evidence', 'blocked by underperformance vs simple momentum/reversal baselines', 'blocked by sharp IC decay under 1-day execution lag']`
 - `portfolio_validation_recommendation`: `Not evaluated (not promoted)`
 - `portfolio_validation_remains_credible`: `None`
 - `portfolio_validation_robustness_label`: `Inconclusive portfolio evidence`
@@ -346,9 +380,9 @@
 - `portfolio_validation_status`: `skipped_not_promoted`
 - `portfolio_validation_support_reasons`: `[]`
 - `primary_metric_scope`: `oos`
-- `promotion_blockers`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag']`
+- `promotion_blockers`: `['blocked by unstable rolling evidence', 'blocked by underperformance vs simple momentum/reversal baselines', 'blocked by sharp IC decay under 1-day execution lag']`
 - `promotion_decision`: `Blocked from Level 2`
-- `promotion_reasons`: `['blocked by unstable rolling evidence', 'blocked by sharp IC decay under 1-day execution lag', 'factor verdict is not yet strong', 'neutralization evidence is unavailable', 'uncertainty remains supportive', 'robust across subperiods']`
+- `promotion_reasons`: `['blocked by unstable rolling evidence', 'blocked by underperformance vs simple momentum/reversal baselines', 'blocked by sharp IC decay under 1-day execution lag', 'factor verdict is not yet strong', 'neutralization evidence is unavailable', 'uncertainty remains supportive']`
 - `random_baseline_mean_ic_mean`: `0.0009922851342206165`
 - `random_baseline_mean_ic_p95`: `0.034118655538010384`
 - `random_baseline_mean_ic_p99`: `0.051700338371306095`
@@ -474,25 +508,26 @@
 - Reason: apparent edge is weak relative to estimation noise
 
 ## Campaign Triage
-- Triage: `Fragile / monitor`
-- Priority: 4
+- Triage: `Drop for now`
+- Priority: 5
 - Ranking metrics (ICIR / L-S / rolling+ min): 0.256815 / 0.004856 / 0.804878
-- Support/Risk count: 7 / 4
+- Support/Risk count: 6 / 5
+- Reason: factor loses to simple momentum/reversal baselines
 - Reason: fragile across rolling windows
 - Reason: rebalance cadence is slower than IC decay
 - Reason: single-case verdict indicates fragility
 - Reason: IC decays sharply after 1-day execution lag
-- Reason: confidence intervals remain supportive
 
 ## Level 2 Promotion Gate
 - Decision: `Blocked from Level 2`
 - Reason: blocked by unstable rolling evidence
+- Reason: blocked by underperformance vs simple momentum/reversal baselines
 - Reason: blocked by sharp IC decay under 1-day execution lag
 - Reason: factor verdict is not yet strong
 - Reason: neutralization evidence is unavailable
 - Reason: uncertainty remains supportive
-- Reason: robust across subperiods
 - Blocker: blocked by unstable rolling evidence
+- Blocker: blocked by underperformance vs simple momentum/reversal baselines
 - Blocker: blocked by sharp IC decay under 1-day execution lag
 
 ## Level 1 to Level 2 Transition
@@ -501,11 +536,11 @@
 - Level 1 status: Promising but fragile
 - Level 2 status: Not evaluated (not promoted)
 - Confirmation vs degradation: No clear confirmation or degradation can be established yet.
-- Transition reason: campaign triage: Fragile / monitor
+- Transition reason: campaign triage: Drop for now
 - Transition reason: promotion decision: Blocked from Level 2
 - Transition reason: portfolio recommendation: Not evaluated (not promoted)
 - Transition reason: promotion reason: blocked by unstable rolling evidence
-- Transition reason: promotion reason: blocked by sharp IC decay under 1-day execution lag
+- Transition reason: promotion reason: blocked by underperformance vs simple momentum/reversal baselines
 - Transition reason: fragility: blocked by unstable rolling evidence
 
 ## Level 2 Portfolio Validation
@@ -516,11 +551,13 @@
 - Portfolio robustness taxonomy: `Inconclusive portfolio evidence`
 - Scenario sensitivity: Sensitivity diagnostics are inconclusive because portfolio validation did not complete.
 - Robustness fragility: blocked by unstable rolling evidence
+- Robustness fragility: blocked by underperformance vs simple momentum/reversal baselines
 - Robustness fragility: blocked by sharp IC decay under 1-day execution lag
 - Benchmark-relative support note: Benchmark-relative support is unavailable in current case evidence.
 - Cost sensitivity note: Cost sensitivity is inconclusive because portfolio validation did not complete.
 - Concentration/turnover note: Concentration/turnover diagnostics are inconclusive because portfolio validation did not complete.
 - Risk: blocked by unstable rolling evidence
+- Risk: blocked by underperformance vs simple momentum/reversal baselines
 - Risk: blocked by sharp IC decay under 1-day execution lag
 - Caveat: Portfolio validation skipped because promotion gate was not passed.
 - Benchmark-relative evaluation status: not_available
