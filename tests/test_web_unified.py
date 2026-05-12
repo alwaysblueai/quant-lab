@@ -2896,7 +2896,7 @@ def test_model_factor_web_output_dir_is_scoped_by_run_id(
         output=SimpleNamespace(root_dir=str(output_root)),
     )
     monkeypatch.setattr(
-        "alpha_lab.web_unified.load_model_factor_case_spec",
+        "alpha_lab.web_unified._subprocess.load_model_factor_case_spec",
         lambda _path: fake_spec,
     )
 
@@ -2964,7 +2964,7 @@ def test_model_lab_subprocess_command_includes_draft_candidate(
         output=SimpleNamespace(root_dir=str(output_root)),
     )
     monkeypatch.setattr(
-        "alpha_lab.web_unified.load_model_factor_case_spec",
+        "alpha_lab.web_unified._subprocess.load_model_factor_case_spec",
         lambda _path: fake_spec,
     )
     task = _RunTask(
