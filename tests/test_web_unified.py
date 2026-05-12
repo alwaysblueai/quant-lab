@@ -3161,10 +3161,10 @@ def test_run_store_reuses_input_bundle_cache_across_single_runs(
         )
         return _FakeResult(output_dir=output_dir, metrics_path=metrics_path)
 
-    monkeypatch.setattr("alpha_lab.web_unified.load_single_factor_case_spec", _fake_load_spec)
-    monkeypatch.setattr("alpha_lab.web_unified.load_standard_inputs", _fake_load_inputs)
+    monkeypatch.setattr("alpha_lab.web_unified._run_store.load_single_factor_case_spec", _fake_load_spec)
+    monkeypatch.setattr("alpha_lab.web_unified._run_store.load_standard_inputs", _fake_load_inputs)
     monkeypatch.setattr(
-        "alpha_lab.web_unified.run_single_factor_case", _fake_run_single_factor_case
+        "alpha_lab.web_unified._run_store.run_single_factor_case", _fake_run_single_factor_case
     )
 
     tasks = [
@@ -3256,7 +3256,10 @@ def test_run_store_executes_model_factor_batch_in_parallel(
 
     monkeypatch.setattr(store, "_execute_single_task", _fake_execute_single_task)
     monkeypatch.setattr(store, "_model_factor_batch_has_output_conflict", lambda _tasks: False)
-    monkeypatch.setattr("alpha_lab.web_unified._build_model_lab_batch_worker_count", lambda _n: 3)
+    monkeypatch.setattr(
+        "alpha_lab.web_unified._run_store._build_model_lab_batch_worker_count",
+        lambda _n: 3,
+    )
 
     store._execute_task_group(tasks)  # noqa: SLF001
 
