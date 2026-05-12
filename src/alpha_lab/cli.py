@@ -988,6 +988,155 @@ def build_unified_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _handle_campaign(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.campaign_action == "run":
+        if args.campaign_name not in _SUPPORTED_CAMPAIGNS:
+            parser.error(
+                "unsupported campaign name "
+                f"{args.campaign_name!r}; supported: {sorted(_SUPPORTED_CAMPAIGNS)}"
+            )
+
+        from alpha_lab.campaigns.research_campaign_1 import (
+            main as research_campaign_1_main,
+        )
+
+        return research_campaign_1_main(args.args)
+
+    if args.campaign_action == "compare-profiles":
+        from alpha_lab.campaigns.profile_comparison import (
+            print_campaign_profile_case_evidence,
+            print_campaign_profile_comparison_summary,
+            run_campaign_profile_comparison,
+        )
+
+        try:
+            comparison_result = run_campaign_profile_comparison(
+                source=args.source,
+                output_root_dir=args.output_root_dir,
+                profiles=tuple(args.profiles),
+                pair_mode=args.pair_mode,
+                campaign_config=args.campaign_config,
+                case_output_root_dir=args.case_output_root_dir,
+                artifact_hint_path_mode=args.artifact_hint_path_mode,
+                render_report=not bool(args.no_render_report),
+                render_overwrite=bool(args.render_overwrite),
+                clean_output=not bool(args.no_clean_output),
+            )
+        except (ValueError, FileNotFoundError, RuntimeError) as exc:
+            parser.error(str(exc))
+        print_campaign_profile_comparison_summary(comparison_result)
+        if args.show_case_evidence is not None:
+            try:
+                print_campaign_profile_case_evidence(
+                    comparison_result,
+                    case_name=str(args.show_case_evidence),
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
+        return 0
+
+    if args.campaign_action == "render-dashboard":
+        from alpha_lab.reporting.renderers import (
+            write_campaign_profile_dashboard_html,
+        )
+
+        try:
+            dashboard_path = write_campaign_profile_dashboard_html(
+                args.comparison_json,
+                output_path=args.output_html,
+                overwrite=bool(args.overwrite),
+                title=args.title,
+                artifact_load_mode=args.artifact_load_mode,
+            )
+        except (ValueError, FileNotFoundError, RuntimeError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : campaign-render-dashboard")
+        print("  Status   : success")
+        print(f"  Input    : {Path(args.comparison_json).resolve()}")
+        print(f"  Output   : {dashboard_path}")
+        return 0
+
+    parser.error(f"unsupported campaign command: {args.campaign_action!r}")
+    return 2  # unreachable — parser.error raises SystemExit; placate type checker.
+
+
+def _handle_idea(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.idea_action == "distribute":
+        from alpha_lab.research_bridge.engine_prompts import Lab
+        from alpha_lab.research_bridge.service import distribute_idea
+
+        available_data = (
+            frozenset(args.available_data) if args.available_data else None
+        )
+        try:
+            result = distribute_idea(
+                vault_root=args.vault_root,
+                idea=args.idea,
+                engines=args.engines,
+                lab=Lab(args.lab),
+                mode=args.mode,
+                project_slug=args.project,
+                top_k=args.top_k,
+                available_data=available_data,
+                stage=args.stage,
+                workspace_root=args.workspace_root,
+                output_root=args.output_root,
+                persist_session=bool(args.persist_session),
+                inject_recent_drift=bool(args.inject_recent_drift),
+                parent_session_id=args.parent_session_id,
+            )
+        except (ValueError, FileExistsError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : idea-distribute")
+        print("  Status   : success")
+        print(f"  Lab      : {result.lab.value}")
+        print(f"  Idea ID  : {result.idea_id}")
+        print(f"  Stage    : {result.stage}")
+        print(f"  Engines  : {', '.join(e.value for e in result.engines)}")
+        print(f"  Output   : {result.draft_dir}")
+        print(f"  Retrieval: {result.retrieval_pack_path}")
+        print(f"  Stage2In : {result.stage2_input_path}")
+        print(f"  Manifest : {result.manifest_path}")
+        return 0
+
+    if args.idea_action == "experiment-card":
+        from alpha_lab.research_bridge.experiment_card import (
+            ExperimentCardOutcome,
+            scaffold_experiment_card,
+        )
+
+        try:
+            outcome = ExperimentCardOutcome(args.outcome)
+        except ValueError:
+            parser.error(
+                f"--outcome must be one of "
+                f"{[o.value for o in ExperimentCardOutcome]}"
+            )
+        try:
+            card_path = scaffold_experiment_card(
+                idea_id=args.idea_id,
+                outcome=outcome,
+                workspace_root=args.workspace_root,
+                cleanup=bool(args.cleanup),
+            )
+        except (FileNotFoundError, FileExistsError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : idea-experiment-card")
+        print("  Status   : success")
+        print(f"  Idea ID  : {args.idea_id}")
+        print(f"  Outcome  : {outcome.value}")
+        print(f"  Card     : {card_path}")
+        if bool(args.cleanup):
+            print("  Cleanup  : removed Stage 0/1/2/3 temp files")
+        return 0
+
+    parser.error(f"unsupported idea command: {args.idea_action!r}")
+    return 2  # unreachable — parser.error raises SystemExit.
+
+
 def unified_main(argv: list[str] | None = None) -> int:
     """Route unified CLI commands to existing module entrypoints."""
     parser = build_unified_parser()
@@ -1029,75 +1178,7 @@ def unified_main(argv: list[str] | None = None) -> int:
         parser.error(f"unsupported real-case workflow: {args.real_case_kind!r}")
 
     if args.top_command == "campaign":
-        if args.campaign_action == "run":
-            if args.campaign_name not in _SUPPORTED_CAMPAIGNS:
-                parser.error(
-                    "unsupported campaign name "
-                    f"{args.campaign_name!r}; supported: {sorted(_SUPPORTED_CAMPAIGNS)}"
-                )
-
-            from alpha_lab.campaigns.research_campaign_1 import (
-                main as research_campaign_1_main,
-            )
-
-            return research_campaign_1_main(args.args)
-
-        if args.campaign_action == "compare-profiles":
-            from alpha_lab.campaigns.profile_comparison import (
-                print_campaign_profile_case_evidence,
-                print_campaign_profile_comparison_summary,
-                run_campaign_profile_comparison,
-            )
-
-            try:
-                comparison_result = run_campaign_profile_comparison(
-                    source=args.source,
-                    output_root_dir=args.output_root_dir,
-                    profiles=tuple(args.profiles),
-                    pair_mode=args.pair_mode,
-                    campaign_config=args.campaign_config,
-                    case_output_root_dir=args.case_output_root_dir,
-                    artifact_hint_path_mode=args.artifact_hint_path_mode,
-                    render_report=not bool(args.no_render_report),
-                    render_overwrite=bool(args.render_overwrite),
-                    clean_output=not bool(args.no_clean_output),
-                )
-            except (ValueError, FileNotFoundError, RuntimeError) as exc:
-                parser.error(str(exc))
-            print_campaign_profile_comparison_summary(comparison_result)
-            if args.show_case_evidence is not None:
-                try:
-                    print_campaign_profile_case_evidence(
-                        comparison_result,
-                        case_name=str(args.show_case_evidence),
-                    )
-                except ValueError as exc:
-                    parser.error(str(exc))
-            return 0
-
-        if args.campaign_action == "render-dashboard":
-            from alpha_lab.reporting.renderers import (
-                write_campaign_profile_dashboard_html,
-            )
-
-            try:
-                dashboard_path = write_campaign_profile_dashboard_html(
-                    args.comparison_json,
-                    output_path=args.output_html,
-                    overwrite=bool(args.overwrite),
-                    title=args.title,
-                    artifact_load_mode=args.artifact_load_mode,
-                )
-            except (ValueError, FileNotFoundError, RuntimeError, OSError) as exc:
-                parser.error(str(exc))
-            print("")
-            print("  Workflow : campaign-render-dashboard")
-            print("  Status   : success")
-            print(f"  Input    : {Path(args.comparison_json).resolve()}")
-            print(f"  Output   : {dashboard_path}")
-            return 0
-
-        parser.error(f"unsupported campaign command: {args.campaign_action!r}")
+        return _handle_campaign(args, parser)
 
     if args.top_command == "profiles":
         _print_profiles()
@@ -1130,76 +1211,7 @@ def unified_main(argv: list[str] | None = None) -> int:
         return bridge_main(resolved_argv_for_bridge(args))
 
     if args.top_command == "idea":
-        if args.idea_action == "distribute":
-            from alpha_lab.research_bridge.engine_prompts import Lab
-            from alpha_lab.research_bridge.service import distribute_idea
-
-            available_data = (
-                frozenset(args.available_data) if args.available_data else None
-            )
-            try:
-                result = distribute_idea(
-                    vault_root=args.vault_root,
-                    idea=args.idea,
-                    engines=args.engines,
-                    lab=Lab(args.lab),
-                    mode=args.mode,
-                    project_slug=args.project,
-                    top_k=args.top_k,
-                    available_data=available_data,
-                    stage=args.stage,
-                    workspace_root=args.workspace_root,
-                    output_root=args.output_root,
-                    persist_session=bool(args.persist_session),
-                    inject_recent_drift=bool(args.inject_recent_drift),
-                    parent_session_id=args.parent_session_id,
-                )
-            except (ValueError, FileExistsError, OSError) as exc:
-                parser.error(str(exc))
-            print("")
-            print("  Workflow : idea-distribute")
-            print("  Status   : success")
-            print(f"  Lab      : {result.lab.value}")
-            print(f"  Idea ID  : {result.idea_id}")
-            print(f"  Stage    : {result.stage}")
-            print(f"  Engines  : {', '.join(e.value for e in result.engines)}")
-            print(f"  Output   : {result.draft_dir}")
-            print(f"  Retrieval: {result.retrieval_pack_path}")
-            print(f"  Stage2In : {result.stage2_input_path}")
-            print(f"  Manifest : {result.manifest_path}")
-            return 0
-        if args.idea_action == "experiment-card":
-            from alpha_lab.research_bridge.experiment_card import (
-                ExperimentCardOutcome,
-                scaffold_experiment_card,
-            )
-
-            try:
-                outcome = ExperimentCardOutcome(args.outcome)
-            except ValueError:
-                parser.error(
-                    f"--outcome must be one of "
-                    f"{[o.value for o in ExperimentCardOutcome]}"
-                )
-            try:
-                card_path = scaffold_experiment_card(
-                    idea_id=args.idea_id,
-                    outcome=outcome,
-                    workspace_root=args.workspace_root,
-                    cleanup=bool(args.cleanup),
-                )
-            except (FileNotFoundError, FileExistsError, OSError) as exc:
-                parser.error(str(exc))
-            print("")
-            print("  Workflow : idea-experiment-card")
-            print("  Status   : success")
-            print(f"  Idea ID  : {args.idea_id}")
-            print(f"  Outcome  : {outcome.value}")
-            print(f"  Card     : {card_path}")
-            if bool(args.cleanup):
-                print("  Cleanup  : removed Stage 0/1/2/3 temp files")
-            return 0
-        parser.error(f"unsupported idea command: {args.idea_action!r}")
+        return _handle_idea(args, parser)
 
     if args.top_command == "vault":
         from alpha_lab.vault_cli import run_vault_command  # noqa: PLC0415
