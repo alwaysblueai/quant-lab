@@ -154,6 +154,8 @@ def test_prompt_body_symmetric_except_identity_and_output_filename(
             .replace("Codex GUI", "X")
             .replace("stage1_claude.md", "stage1_X.md")
             .replace("stage1_codex.md", "stage1_X.md")
+            .replace("engine: claude", "engine: X")
+            .replace("engine: codex", "engine: X")
         )
 
     assert normalize(claude_prompt) == normalize(codex_prompt)
@@ -179,6 +181,26 @@ def test_prompt_carries_inline_governance_preamble(tmp_path: Path) -> None:
         assert "Stage 2 网页 GPT 的事" in prompt
         assert "Stage 3 后端的事" in prompt
         assert "Level 3 永久禁止" in prompt
+
+
+def test_prompt_mandates_4_line_header_in_section_8(tmp_path: Path) -> None:
+    """Stage 1 输出首行起必须是 4 行 header；缺一行视为契约违规。
+
+    Codex GUI 上一轮没有自加 header（因为 §8 example 没写），导致 Stage 2
+    reconcile 抓到 'lacks an explicit idea_id header' 警告。此测试守护那行。
+    """
+
+    ctx = _ctx(lab=Lab.SINGLE_FACTOR, draft_dir=tmp_path, vault_root=tmp_path)
+    for engine in (Engine.CLAUDE, Engine.CODEX):
+        prompt = build_prompt(engine=engine, ctx=ctx)
+        # §8 example block carries all 4 header lines, with engine-specific value
+        assert "idea_id: `20260511T000000Z__test`" in prompt
+        assert f"engine: {engine.value}" in prompt
+        assert "lab: single_factor" in prompt
+        assert "generated: <YYYY-MM-DD>" in prompt
+        # §0.5 cross-references the header requirement
+        assert "4 行 header" in prompt
+        assert "Stage 2 reconcile" in prompt
 
 
 def test_prompt_contains_generator_and_reviewer_sections(tmp_path: Path) -> None:
@@ -216,6 +238,81 @@ def test_prompt_uses_model_lab_schema_when_lab_is_model_factor(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 # codebase_index
 # ---------------------------------------------------------------------------
+
+
+def test_extract_dict_transferable_moves_renders_multiline() -> None:
+    """Vault cards 的 transferable_moves 通常是 list[dict]。
+
+    上一轮 `_extract_frontmatter_field_items` 用行扫描把 id/one_line/why_it_works
+    全压成一行（看 retrieval_pack.md 就能看到），根因是没走 yaml。这里直接
+    断言 extractor 把 dict 项展开成多行（用 `\\n` 分隔），下游可缩进渲染。
+    """
+
+    from alpha_lab.research_bridge.service import _extract_frontmatter_field_items
+
+    text = (
+        "---\n"
+        "type: factor\n"
+        "transferable_moves:\n"
+        "  - id: price_path_curvature_against_endpoint_line\n"
+        "    one_line: 用窗口内平均价格相对首尾中点价格的偏离\n"
+        "    why_it_works: 卡内定义 Convexity = ((P1+PN)/2 - Pbar) / midpt\n"
+        "    transfer_caveats:\n"
+        "      - 必须使用稳定复权后的价格路径\n"
+        "      - 收益率差公式会语义漂移\n"
+        "    seen_in: []\n"
+        "  - id: lagged_return_control_increment_gate\n"
+        "    one_line: 控制同窗口滞后收益再看形状增量\n"
+        "    why_it_works: 卡内实现纪律\n"
+        "---\n"
+        "# body\n"
+    )
+    items = _extract_frontmatter_field_items(text, "transferable_moves")
+    assert len(items) == 2
+
+    first = items[0]
+    # Multi-line: each sub-field is on its own line
+    lines = first.split("\n")
+    assert lines[0] == "id: price_path_curvature_against_endpoint_line"
+    assert any(line.startswith("one_line: 用窗口内") for line in lines)
+    assert any(line.startswith("why_it_works:") for line in lines)
+    # Nested list → joined with `; ` but stays on its own line
+    caveat_line = next(
+        line for line in lines if line.startswith("transfer_caveats:")
+    )
+    assert "必须使用稳定复权后的价格路径" in caveat_line
+    assert "收益率差公式会语义漂移" in caveat_line
+    # Old bug fingerprint: keys are NOT pasted onto the id line
+    assert "one_line:" not in lines[0]
+
+    # Plain string items still work (back-compat)
+    text2 = (
+        "---\n"
+        "transferable_moves:\n"
+        '  - "把动量信号按市场状态条件化"\n'
+        "---\n"
+    )
+    items2 = _extract_frontmatter_field_items(text2, "transferable_moves")
+    assert items2 == ["把动量信号按市场状态条件化"]
+
+
+def test_render_move_lines_indents_continuation() -> None:
+    """engine_prompts._render_move_lines: 第一行 `  - `, 后续行 4-space 缩进。"""
+
+    from alpha_lab.research_bridge.engine_prompts import _render_move_lines
+
+    move = "id: foo\none_line: bar\nwhy_it_works: baz"
+    rendered = _render_move_lines(move)
+    assert rendered == [
+        "  - id: foo",
+        "    one_line: bar",
+        "    why_it_works: baz",
+    ]
+    # Single-line input → single bullet
+    assert _render_move_lines("把 X 应用到 Y") == ["  - 把 X 应用到 Y"]
+    # Empty / whitespace → no bullet
+    assert _render_move_lines("") == []
+    assert _render_move_lines("\n  \n") == []
 
 
 def test_codebase_snapshot_walks_research_and_promoted(tmp_path: Path) -> None:

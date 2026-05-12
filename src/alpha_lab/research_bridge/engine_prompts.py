@@ -238,7 +238,17 @@ def build_prompt(*, engine: Engine, ctx: PromptContext) -> str:
         [
             "",
             "## 8. 输出格式",
-            f"写入 `{ctx.draft_dir / output_filename_for(engine)}`，单一 markdown 含两段：",
+            f"写入 `{ctx.draft_dir / output_filename_for(engine)}`，单一 markdown。",
+            "首行起 **必须** 是下面四行 header（Stage 2 reconcile 用来追溯来源），缺一行视为契约违规：",
+            "",
+            "```markdown",
+            f"idea_id: `{ctx.idea_id}`",
+            f"engine: {engine.value}",
+            f"lab: {ctx.lab.value}",
+            "generated: <YYYY-MM-DD>",
+            "```",
+            "",
+            "header 后留一行空行，再写两段正文：",
             "",
             "```markdown",
             "## Part A — Mechanism candidates (generator)",
@@ -302,10 +312,23 @@ def _format_cards(cards: Sequence[CardForPrompt]) -> list[str]:
         if card.transferable_moves:
             lines.append("- transferable_moves:")
             for move in card.transferable_moves[:4]:
-                lines.append(f"  - {move}")
+                lines.extend(_render_move_lines(move))
         else:
             lines.append("- transferable_moves: []")
     return lines
+
+
+def _render_move_lines(move: str) -> list[str]:
+    """Render one transferable_move with `\\n`-joined sub-fields as a bullet."""
+
+    sub_lines = move.split("\n") if "\n" in move else [move]
+    sub_lines = [s for s in (line.strip() for line in sub_lines) if s]
+    if not sub_lines:
+        return []
+    rendered = [f"  - {sub_lines[0]}"]
+    for line in sub_lines[1:]:
+        rendered.append(f"    {line}")
+    return rendered
 
 
 def _format_insight_brief(briefs: Sequence[str]) -> list[str]:
@@ -393,6 +416,8 @@ def _governance_preamble() -> list[str]:
         "### 0.5 输出（与 §3 / §8 一致）",
         "- 唯一输出：`<draft_dir>/stage1_<engine>.md`，单一 Markdown 含 Part A"
         " + Part B；不另起 YAML / 代码文件。",
+        "- **必须**以 4 行 header 开头（`idea_id` / `engine` / `lab` /"
+        " `generated`），格式见 §8。缺 header 会被 Stage 2 reconcile 标为契约违规。",
         "- 内联 YAML code block 是 Markdown 内嵌格式的一部分，**不是**独立文件。",
         "",
         "---",

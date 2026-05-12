@@ -84,6 +84,9 @@ from .engine_prompts import (
 from .engine_prompts import (
     prompt_filename_for as _engine_prompt_filename,
 )
+from .engine_prompts import (
+    _render_move_lines,
+)
 from .llm_rerank import (
     DEFAULT_MAX_CANDIDATES,
     CategorizeOutcome,
@@ -1230,7 +1233,7 @@ def _render_retrieval_pack(
             if card.transferable_moves:
                 lines.append("- transferable_moves:")
                 for move in card.transferable_moves[:4]:
-                    lines.append(f"  - {move}")
+                    lines.extend(_render_move_lines(move))
     else:
         lines.append("- 未命中卡片（novel synthesis 合法）。")
     lines.extend(["", "## Cross-card synthesis"])
@@ -3657,8 +3660,17 @@ def _extract_frontmatter_field_items(
     field_name: str,
     *,
     max_items: int = 4,
-    max_chars: int = 180,
+    max_chars: int = 220,
 ) -> list[str]:
+    """Extract a list-shaped frontmatter field as renderable items.
+
+    Each returned item is a single string; for dict-shaped entries (e.g.
+    ``transferable_moves`` whose items have ``id`` / ``one_line`` /
+    ``why_it_works`` sub-fields), the string carries ``\\n`` between sub-fields
+    so downstream renderers can indent continuation lines. Plain string items
+    stay single-line.
+    """
+
     if not text.startswith("---\n"):
         return []
     try:
@@ -3668,45 +3680,68 @@ def _extract_frontmatter_field_items(
     target = field_name.strip()
     if not target:
         return []
-    lines = frontmatter.splitlines()
-    captured: list[str] = []
-    in_field = False
-    for line in lines:
-        stripped = line.strip()
-        if not in_field:
-            if stripped.startswith(f"{target}:"):
-                value = stripped.split(":", 1)[1].strip()
-                if value:
-                    captured.append(value)
-                    break
-                in_field = True
-            continue
-        if stripped and not line[:1].isspace() and not stripped.startswith("-"):
-            break
-        captured.append(stripped)
-    if not captured:
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover
+        return []
+    try:
+        payload = yaml.safe_load(frontmatter)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get(target)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items_raw: list[Any] = [raw]
+    elif isinstance(raw, list):
+        items_raw = list(raw)
+    else:
         return []
 
-    items: list[str] = []
-    current: list[str] = []
-    for line in captured:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("- "):
-            if current:
-                items.append(" ".join(current))
-            current = [stripped[2:].strip()]
-        else:
-            current.append(stripped)
-    if current:
-        items.append(" ".join(current))
-    if not items:
-        items = [" ".join(captured)]
-    return [
-        _truncate_text(re.sub(r"\s+", " ", item), max_chars=max_chars)
-        for item in items[:max_items]
-    ]
+    rendered: list[str] = []
+    for item in items_raw[:max_items]:
+        rendered.append(_render_frontmatter_item(item, max_chars=max_chars))
+    return [text for text in rendered if text]
+
+
+def _render_frontmatter_item(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, dict):
+        sub_lines: list[str] = []
+        for key, sub in value.items():
+            if sub is None:
+                continue
+            text = _format_frontmatter_sub_value(sub, max_chars=max_chars)
+            if not text:
+                continue
+            sub_lines.append(f"{key}: {text}")
+        return "\n".join(sub_lines)
+    return _truncate_text(
+        re.sub(r"\s+", " ", str(value).strip()),
+        max_chars=max_chars,
+    )
+
+
+def _format_frontmatter_sub_value(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, list):
+        parts = [
+            re.sub(r"\s+", " ", str(item).strip())
+            for item in value
+            if str(item).strip()
+        ]
+        return _truncate_text("; ".join(parts), max_chars=max_chars)
+    if isinstance(value, dict):
+        parts = [
+            f"{k}={re.sub(r'\\s+', ' ', str(v).strip())}"
+            for k, v in value.items()
+            if str(v).strip()
+        ]
+        return _truncate_text("; ".join(parts), max_chars=max_chars)
+    return _truncate_text(
+        re.sub(r"\s+", " ", str(value).strip()),
+        max_chars=max_chars,
+    )
 
 
 def _strip_frontmatter(text: str) -> str:
