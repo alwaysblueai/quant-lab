@@ -1220,7 +1220,7 @@ def test_export_model_lab_run_experiment_card_invokes_vault_export(
             error=None,
         )
 
-    monkeypatch.setattr("alpha_lab.web_unified.export_to_vault", _fake_export_to_vault)
+    monkeypatch.setattr("alpha_lab.web_unified._service.export_to_vault", _fake_export_to_vault)
 
     result = svc.export_model_lab_run_experiment_card(run_id="mrun_export_ok", mode="versioned")
 
@@ -1350,7 +1350,7 @@ def test_model_lab_source_list_tolerates_missing_registered_file(
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)
     monkeypatch.setattr(
-        "alpha_lab.web_unified._MODEL_LAB_SOURCE_SPECS",
+        "alpha_lab.web_unified._service._MODEL_LAB_SOURCE_SPECS",
         (
             {
                 "key": "missing_source",
@@ -2721,13 +2721,13 @@ def test_frontend_batch_parallel_config_prefers_process_mode() -> None:
 
 def test_model_lab_batch_worker_count_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ALPHA_LAB_MODEL_LAB_MAX_WORKERS", raising=False)
-    monkeypatch.setattr("alpha_lab.web_unified.os.cpu_count", lambda: 1)
+    monkeypatch.setattr("alpha_lab.web_unified._subprocess.os.cpu_count", lambda: 1)
     assert _build_model_lab_batch_worker_count(3) == 1
 
-    monkeypatch.setattr("alpha_lab.web_unified.os.cpu_count", lambda: 2)
+    monkeypatch.setattr("alpha_lab.web_unified._subprocess.os.cpu_count", lambda: 2)
     assert _build_model_lab_batch_worker_count(3) == 1
 
-    monkeypatch.setattr("alpha_lab.web_unified.os.cpu_count", lambda: 8)
+    monkeypatch.setattr("alpha_lab.web_unified._subprocess.os.cpu_count", lambda: 8)
     assert _build_model_lab_batch_worker_count(1) == 1
     assert _build_model_lab_batch_worker_count(2) == 1
     assert _build_model_lab_batch_worker_count(5) == 1

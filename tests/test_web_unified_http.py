@@ -1549,7 +1549,7 @@ def test_model_lab_run_export_card_route(
             error=None,
         )
 
-    monkeypatch.setattr("alpha_lab.web_unified.export_to_vault", _fake_export_to_vault)
+    monkeypatch.setattr("alpha_lab.web_unified._service.export_to_vault", _fake_export_to_vault)
 
     status, payload = _post(
         base_url,
@@ -2065,7 +2065,7 @@ def test_apply_draft_route_invokes_writeback(
             ),
         )
 
-    monkeypatch.setattr("alpha_lab.web_unified.apply_writeback", _fake_apply_writeback)
+    monkeypatch.setattr("alpha_lab.web_unified._service.apply_writeback", _fake_apply_writeback)
     status, data = _post(base_url, f"/api/projects/{slug}/drafts/{draft_path.name}/apply", {})
     assert status == 200
     assert isinstance(data, dict)
