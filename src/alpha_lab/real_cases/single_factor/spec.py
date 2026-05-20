@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
-from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabExperimentError
+from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.real_cases.common_spec import (
     NeutralizationSpec,
     OutputSpec,
@@ -220,23 +220,6 @@ def spec_to_dict(spec: SingleFactorCaseSpec) -> dict[str, object]:
     if payload.get("archive_identity") is None:
         payload.pop("archive_identity", None)
     return payload
-
-
-def dump_spec_yaml(spec: SingleFactorCaseSpec) -> str:
-    """Serialize spec as YAML text."""
-
-    try:
-        import yaml  # type: ignore[import-untyped]
-    except ImportError as exc:  # pragma: no cover - import guard
-        raise AlphaLabExperimentError("PyYAML is required to serialize YAML specs") from exc
-
-    return str(
-        yaml.safe_dump(
-            spec_to_dict(spec),
-            sort_keys=False,
-            allow_unicode=False,
-        )
-    )
 
 
 def _optional_text(value: object) -> str | None:

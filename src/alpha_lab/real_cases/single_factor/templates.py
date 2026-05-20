@@ -257,40 +257,6 @@ def _fmt_conditional_ic_summary(metrics: dict[str, object]) -> str:
     return "; ".join(parts) if parts else "—"
 
 
-def _uncertainty_method_note(metrics: dict[str, object]) -> str:
-    method = str(metrics.get("uncertainty_method") or "").strip().lower()
-    if not method:
-        return "—"
-    level = _to_float(metrics.get("uncertainty_confidence_level"))
-    resamples = metrics.get("uncertainty_bootstrap_resamples")
-    block_length = metrics.get("uncertainty_bootstrap_block_length")
-    if method == "bootstrap":
-        resample_text = _fmt(resamples)
-        if level is None:
-            return f"bootstrap (resamples={resample_text})"
-        return f"bootstrap (CI={level:.2f}, resamples={resample_text})"
-    if method == "block_bootstrap":
-        resample_text = _fmt(resamples)
-        block_length_text = _fmt(block_length)
-        if level is None:
-            return f"block_bootstrap (resamples={resample_text}, block_length={block_length_text})"
-        return (
-            "block_bootstrap "
-            f"(CI={level:.2f}, resamples={resample_text}, block_length={block_length_text})"
-        )
-    if level is None:
-        return method
-    return f"{method} (CI={level:.2f})"
-
-
-def _fmt_ci(lower: object, upper: object) -> str:
-    left = _to_float(lower)
-    right = _to_float(upper)
-    if left is None or right is None:
-        return "—"
-    return f"[{left:.6f}, {right:.6f}]"
-
-
 def _to_float(value: object) -> float | None:
     if isinstance(value, bool):
         return None
@@ -301,65 +267,3 @@ def _to_float(value: object) -> float | None:
     return None
 
 
-def _neutralization_comparison_rows(metrics: dict[str, object]) -> list[str]:
-    comparison = _as_dict(metrics.get("neutralization_comparison"))
-    if not comparison:
-        return []
-    raw = _as_dict(comparison.get("raw"))
-    neutralized = _as_dict(comparison.get("neutralized"))
-    delta = _as_dict(comparison.get("delta"))
-
-    def _cmp(raw_key: str, delta_key: str) -> str:
-        return _fmt_transition(
-            raw.get(raw_key),
-            neutralized.get(raw_key),
-            delta.get(delta_key),
-        )
-
-    return [
-        (f"| Raw vs Neutralized Mean IC | {_cmp('mean_ic', 'mean_ic_delta')} |"),
-        (f"| Raw vs Neutralized Mean RankIC | {_cmp('mean_rank_ic', 'mean_rank_ic_delta')} |"),
-        (
-            "| Raw vs Neutralized Mean L/S Return | "
-            f"{_cmp('mean_long_short_return', 'mean_long_short_return_delta')} |"
-        ),
-        (f"| Raw vs Neutralized ICIR | {_cmp('ic_ir', 'ic_ir_delta')} |"),
-        (
-            "| Raw vs Neutralized Validity Min | "
-            f"{_cmp('valid_ratio_min', 'valid_ratio_min_delta')} |"
-        ),
-        (
-            "| Raw vs Neutralized Coverage Mean | "
-            f"{_cmp('eval_coverage_ratio_mean', 'eval_coverage_ratio_mean_delta')} |"
-        ),
-        (
-            "| Raw vs Neutralized Uncertainty Overlap Count | "
-            f"{_cmp('uncertainty_overlap_zero_count', 'uncertainty_overlap_zero_count_delta')} |"
-        ),
-        (
-            "| Raw vs Neutralized Rolling+ Min Share | "
-            f"{_cmp('rolling_positive_share_min', 'rolling_positive_share_min_delta')} |"
-        ),
-        (
-            "| Raw vs Neutralized Rolling Worst Mean | "
-            f"{_cmp('rolling_worst_mean_min', 'rolling_worst_mean_min_delta')} |"
-        ),
-        (
-            "| Neutralization Comparison Flags | "
-            f"{_fmt_flags(comparison.get('interpretation_flags'))} |"
-        ),
-        (
-            "| Neutralization Comparison Reasons | "
-            f"{_fmt_reason_list(comparison.get('interpretation_reasons'))} |"
-        ),
-    ]
-
-
-def _fmt_transition(raw_value: object, neutralized_value: object, delta_value: object) -> str:
-    return f"{_fmt(raw_value)} -> {_fmt(neutralized_value)} (delta={_fmt(delta_value)})"
-
-
-def _as_dict(value: object) -> dict[str, object]:
-    if isinstance(value, dict):
-        return value
-    return {}

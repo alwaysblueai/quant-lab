@@ -566,34 +566,6 @@ def _merge_baseline_factor_comparison_metrics(
             metrics["baseline_factor_mean_ic_advantage"] = base_mean_ic - best
 
 
-def _build_price_baseline_factor(
-    prices: pd.DataFrame,
-    *,
-    lookback: int,
-    reversal: bool,
-) -> pd.DataFrame:
-    """Return a canonical long-form factor dataframe for a price baseline."""
-    if lookback < 1:
-        raise ValueError("lookback must be >= 1")
-    ret_col = f"ret_{lookback}d"
-    if ret_col in prices.columns:
-        wide = prices[["date", "asset", ret_col]].copy()
-        wide["_ret"] = pd.to_numeric(wide[ret_col], errors="coerce")
-    else:
-        wide = prices[["date", "asset", "close"]].copy()
-        wide["close"] = pd.to_numeric(wide["close"], errors="coerce")
-        wide = wide.dropna(subset=["close"])
-        wide = wide.sort_values(["asset", "date"], kind="mergesort")
-        grouped = wide.groupby("asset", sort=False, group_keys=False)
-        wide["_ret"] = grouped["close"].pct_change(lookback)
-    if reversal:
-        wide["_ret"] = -wide["_ret"]
-    factor_name = f"{'reversal' if reversal else 'momentum'}_{lookback}d"
-    out = wide[["date", "asset", "_ret"]].rename(columns={"_ret": "value"}).dropna()
-    out["factor"] = factor_name
-    return out[["date", "asset", "factor", "value"]].reset_index(drop=True)
-
-
 def _cross_sectional_rank_corr(
     left_factor: pd.DataFrame,
     right_factor: pd.DataFrame,
