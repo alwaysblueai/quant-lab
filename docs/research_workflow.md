@@ -123,7 +123,7 @@ Part B 只负责"在 v1 schema 内能不能执行"；不否决、不淘汰、不
 | Stage 4 card scaffold + cleanup | `experiment_card.py::scaffold_experiment_card` |
 | `transferable_moves` / `operative_claims` 提取 | `service.py::_extract_frontmatter_field_items` / `model_idea.py::_read_card_frontmatter_field_items` |
 | `available_data` 自动推断 | `scoring.py::infer_available_data_from_frequency` |
-| Retrieval 多分量评分 | `scoring.py::score_card` + `service.py::_typed_rank_candidates` |
+| Retrieval 多分量评分 | `scoring.py::score_card` + `service.py::_score_candidates` |
 | Stage 3 validator | `draft_factor_validation.py::validate_draft_factor_file` / `draft_model_validation.py::validate_draft_model_file` |
 | Audit pass-through | `custom_factors.py::CustomFactorSource.to_audit_dict` / `custom_models.py::DraftModelSource.to_audit_dict` |
 

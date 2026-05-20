@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -49,14 +48,6 @@ _TEMP_FILES_GLOB: tuple[str, ...] = (
 )
 
 _KEEP_FILES: frozenset[str] = frozenset({"manifest.json", "experiment_card.md"})
-
-
-@dataclass(frozen=True)
-class ScaffoldedCard:
-    """Result of ``scaffold_experiment_card`` (returned for tests; CLI prints path)."""
-
-    card_path: Path
-    cleaned: tuple[Path, ...]
 
 
 def scaffold_experiment_card(

@@ -617,14 +617,6 @@ def _apply_runtime_defaults(profile: CategoryProfile) -> CategoryProfile:
     return replace(profile, form_fields=tuple(fields))
 
 
-def default_form_field_value(category: str, field_name: str) -> str:
-    profile = get_category_profile(category)
-    for field in profile.form_fields:
-        if str(field.get("name") or "") == field_name:
-            return str(field.get("default") or "")
-    return ""
-
-
 def get_category_profile(category: str) -> CategoryProfile:
     """Look up a category profile, falling back to *factor_recipe*."""
     key = _ALIASES.get(category, category)

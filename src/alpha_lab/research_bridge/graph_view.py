@@ -197,38 +197,6 @@ class VaultGraph:
         }
         return sorted(neighbors)
 
-    def get_subgraph(self, names: list[str], hops: int = 1) -> nx.DiGraph:
-        self._require_loaded()
-        selected = {name for name in names if name in self._nodes}
-        frontier = set(selected)
-        for _ in range(max(hops, 0)):
-            expanded = set(frontier)
-            for node in frontier:
-                expanded.update(self._graph.predecessors(node))
-                expanded.update(self._graph.successors(node))
-            frontier = expanded
-            selected.update(expanded)
-        return self._graph.subgraph(selected).copy()
-
-    def get_dependency_chain(self, name: str) -> list[str]:
-        self._require_loaded()
-        ordered: list[str] = []
-        visited: set[str] = set()
-
-        def visit(node: str) -> None:
-            for edge in self._edges:
-                if edge.source != node or edge.type != "depends_on" or edge.target_kind != "card":
-                    continue
-                if edge.target not in self._nodes or edge.target in visited:
-                    continue
-                visited.add(edge.target)
-                visit(edge.target)
-                ordered.append(edge.target)
-
-        if name in self._nodes:
-            visit(name)
-        return ordered
-
     def get_reverse_dependencies(self, name: str) -> list[str]:
         self._require_loaded()
         matches = {
@@ -354,20 +322,6 @@ class VaultGraph:
             if edge.source == name and edge.type == "depends_on"
         ]
         return sorted(set(missing))
-
-    def check_mechanism_redundancy(self, name: str) -> list[str]:
-        self._require_loaded()
-        node = self._nodes.get(name)
-        if node is None or node.type != "factor" or not node.mechanism or not node.factor_family:
-            return []
-        return [
-            other_name
-            for other_name in self.get_mechanism_family_factors(
-                node.factor_family,
-                node.mechanism,
-            )
-            if other_name != name
-        ]
 
     def dangling_edges(self) -> list[Edge]:
         self._require_loaded()

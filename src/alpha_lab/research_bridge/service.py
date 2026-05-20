@@ -3297,30 +3297,6 @@ def _categorize_diagnostics(outcome: CategorizeOutcome) -> dict[str, object]:
     }
 
 
-def _typed_rank_candidates(
-    *,
-    semantic_matches: list[SearchResult],
-    graph: VaultGraph | None,
-    anchor: QueryAnchor,
-    weights: ScoreWeights,
-    available_data: frozenset[str] | None,
-    failure_keywords: frozenset[str],
-) -> tuple[list[_RankedCandidate], list[dict[str, str]]]:
-    """Score and re-rank semantic candidates, with hard-filter dropouts.
-
-    Returns ``(ranked_kept, dropped)``. Each dropped record carries the
-    candidate name and a human-readable ``reason`` for observability.
-    """
-    scored, dropped = _score_candidates(
-        semantic_matches=semantic_matches,
-        graph=graph,
-        anchor=anchor,
-        available_data=available_data,
-        failure_keywords=failure_keywords,
-    )
-    return _finalize_ranking(scored, weights), dropped
-
-
 def _score_candidates(
     *,
     semantic_matches: list[SearchResult],

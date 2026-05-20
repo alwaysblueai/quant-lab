@@ -1735,28 +1735,6 @@ def read_model_idea_session(
     return payload
 
 
-def delete_model_idea_session(
-    *,
-    session_id: str,
-    workspace_root: str | Path = PROJECT_ROOT,
-) -> dict[str, object]:
-    normalized_session_id = _normalize_session_id(session_id)
-    session_root = model_idea_sessions_root(workspace_root=workspace_root)
-    session_path = (session_root / f"{normalized_session_id}.json").resolve()
-    if not session_path.exists() or not session_path.is_file():
-        raise FileNotFoundError(f"model-idea session not found: {normalized_session_id}")
-    payload = _read_model_idea_session_file(session_path)
-    if payload is None:
-        raise ValueError(f"invalid model-idea session payload: {normalized_session_id}")
-    payload["archived"] = True
-    payload["archived_at_utc"] = dt.datetime.now(dt.UTC).isoformat()
-    session_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return {"ok": True, "session_id": normalized_session_id, "archived": True}
-
-
 def record_model_idea_response(
     *,
     session_id: str,
