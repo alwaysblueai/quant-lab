@@ -56,9 +56,6 @@ from alpha_lab.web_unified._run_store import RunSuccessResult as RunSuccessResul
 from alpha_lab.web_unified._run_store import (
     _compact_metrics_summary as _compact_metrics_summary,
 )
-from alpha_lab.web_unified._run_store import (
-    _InputBundleCacheEntry as _InputBundleCacheEntry,
-)
 from alpha_lab.web_unified._run_store import _RunRecord as _RunRecord
 from alpha_lab.web_unified._run_store import _RunStore as _RunStore
 
@@ -670,12 +667,6 @@ def _yaml_case_name(path: Path) -> str:
     except Exception:
         return ""
     return str(payload.get("name") or "").strip()
-
-
-def _read_text(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8")
 
 
 def _read_text_with_limit(path: Path, *, limit_bytes: int) -> str:
@@ -2554,31 +2545,6 @@ def _require_yaml() -> Any:
     except ImportError as exc:  # pragma: no cover
         raise AlphaLabExperimentError("PyYAML is required for draft editing") from exc
     return yaml
-
-
-def _compile_custom_factor(name: str, code: str) -> Any:
-    """Compile user-provided Python code into a callable factor builder.
-
-    The code must define a function named ``builder`` that accepts
-    ``(prices, *, window=20, skip_recent=0, min_periods=None, **kwargs)``
-    and returns a DataFrame with columns ``[date, asset, factor, value]``.
-    """
-    import numpy as np  # noqa: F401
-    import pandas as pd  # noqa: F401
-
-    namespace: dict[str, Any] = {"np": np, "pd": pd}
-    try:
-        compiled = compile(code, f"<custom_factor:{name}>", "exec")
-    except SyntaxError as exc:
-        raise ValueError(f"syntax error in custom factor code: {exc}") from exc
-    exec(compiled, namespace)  # noqa: S102
-    fn = namespace.get("builder")
-    if fn is None or not callable(fn):
-        raise ValueError(
-            "custom factor code must define a callable named 'builder'; "
-            "e.g. def builder(prices, *, window=20, **kwargs): ..."
-        )
-    return fn
 
 
 # ---------------------------------------------------------------------------

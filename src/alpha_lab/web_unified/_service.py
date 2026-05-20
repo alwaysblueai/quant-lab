@@ -47,7 +47,6 @@ from alpha_lab.custom_factors import (
     compile_custom_factor,
     custom_factor_meta_path,
     custom_factor_write_path,
-    iter_custom_factor_meta_paths,
     load_persisted_custom_factors,
 )
 from alpha_lab.custom_models import (
@@ -203,7 +202,6 @@ class _UnifiedService:
         self.vault_root = vault_root.resolve()
         self.workspace_root = workspace_root.resolve()
         self.run_store = _RunStore()
-        self._custom_factors_dir = self.workspace_root / "custom_factors"
         self._apply_saved_llm_settings()
         self._load_persisted_custom_factors()
         self._restore_completed_web_runs()
@@ -2959,9 +2957,6 @@ class _UnifiedService:
             "code": meta.get("code", ""),
             "description": meta.get("description", ""),
         }
-
-    def _iter_custom_factor_meta_paths(self) -> list[Path]:
-        return iter_custom_factor_meta_paths(self.workspace_root)
 
     def _custom_factor_meta_path(self, name: str) -> Path:
         return custom_factor_meta_path(self.workspace_root, name)

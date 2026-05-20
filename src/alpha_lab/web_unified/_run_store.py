@@ -31,11 +31,8 @@ from typing import Any, cast
 
 from alpha_lab.real_cases.single_factor.pipeline import (
     SingleFactorCaseRunResult,
-    SingleFactorInputBundle,
-    load_standard_inputs,
 )
 from alpha_lab.real_cases.single_factor.spec import (
-    SingleFactorCaseSpec,
     load_single_factor_case_spec,
 )
 from alpha_lab.reporting.renderers import write_case_report
@@ -67,7 +64,6 @@ from alpha_lab.web_unified._subprocess import (
 from alpha_lab.web_unified._utils import _coerce_finite_or_text
 
 _FRONTEND_BATCH_WINDOW_SECONDS: float = 0.20
-_FRONTEND_INPUT_BUNDLE_CACHE_MAX_ITEMS: int = 8
 _MODEL_LAB_SUBPROCESS_POLL_SECONDS: float = 0.5
 
 _RUN_SUMMARY_COMPACT_KEYS: tuple[str, ...] = (
@@ -331,22 +327,11 @@ class _RunRecord:
 RunSuccessResult = SingleFactorCaseRunResult | _SubprocessCaseRunResult
 
 
-@dataclass
-class _InputBundleCacheEntry:
-    bundle: SingleFactorInputBundle
-    last_used_seq: int
-
-
 class _RunStore:
     def __init__(self) -> None:
         self._records: dict[str, _RunRecord] = {}
         self._tasks: dict[str, _RunTask] = {}
         self._cancel_requests: set[str] = set()
-        self._input_bundle_cache: dict[
-            tuple[str, str | None, str, int, int],
-            _InputBundleCacheEntry,
-        ] = {}
-        self._input_bundle_cache_clock: int = 0
         self._lock = threading.Lock()
         self._dispatch_event = threading.Event()
         self._dispatcher = threading.Thread(target=self._dispatch_loop, daemon=True)
@@ -513,47 +498,6 @@ class _RunStore:
             record.summarize_feedback_path = str(feedback_path)
             record.summarize_draft_path = str(draft_path)
             record.summarize_state_patch_path = str(state_patch_path)
-
-    def _load_cached_input_bundle(
-        self,
-        spec: SingleFactorCaseSpec,
-    ) -> tuple[SingleFactorInputBundle, bool]:
-        key = self._build_input_bundle_cache_key(spec)
-        with self._lock:
-            cached = self._input_bundle_cache.get(key)
-            if cached is not None:
-                self._input_bundle_cache_clock += 1
-                cached.last_used_seq = self._input_bundle_cache_clock
-                return cached.bundle, True
-
-        bundle = load_standard_inputs(spec)
-        with self._lock:
-            self._input_bundle_cache_clock += 1
-            self._input_bundle_cache[key] = _InputBundleCacheEntry(
-                bundle=bundle,
-                last_used_seq=self._input_bundle_cache_clock,
-            )
-            while len(self._input_bundle_cache) > _FRONTEND_INPUT_BUNDLE_CACHE_MAX_ITEMS:
-                oldest_key = min(
-                    self._input_bundle_cache.items(),
-                    key=lambda item: item[1].last_used_seq,
-                )[0]
-                self._input_bundle_cache.pop(oldest_key, None)
-        return bundle, False
-
-    @staticmethod
-    def _build_input_bundle_cache_key(
-        spec: SingleFactorCaseSpec,
-    ) -> tuple[str, str | None, str, int, int]:
-        from alpha_lab.web_unified import _file_mtime_ns
-
-        return (
-            spec.prices_path,
-            spec.universe.path,
-            spec.universe.in_universe_column,
-            _file_mtime_ns(spec.prices_path),
-            _file_mtime_ns(spec.universe.path),
-        )
 
     def _push_progress(
         self,
@@ -724,16 +668,6 @@ class _RunStore:
     def _resolve_model_factor_task_output_dir(self, task: _RunTask) -> str:
         root_dir, case_dir_name = _resolve_model_factor_web_output_parts(task)
         return str((root_dir / case_dir_name).resolve())
-
-    def _push_batch_progress(
-        self,
-        tasks: list[_RunTask],
-        *,
-        message: str,
-        percent: int | None,
-    ) -> None:
-        for task in tasks:
-            self._push_progress(task.run_id, message=message, percent=percent)
 
     def _execute_model_factor_subprocess_task(
         self,
@@ -1254,7 +1188,6 @@ class _RunStore:
 __all__ = [
     "RunSuccessResult",
     "_RUN_SUMMARY_COMPACT_KEYS",
-    "_InputBundleCacheEntry",
     "_RunRecord",
     "_RunStore",
     "_compact_metrics_summary",
