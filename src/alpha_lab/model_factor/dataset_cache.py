@@ -95,15 +95,6 @@ class ModelFactorDatasetCache:
     def data_load_path(self, cache_key: str) -> Path:
         return self.data_load_root_dir / str(cache_key)
 
-    def prepared_inputs_path(self, cache_key: str) -> Path:
-        path = prepared_inputs_cache_path(
-            cache_dir=self.prepared_inputs_root_dir,
-            cache_key=cache_key,
-        )
-        if path is None:
-            raise ValueError("cache_key must be non-empty")
-        return path
-
     def prepared_inputs_exists(self, cache_key: str) -> bool:
         return prepared_inputs_cache_exists(
             cache_dir=self.prepared_inputs_root_dir,

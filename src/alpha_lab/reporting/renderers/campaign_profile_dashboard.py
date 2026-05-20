@@ -3449,27 +3449,6 @@ def _factor_correlation_matrix(
     return tuple(rows)
 
 
-def _shortlist_recommendations(
-    *,
-    summaries: list[FactorSummary] | tuple[FactorSummary, ...],
-    correlation_matrix: tuple[tuple[str, tuple[tuple[str, float | None], ...]], ...],
-) -> tuple[str, ...]:
-    rows = [
-        FactorComparisonRow(
-            factor_id=item.factor_id,
-            factor_name=item.factor_name,
-            factor_family=item.factor_family,
-        )
-        for item in summaries
-    ]
-    shortlist = _build_factor_shortlist_result(
-        comparison_rows=rows,
-        correlation_matrix=correlation_matrix,
-        config=_DEFAULT_SHORTLIST_CONFIG,
-    )
-    return shortlist.recommendation_summary
-
-
 def _build_factor_shortlist_result(
     *,
     comparison_rows: list[FactorComparisonRow] | tuple[FactorComparisonRow, ...],
