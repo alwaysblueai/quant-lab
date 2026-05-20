@@ -59,7 +59,7 @@ def _write_candidate(
     candidate_name: str,
     payload: Mapping[str, object],
 ) -> Path:
-    candidate_dir = tmp_path / "model_candidates" / "research" / candidate_name
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
     candidate_dir.mkdir(parents=True)
     candidate_path = candidate_dir / "model_candidate.json"
     candidate_path.write_text(
@@ -219,7 +219,7 @@ def test_run_model_factor_case_writes_draft_model_source(tmp_path: Path) -> None
     payload = _legal_payload(spec_path, candidate_name="audit_alpha")
     candidate_path = _write_candidate(tmp_path, "audit_alpha", payload)
 
-    from alpha_lab.model_candidates import read_draft_model_source
+    from alpha_lab.custom_models import read_draft_model_source
 
     draft_model_source = read_draft_model_source(candidate_path)
     result = run_model_factor_case(
@@ -295,7 +295,7 @@ def test_validate_draft_model_rejects_provenance_without_idea_id(tmp_path: Path)
 
 
 def test_draft_model_source_passes_provenance_to_audit(tmp_path: Path) -> None:
-    from alpha_lab.model_candidates import read_draft_model_source
+    from alpha_lab.custom_models import read_draft_model_source
 
     spec_path = write_demo_model_factor_case(tmp_path, factor_name="prov_audit")
     payload = dict(_legal_payload(spec_path, candidate_name="prov_audit"))

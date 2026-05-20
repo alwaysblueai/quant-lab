@@ -89,6 +89,9 @@ def builder(prices, *, window=20, skip_recent=0, min_periods=None, **kwargs):
 1. 从 Stage2 输出中提取唯一的 `factor_json_payload`。
 2. 写入 `custom_factors/research/<factor_name>/factor.json`。
 3. 更新或创建对应 single-factor case YAML。
+   - 新 YAML 根字段应包含 `project_slug`、`archive_identity`、`evaluation_profile`。
+   - `project_slug` 只能来自用户或执行信封明确给出的项目上下文；不能从 factor 名、路径、文件名猜。
+   - 覆盖已有 YAML 前，先读取旧 YAML；若已有 `project_slug` / `archive_identity` / `evaluation_profile`，默认保留，除非用户明确要求修改。
 4. 先运行 validator：
 
 ```bash

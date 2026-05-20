@@ -210,6 +210,7 @@ def evaluate_single_factor_case(
                 label_fn=core_close_label_fn,
                 precomputed_forward_labels=precomputed_forward_labels,
                 split_contract=split_contract,
+                execution_price_mode=spec.target.execution_price_mode,
             ),
         )
 
@@ -241,6 +242,7 @@ def evaluate_single_factor_case(
                     label_fn=core_close_label_fn,
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
+                    execution_price_mode=spec.target.execution_price_mode,
                 ),
             )
         with _stage("core_summary_full_report_path"):
@@ -267,6 +269,7 @@ def evaluate_single_factor_case(
                     label_fn=core_close_label_fn,
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
+                    execution_price_mode=spec.target.execution_price_mode,
                 ),
             )
         with _stage("core_summary_is_report_path"):
@@ -296,6 +299,7 @@ def evaluate_single_factor_case(
                     label_fn=close_label_fn,
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=split_contract,
+                    execution_price_mode=spec.target.execution_price_mode,
                 ),
             )
         with _stage("neutralization_raw_summary"):
@@ -353,6 +357,7 @@ def evaluate_single_factor_case(
                 prices_df=prices,
                 horizons=decay_horizons,
                 precomputed_labels_by_horizon=diagnostic_decay_label_cache,
+                execution_price_mode=spec.target.execution_price_mode,
             )
             if diagnostics_cfg.compute_ic_decay
             else _empty_ic_decay_frame()
@@ -555,6 +560,13 @@ def evaluate_single_factor_case(
         "factor_name": spec.factor_name,
         "target_kind": spec.target.kind,
         "target_horizon": spec.target.horizon,
+        "target_execution_price_mode": spec.target.execution_price_mode,
+        "label_mode": spec.target.execution_price_mode,
+        "label_entry_assumption": (
+            "next open after factor date"
+            if spec.target.execution_price_mode == "next_open"
+            else "factor-date close (instant execution)"
+        ),
         "direction": spec.direction,
         "rebalance_frequency": spec.rebalance_frequency,
         "rebalance_step_dates": rebalance_step,

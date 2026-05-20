@@ -1,4 +1,4 @@
-"""Build a per-factor slim prices.parquet by keeping only the intraday columns a factor needs.
+"""Build a per-factor slim prices.parquet by keeping only columns a factor needs.
 
 Single-factor pipeline currently does not project columns at parquet-read time
 (see ``load_prices`` call in ``src/alpha_lab/real_cases/single_factor/pipeline.py``).
@@ -9,7 +9,8 @@ canonical price columns plus a user-specified subset of intraday features.
 Inputs
 ------
 - Source joined dataset: ``data/processed/real_case_inputs/ashare_institutional_intraday_v1/``
-- Source 31-col prices: ``data/processed/real_case_inputs/ashare_institutional_20160418_20260415_supplemented/prices.parquet``
+- Source 31-col prices:
+  ``data/processed/real_case_inputs/ashare_institutional_20160418_20260415_supplemented/prices.parquet``
   (used as the column whitelist; we keep every column it has)
 
 Output
@@ -58,7 +59,10 @@ UNIVERSE_PATH = SOURCE_JOINED.parent / "universe_mask.parquet"
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument(
         "--intraday-cols",
         nargs="+",

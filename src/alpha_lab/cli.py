@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from alpha_lab.config import PROCESSED_DATA_DIR
-from alpha_lab.exceptions import AlphaLabConfigError
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     CAMPAIGN_PROFILE_COMPARE_DEFAULTS,
@@ -50,6 +50,7 @@ _UNIFIED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset(
         "campaign",
         "bridge",
         "idea",
+        "archive",
         "vault",
         "profiles",
         "web",
@@ -545,7 +546,7 @@ def build_unified_parser() -> argparse.ArgumentParser:
     validate_draft_model.add_argument(
         "model_candidate_json",
         help=(
-            "Path to model_candidates/research/<candidate_name>/model_candidate.json."
+            "Path to custom_models/research/<candidate_name>/model_candidate.json."
         ),
     )
     validate_draft_model.add_argument(
@@ -561,7 +562,7 @@ def build_unified_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Allow validating a model_candidate.json outside "
-            "model_candidates/research for tests only."
+            "custom_models/research for tests only."
         ),
     )
     validate_draft_model.add_argument(
@@ -957,6 +958,63 @@ def build_unified_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    archive = top.add_parser(
+        "archive",
+        help="Preview research archive cards and migrate legacy auto-exported vault cards.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    archive_commands = archive.add_subparsers(dest="archive_action", required=True)
+    archive_preview = archive_commands.add_parser(
+        "preview",
+        help="Build a read-only archive preview for a completed run.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    archive_preview.add_argument(
+        "--workflow",
+        required=True,
+        choices=["single_factor", "model_factor"],
+        help="Run workflow.",
+    )
+    archive_preview.add_argument("--run-id", required=True, help="Run id to preview.")
+    archive_preview.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="json",
+        help="Preview output format.",
+    )
+    archive_preview.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root used to discover run outputs.",
+    )
+    archive_preview.add_argument(
+        "--vault-root",
+        default=None,
+        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
+    )
+
+    archive_migrate = archive_commands.add_parser(
+        "migrate-auto-exports",
+        help="Move unmodified alpha-lab pipeline auto-export cards aside.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    archive_migrate.add_argument(
+        "--vault-root",
+        required=True,
+        help="Quant-knowledge vault root.",
+    )
+    archive_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Classify without moving files.",
+    )
+    archive_migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually move will_move cards and write migration manifests.",
+    )
+
     vault = top.add_parser(
         "vault",
         help=(
@@ -1141,6 +1199,56 @@ def _handle_idea(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
     return 2  # unreachable — parser.error raises SystemExit.
 
 
+def _handle_archive(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    from alpha_lab.archive import (
+        ArchiveRunIndex,
+        build_archive_preview,
+        migrate_auto_exports,
+        preview_to_markdown,
+    )
+    from alpha_lab.vault_export import resolve_vault_root
+
+    if args.archive_action == "preview":
+        vault_root = resolve_vault_root(args.vault_root)
+        if vault_root is None:
+            parser.error("--vault-root or OBSIDIAN_VAULT_PATH is required")
+        try:
+            index = ArchiveRunIndex.build(workspace_root=args.workspace_root)
+            preview = build_archive_preview(
+                index=index,
+                vault_root=vault_root,
+                workflow=args.workflow,
+                run_id=args.run_id,
+            )
+        except (
+            ValueError,
+            FileNotFoundError,
+            OSError,
+            AlphaLabConfigError,
+            AlphaLabDataError,
+        ) as exc:
+            parser.error(str(exc))
+        if args.format == "markdown":
+            print(preview_to_markdown(preview))
+        else:
+            print(json.dumps(preview, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    if args.archive_action == "migrate-auto-exports":
+        try:
+            result = migrate_auto_exports(
+                vault_root=args.vault_root,
+                dry_run=not bool(args.apply),
+            )
+        except OSError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    parser.error(f"unsupported archive command: {args.archive_action!r}")
+    return 2  # unreachable — parser.error raises SystemExit.
+
+
 def unified_main(argv: list[str] | None = None) -> int:
     """Route unified CLI commands to existing module entrypoints."""
     parser = build_unified_parser()
@@ -1216,6 +1324,9 @@ def unified_main(argv: list[str] | None = None) -> int:
 
     if args.top_command == "idea":
         return _handle_idea(args, parser)
+
+    if args.top_command == "archive":
+        return _handle_archive(args, parser)
 
     if args.top_command == "vault":
         from alpha_lab.vault_cli import run_vault_command  # noqa: PLC0415

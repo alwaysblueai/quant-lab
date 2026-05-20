@@ -10,6 +10,8 @@ from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabExperimentError
 
 FactorDirection = Literal["long", "short"]
 TargetKind = Literal["forward_return"]
+ExecutionPriceMode = Literal["close", "next_open"]
+_ALLOWED_EXECUTION_PRICE_MODES: tuple[str, ...] = ("close", "next_open")
 
 
 @dataclass(frozen=True)
@@ -29,13 +31,24 @@ class UniverseSpec:
 
 @dataclass(frozen=True)
 class TargetSpec:
-    """Target/label definition."""
+    """Target/label definition.
+
+    ``execution_price_mode`` selects the entry-price convention used to build
+    the forward-return label.  ``"close"`` (default, legacy behaviour) assumes
+    instantaneous execution at the signal-day close; ``"next_open"`` models a
+    trader who sees the signal at the close of day ``t`` and executes at the
+    next open, which is the realistic entry for after-close intraday-derived
+    factors (e.g. factors built from full-day intraday minute bars).  The
+    string is normalized to lowercase; values outside the allowed set fail
+    fast.
+    """
 
     kind: TargetKind = "forward_return"
     horizon: int = 5
     price_column: str = "close"
     max_abs_forward_return: float | None = None
     winsorize_zscore: float | None = None
+    execution_price_mode: ExecutionPriceMode = "close"
 
     def __post_init__(self) -> None:
         if self.kind != "forward_return":
@@ -52,6 +65,20 @@ class TargetSpec:
             raise AlphaLabConfigError(
                 "target.winsorize_zscore must be > 0 when provided (e.g. 3.0)"
             )
+        if not isinstance(self.execution_price_mode, str):
+            raise AlphaLabConfigError(
+                "target.execution_price_mode must be a string; "
+                f"got {type(self.execution_price_mode).__name__}"
+            )
+        normalized = self.execution_price_mode.strip().lower()
+        if normalized not in _ALLOWED_EXECUTION_PRICE_MODES:
+            raise AlphaLabConfigError(
+                "target.execution_price_mode must be one of "
+                f"{list(_ALLOWED_EXECUTION_PRICE_MODES)}; got "
+                f"{self.execution_price_mode!r}"
+            )
+        if normalized != self.execution_price_mode:
+            object.__setattr__(self, "execution_price_mode", cast(ExecutionPriceMode, normalized))
 
 
 @dataclass(frozen=True)

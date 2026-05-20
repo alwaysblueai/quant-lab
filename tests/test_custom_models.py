@@ -1,4 +1,4 @@
-"""Smoke coverage for :mod:`alpha_lab.model_candidates`."""
+"""Smoke coverage for :mod:`alpha_lab.custom_models`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from alpha_lab.model_candidates import (
+from alpha_lab.custom_models import (
     MODEL_CANDIDATE_SCOPES,
     DraftModelSource,
     model_candidate_write_path,

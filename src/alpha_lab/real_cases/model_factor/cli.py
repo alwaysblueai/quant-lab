@@ -359,7 +359,7 @@ def _run_one(
     draft_model_source = None
     candidate_arg = getattr(args, "draft_model_candidate", None)
     if candidate_arg:
-        from alpha_lab.model_candidates import read_draft_model_source
+        from alpha_lab.custom_models import read_draft_model_source
 
         try:
             draft_model_source = read_draft_model_source(candidate_arg)

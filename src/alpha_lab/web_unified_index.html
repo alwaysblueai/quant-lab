@@ -2352,7 +2352,25 @@
       width: 100%;
       overflow-x: auto;
     }
-    .case-table { table-layout: fixed; }
+    .case-table {
+      table-layout: fixed;
+      width: 100%;
+      min-width: 920px;
+    }
+    .case-table th,
+    .case-table td {
+      vertical-align: top;
+    }
+    .case-table th:nth-child(1),
+    .case-table td:nth-child(1) { width: 30%; }
+    .case-table th:nth-child(2),
+    .case-table td:nth-child(2) { width: 18%; }
+    .case-table th:nth-child(3),
+    .case-table td:nth-child(3) { width: 18%; }
+    .case-table th:nth-child(4),
+    .case-table td:nth-child(4) { width: 22%; }
+    .case-table th:nth-child(5),
+    .case-table td:nth-child(5) { width: 12%; }
     .grid-run-validation .case-table th:nth-child(1) { width: 52%; }
     .run-table {
       table-layout: auto;
@@ -2401,8 +2419,11 @@
     }
     .case-flag-cell,
     .case-action-cell {
-      white-space: nowrap;
-      width: 1%;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    .case-action-cell {
+      white-space: normal;
     }
     /* Keyboard navigation hints */
     .kbd {
@@ -2838,17 +2859,22 @@
             <!-- Step 3: Current Case -->
             <div class="panel panel-ai-workspace">
               <span class="section-tag">Step 3: Current Case</span>
-              <h2 style="border:0;padding:0;margin-bottom:12px">当前实验合同</h2>
+              <h2 style="border:0;padding:0;margin-bottom:12px">后端推荐实验合同</h2>
               <div class="grid grid-run-validation" style="grid-template-columns: 6fr 4fr">
                 <div>
-                  <label>Current Case Name</label>
-                  <input id="caseName" placeholder="mom_v1" />
-                  <div id="caseDynamicFields"></div>
-                  <button class="action action-success" id="btnCreateCase" style="width:100%;margin-top:12px">刷新 Current Case</button>
+                  <div id="recommendedCaseBox" class="md-box" style="background:var(--bg);min-height:160px">等待加载后端推荐 case…</div>
+                  <button class="action action-success" id="btnRunRecommendedCase" style="width:100%;margin-top:12px" disabled>运行后端推荐 Case</button>
                   <pre id="bridgeResponseBox" style="margin-top:12px;font-size: 12px;max-height:80px;overflow:auto" class="muted"></pre>
+                  <details style="margin-top:14px">
+                    <summary class="factor-workshop-summary">Advanced / Deprecated 手动创建 current_case</summary>
+                    <label style="margin-top:10px">Current Case Name</label>
+                    <input id="caseName" placeholder="mom_v1" />
+                    <div id="caseDynamicFields"></div>
+                    <button class="action action-success" id="btnCreateCase" style="width:100%;margin-top:12px">刷新 Current Case</button>
+                  </details>
                 </div>
                 <div>
-                  <label>Current Case Preview</label>
+                  <label>Case YAML Preview</label>
                   <div id="currentCasePreviewBox" class="md-box report-doc-box" style="background:var(--bg)">等待 current case…</div>
                 </div>
               </div>
@@ -2858,7 +2884,7 @@
             <div class="panel panel-ai-workspace">
               <span class="section-tag">Step 4: Run Validation</span>
               <h2 style="border:0;padding:0;margin-bottom:12px">运行与结果</h2>
-              <div class="grid" style="grid-template-columns: 6fr 4fr">
+              <div class="grid" style="grid-template-columns: 1fr">
                 <div class="hub-box">
                   <label>Case 列表 (Current)</label>
                   <p class="muted" style="margin:0 0 8px 0;font-size: 13px">显示当前活跃的 case 合同,点击"选择"可直接填入运行目标。</p>
@@ -2866,13 +2892,22 @@
                   <button class="ghost small" id="btnRefreshCases" style="margin-top:12px">REFRESH_CASES</button>
                 </div>
                 <div class="hub-box">
-                  <label>CASE_NAME (Target)</label>
-                  <input id="runCaseName" placeholder="选定或输入 Case">
-                  <label>EVALUATION_PROFILE (Engine)</label>
-                  <select id="runProfile"></select>
-                  <label>OUTPUT_DIR_OVERRIDE (Optional)</label>
-                  <input id="runOutputDir" placeholder="默认路径">
-                  <button class="action" id="btnStartRun" style="width:100%;margin-top:12px">EXECUTE_RUN</button>
+                  <label>推荐 Case 运行</label>
+                  <div id="runTargetSummary" class="md-box" style="background:var(--bg);min-height:96px">等待推荐 case…</div>
+                  <button class="action" id="btnStartRun" style="width:100%;margin-top:12px" disabled>运行后端推荐 Case</button>
+                  <details style="margin-top:12px">
+                    <summary class="factor-workshop-summary">Advanced 运行覆盖项</summary>
+                    <label>CASE_NAME (Target)</label>
+                    <input id="runCaseName" placeholder="选定或输入 Case">
+                    <label style="display:flex;gap:8px;align-items:center;margin-top:8px">
+                      <input id="runProfileOverrideEnabled" type="checkbox" style="width:auto">
+                      覆盖 EVALUATION_PROFILE
+                    </label>
+                    <label>EVALUATION_PROFILE (Override)</label>
+                    <select id="runProfile"></select>
+                    <label>OUTPUT_DIR_OVERRIDE (Optional)</label>
+                    <input id="runOutputDir" placeholder="默认路径">
+                  </details>
                 </div>
               </div>
               <div class="hub-panel" style="margin-top:16px">
@@ -3021,10 +3056,10 @@
         <div class="grid">
           <div class="hub-panel">
             <div class="hub-header">
-              <h2>导出草案队列 (Export Drafts)</h2>
+              <h2>归档草稿 (Archive Drafts)</h2>
             </div>
             <div class="hub-body">
-              <p class="muted" style="margin:0 0 12px 0;font-size: 14px">这个页面不是日常主路径。只有你需要把结论正式写回知识库时,才在这里处理导出草案。</p>
+              <p class="muted" style="margin:0 0 12px 0;font-size: 14px">成功 run 会先生成研究归档预览，确认后进入这里等待审阅和正式写回。</p>
               <div id="draftTable"></div>
               <button class="ghost small" id="btnRefreshDrafts" style="margin-top:12px">REFRESH_EXPORTS</button>
             </div>
@@ -3036,6 +3071,19 @@
             </div>
             <div class="hub-body">
               <p class="muted" style="margin:0 0 16px 0;font-size: 14px">这里只处理正式知识写回。日常研究循环只看 project / current case / latest result / decision log。</p>
+              <div class="hub-box">
+                <label>ARCHIVE_CONCLUSION_ZH</label>
+                <textarea id="archiveUserNotesZh" placeholder="中文结论：为什么这个因子/模型值得归档，边界是什么。"></textarea>
+                <label>RISKS (每行一条)</label>
+                <textarea id="archiveRisks" style="min-height:72px" placeholder="样本边界 / 失效条件 / 数据风险"></textarea>
+                <label>NEXT_STEPS (每行一条)</label>
+                <textarea id="archiveNextSteps" style="min-height:72px" placeholder="下一步验证或复核动作"></textarea>
+                <label>EMERGENT_MOVES (每行一条)</label>
+                <textarea id="archiveEmergentMoves" style="min-height:72px"></textarea>
+                <label>OPERATIVE_CLAIMS (每行一条)</label>
+                <textarea id="archiveOperativeClaims" style="min-height:72px"></textarea>
+                <button class="action" id="btnCreateArchiveDraft" style="margin-top:10px;width:100%">CREATE_ARCHIVE_DRAFT</button>
+              </div>
               <div class="hub-box">
                 <label>EXPORT_DRAFT</label>
                 <input id="draftName" placeholder="draft_mom_5d_r01.md">
@@ -3139,9 +3187,12 @@
       csvParseCache: new Map(),
       artifactRawText: "",
       runCompareIds: [],
+      recommendedCase: null,
+      selectedCaseSpecPath: "",
       categories: [],          // [{key, display_name_zh, form_fields, ...}]
       currentCategoryKey: "factor_recipe",
       llmSettings: null,
+      currentArchivePreview: null,
     };
 
     const RUNS_AUTO_REFRESH_ACTIVE_MS = 3000;
@@ -3702,26 +3753,122 @@
       try {
         const data = await api(`/api/projects/${enc(state.selectedProject)}/cases`);
         const cases = data.cases || [];
+        state.cases = cases;
+        const recommended = cases.find((c) => c && c.is_recommended) || null;
+        state.recommendedCase = recommended;
+        state.selectedCaseSpecPath = recommended ? String(recommended.spec_path || "") : "";
+        if (recommended) {
+          $("runCaseName").value = recommended.case_name || "";
+        }
+        renderRecommendedCase(recommended, cases);
+        renderRunTargetSummary(recommended);
         if (!cases.length) {
           $("caseTable").innerHTML = "<div class='muted'>暂无 current case,请先在研究工作台刷新 current case。</div>";
           return;
         }
         $("caseTable").innerHTML = `<div class="case-table-wrap"><table class="case-table">
-          <thead><tr><th>case_name</th><th>current</th><th>spec</th><th>handoff</th><th></th></tr></thead>
+          <thead><tr><th>case_name</th><th>source</th><th>claim</th><th>profile</th><th></th></tr></thead>
           <tbody>${cases.map(c => `
             <tr>
               <td class="case-name-cell"><code>${c.case_name}</code></td>
-              <td class="case-flag-cell">${c.is_current ? "<span class='status succeeded'>current</span>" : "-"}</td>
-              <td class="case-flag-cell">${c.spec_exists ? "yes" : "no"}</td>
-              <td class="case-flag-cell">${c.handoff_exists ? "yes" : "no"}</td>
-              <td class="case-action-cell"><button class="ghost small" data-action="selectCase" data-case-name="${escAttr(c.case_name)}">选择</button></td>
+              <td class="case-flag-cell">${escHtml(c.source || "-")}${c.is_recommended ? " · <span class='status succeeded'>recommended</span>" : ""}</td>
+              <td class="case-flag-cell">${escHtml(c.claim_status || "-")}</td>
+              <td class="case-flag-cell">${escHtml(c.evaluation_profile || "-")}<div class="muted">${escHtml(c.evaluation_profile_source || "")}</div></td>
+              <td class="case-action-cell">${renderCaseActionButton(c)}</td>
             </tr>
           `).join("")}</tbody></table></div>`;
       } catch(e) { $("caseTable").innerHTML = `<div class="muted">${e.message}</div>`; }
     }
 
-    function selectCase(name) {
+    function renderCaseActionButton(c) {
+      const status = String(c.claim_status || "");
+      const specPath = escAttr(c.spec_path || "");
+      const caseName = escAttr(c.case_name || "");
+      if (status === "unclaimed") {
+        return `<button class="ghost small accent" data-action="claimCase" data-spec-path="${specPath}">认领到当前项目</button>`;
+      }
+      if (status === "owned_by_other_project") {
+        return "<span class='muted'>其它项目持有</span>";
+      }
+      return `<button class="ghost small" data-action="selectCase" data-case-name="${caseName}" data-spec-path="${specPath}">选择</button>`;
+    }
+
+    function renderRecommendedCase(recommended, cases) {
+      const box = $("recommendedCaseBox");
+      const preview = $("currentCasePreviewBox");
+      const runBtn = $("btnRunRecommendedCase");
+      const candidates = Array.isArray(cases) ? cases : [];
+      if (!box || !preview) return;
+      if (!recommended) {
+        box.innerHTML = `<div class="muted">没有可安全自动推荐的 backend case。旧 YAML 需要先从候选表认领到当前项目。</div>
+          <div class="muted" style="margin-top:8px">候选数量:${candidates.length}</div>`;
+        preview.textContent = "暂无后端推荐 case。";
+        if (runBtn) runBtn.disabled = true;
+        const startBtn = $("btnStartRun");
+        if (startBtn) startBtn.disabled = true;
+        return;
+      }
+      const summary = recommended.spec_summary || {};
+      box.innerHTML = `
+        <table>
+          <tr><td><strong>case</strong></td><td><code>${escHtml(recommended.case_name || "-")}</code></td></tr>
+          <tr><td><strong>factor</strong></td><td>${escHtml(summary.factor_name || recommended.factor_name || "-")}</td></tr>
+          <tr><td><strong>identity</strong></td><td>${escHtml(recommended.archive_identity || "-")}</td></tr>
+          <tr><td><strong>profile</strong></td><td>${escHtml(recommended.evaluation_profile || "-")} <span class="muted">(${escHtml(recommended.evaluation_profile_source || "-")})</span></td></tr>
+          <tr><td><strong>reason</strong></td><td>${escHtml(recommended.recommendation_reason || "-")}</td></tr>
+          <tr><td><strong>updated</strong></td><td>${escHtml(recommended.updated_at || "-")}</td></tr>
+          <tr><td><strong>spec</strong></td><td><code>${escHtml(recommended.spec_path || "-")}</code></td></tr>
+        </table>
+        <div class="muted" style="margin-top:8px">${escHtml(caseSpecSummaryText(summary))}</div>`;
+      preview.textContent = recommended.spec_preview || "暂无 YAML preview。";
+      if (runBtn) runBtn.disabled = false;
+      const startBtn = $("btnStartRun");
+      if (startBtn) startBtn.disabled = false;
+    }
+
+    function renderRunTargetSummary(caseRow) {
+      const box = $("runTargetSummary");
+      const startBtn = $("btnStartRun");
+      if (!box) return;
+      if (!caseRow) {
+        box.innerHTML = "<div class='muted'>没有推荐 case。请先认领一个 backend case，或在 Advanced 中手动选择。</div>";
+        if (startBtn) startBtn.disabled = true;
+        return;
+      }
+      box.innerHTML = `<div><strong>${escHtml(caseRow.case_name || "-")}</strong></div>
+        <div class="muted">profile: ${escHtml(caseRow.evaluation_profile || "-")} (${escHtml(caseRow.evaluation_profile_source || "-")})</div>
+        <div class="muted">${escHtml(caseSpecSummaryText(caseRow.spec_summary || {}))}</div>`;
+      if (startBtn) startBtn.disabled = false;
+    }
+
+    function caseSpecSummaryText(summary) {
+      if (!summary || typeof summary !== "object") return "";
+      const parts = [
+        summary.target_horizon ? `horizon=${summary.target_horizon}` : "",
+        summary.execution_price_mode ? `execution=${summary.execution_price_mode}` : "",
+        summary.rebalance_frequency ? `rebalance=${summary.rebalance_frequency}` : "",
+        summary.direction ? `direction=${summary.direction}` : "",
+      ].filter(Boolean);
+      return parts.join(" · ");
+    }
+
+    async function claimCase(specPath) {
+      if (!state.selectedProject) return;
+      const data = await api(`/api/projects/${enc(state.selectedProject)}/cases/claim`, "POST", { spec_path: specPath });
+      showResponse("bridgeResponseBox", data);
+      await loadCases();
+      return data;
+    }
+
+    function selectCase(name, specPath = "") {
       $("runCaseName").value = name;
+      state.selectedCaseSpecPath = specPath || "";
+      const selected = (state.cases || []).find((item) => String(item.case_name || "") === String(name || ""));
+      if (selected) {
+        state.recommendedCase = selected;
+        renderRecommendedCase(selected, state.cases || []);
+        renderRunTargetSummary(selected);
+      }
     }
 
     async function loadEvaluationProfiles() {
@@ -3982,7 +4129,7 @@
             </td>
             <td class="run-id-cell"><code>${shortId}</code></td>
             <td class="run-case-cell"><code>${r.case_name}</code></td>
-            <td class="muted run-profile-cell">${r.evaluation_profile}</td>
+            <td class="muted run-profile-cell">${escHtml(r.evaluation_profile || "-")}<div>${escHtml(r.evaluation_profile_source || "")}</div></td>
             <td>${progressHtml}${eventTrailHtml}</td>
             <td>${metricsHtml}</td>
             <td class="artifact-cell">${artifactHtml}</td>
@@ -3990,11 +4137,8 @@
               ${r.status === "succeeded"
                 ? `<button class="ghost small" data-action="openMetricsRun" data-run-id="${escAttr(r.run_id)}">查看实验结果</button> `
                 : ""}
-              ${r.status === "succeeded" && !alreadySummarized
-                ? `<button class="ghost small" data-action="summarizeRun" data-run-id="${escAttr(r.run_id)}">生成实验结果草案</button> `
-                : ""}
-              ${r.status === "succeeded" && alreadySummarized
-                ? `<button class="ghost small accent" data-action="writebackRun" data-run-id="${escAttr(r.run_id)}">查看实验结果草案</button> `
+              ${r.status === "succeeded"
+                ? `<button class="ghost small accent" data-action="archiveRun" data-run-id="${escAttr(r.run_id)}">生成研究归档</button> `
                 : ""}
               ${r.status === "succeeded" || r.status === "failed"
                 ? `<button class="ghost small danger" data-action="deleteRun" data-run-id="${escAttr(r.run_id)}" data-case-name="${escAttr(r.case_name)}">删除实验</button>`
@@ -12811,6 +12955,86 @@ ${styleText}
       } catch(e) { /* drafts tab will show its own error */ }
     }
 
+    function findRunById(runId) {
+      return (state.runs || []).find((item) => String(item.run_id || "") === String(runId || "")) || null;
+    }
+
+    function renderArchivePreviewText(preview) {
+      const identity = preview.identity || {};
+      const audit = preview.audit || {};
+      const existing = preview.existing_card || {};
+      const journey = preview.research_journey || {};
+      const diagnostics = Array.isArray(audit.diagnostics) ? audit.diagnostics : [];
+      const historical = Array.isArray(preview.historical_runs) ? preview.historical_runs : [];
+      return [
+        `workflow: ${preview.workflow || ""}`,
+        `archive_identity: ${identity.archive_identity || ""}${identity.archive_identity_inferred ? " (inferred)" : ""}`,
+        `target_path: ${preview.target_path || ""}`,
+        `can_draft: ${Boolean(preview.can_draft)}`,
+        `legacy_archive_only: ${Boolean(preview.legacy_archive_only)}`,
+        `existing_card_sha: ${existing.content_sha256 || "null"}`,
+        `vault_read_timestamp_utc: ${preview.timestamps?.vault_read_timestamp_utc || existing.vault_read_timestamp_utc || ""}`,
+        "",
+        "=== 诊断 ===",
+        diagnostics.length ? diagnostics.map((item) => `- [${item.severity || ""}] ${item.code || ""}: ${item.message || ""}`).join("\n") : "无阻断诊断。",
+        "",
+        "=== 演化过程 ===",
+        journey.llm_summary_zh || journey.deterministic_summary_zh || "暂无过程摘要。",
+        "",
+        "=== 历史 runs ===",
+        historical.length ? historical.map((item) => `- ${item.run_id || ""} | ${item.case_name || ""} | ${item.run_timestamp_utc || ""}`).join("\n") : "暂无历史 run。",
+        "",
+        "=== 写回预览 ===",
+        preview.draft_markdown || "",
+        existing.diff ? `\n=== Existing Card Diff ===\n${existing.diff}` : "",
+      ].join("\n");
+    }
+
+    async function archiveRun(runId) {
+      const run = findRunById(runId) || {};
+      const workflow = run.workflow || "single_factor";
+      switchView("writeback");
+      try {
+        const preview = await api(`/api/workflows/${enc(workflow)}/runs/${enc(runId)}/archive-preview`);
+        state.currentArchivePreview = preview;
+        $("draftPreviewContent").textContent = renderArchivePreviewText(preview);
+        const identity = preview.identity?.archive_identity || run.case_name || runId;
+        $("archiveUserNotesZh").value = $("archiveUserNotesZh").value || "";
+        sidebarMsg(`已生成 ${identity} 的研究归档预览`);
+      } catch(e) {
+        $("draftPreviewContent").textContent = `归档预览失败: ${e.message}`;
+        sidebarMsg(e.message, true);
+      }
+    }
+
+    async function createArchiveDraftFromPreview() {
+      const preview = state.currentArchivePreview;
+      if (!preview || !preview.workflow || !preview.trigger_run?.run_id) {
+        sidebarMsg("请先从成功 run 生成研究归档预览", true);
+        return;
+      }
+      const payload = {
+        user_notes_zh: $("archiveUserNotesZh").value,
+        risks: linesToList($("archiveRisks").value),
+        next_steps: linesToList($("archiveNextSteps").value),
+        emergent_moves: linesToList($("archiveEmergentMoves").value),
+        operative_claims: linesToList($("archiveOperativeClaims").value),
+        existing_card_content_sha256_at_review: preview.existing_card?.content_sha256 || null,
+        acknowledge_legacy_archive_only: preview.legacy_archive_only ? true : null,
+      };
+      const data = await api(
+        `/api/workflows/${enc(preview.workflow)}/runs/${enc(preview.trigger_run.run_id)}/archive-draft`,
+        "POST",
+        payload,
+      );
+      showResponse("writebackResponseBox", data);
+      $("draftName").value = data.draft_name || "";
+      if (data.preview) $("draftPreviewContent").textContent = String(data.preview);
+      if (data.project_slug) state.selectedProject = data.project_slug;
+      await loadDrafts();
+      sidebarMsg("研究归档草稿已创建，请审阅后再正式写回");
+    }
+
     function renderMarkdownHub(id, text) {
       const box = $(id);
       if (!box) return;
@@ -12905,7 +13129,7 @@ ${styleText}
         item && (item.card_type || item.source_stage || item.draft_type === "knowledge_writeback_draft")
       );
       if (!rows.length) {
-        box.innerHTML = "<span class='muted'>暂无 Knowledge Writeback 草案。Stage2/Stage3 产物审阅后可在这里生成草案。</span>";
+        box.innerHTML = "<span class='muted'>暂无旧式 manual writeback 草案。新流程以研究归档草稿为主。</span>";
         return;
       }
       box.innerHTML = `<table>
@@ -12923,7 +13147,7 @@ ${styleText}
 
     function renderDraftTable(drafts) {
       if (!drafts.length) {
-        $("draftTable").innerHTML = "<div class='muted'>暂无导出草案。只有在你显式走正式写回流程时,这里才会出现内容。</div>";
+        $("draftTable").innerHTML = "<div class='muted'>暂无归档草稿。成功 run 点击“生成研究归档”后会出现在这里。</div>";
         return;
       }
       $("draftTable").innerHTML = `<table>
@@ -12931,12 +13155,12 @@ ${styleText}
         <tbody>${drafts.map(d => `
           <tr>
             <td style="font-size: 14px">${d.name}</td>
-            <td>${d.source_stage || "-"}</td>
-            <td>${d.card_type || d.draft_type || "-"}</td>
+            <td>${d.workflow || d.source_stage || "-"}</td>
+            <td>${d.archive_identity || d.card_type || d.draft_type || "-"}</td>
             <td style="font-size:12px;max-width:260px;overflow-wrap:anywhere">${d.target_path || "-"}</td>
             <td><span class="status ${d.review_status}">${d.review_status}</span></td>
             <td>${d.reviewed_by || "-"}</td>
-            <td>${d.case_name || "-"}</td>
+            <td>${d.case_name || d.audit_level || "-"}</td>
             <td><button class="ghost small" data-action="selectDraft" data-draft-name="${escAttr(d.name)}">选择</button></td>
           </tr>
         `).join("")}</tbody></table>`;
@@ -13055,7 +13279,9 @@ ${styleText}
       if (!el) return;
       const action = el.dataset.action;
       if (action === "selectCase") {
-        selectCase(el.dataset.caseName);
+        selectCase(el.dataset.caseName, el.dataset.specPath);
+      } else if (action === "claimCase") {
+        claimCase(el.dataset.specPath).catch((err) => showResponse("bridgeResponseBox", { error: err.message || String(err) }));
       } else if (action === "viewArtifact") {
         const viewerId = el.dataset.viewerId || "artifactViewer";
         const includeOverviewRaw = String(el.dataset.includeOverview || "").trim().toLowerCase();
@@ -13079,6 +13305,8 @@ ${styleText}
         deleteRun(el.dataset.runId, el.dataset.caseName);
       } else if (action === "writebackRun") {
         writebackRun(el.dataset.runId);
+      } else if (action === "archiveRun") {
+        archiveRun(el.dataset.runId);
       } else if (action === "toggleRunCompare") {
         const runId = String(el.dataset.runId || "").trim();
         const checked = el instanceof HTMLInputElement ? el.checked : false;
@@ -13698,6 +13926,10 @@ ${styleText}
           return `Case 已创建:${payload.case_name}`;
         });
       });
+      bind("btnRunRecommendedCase", "click", (e) => {
+        const startBtn = $("btnStartRun");
+        if (startBtn && !startBtn.disabled) startBtn.click();
+      });
 
       // Validation Console
       $("btnRefreshCases").addEventListener("click", (e) => {
@@ -13706,12 +13938,20 @@ ${styleText}
       $("btnStartRun").addEventListener("click", (e) => {
         withLoading(e.currentTarget, "启动实验", async () => {
           if (!state.selectedProject) { sidebarMsg("请先选择项目", true); return; }
+          const selectedCase = state.recommendedCase || {};
           const payload = {
             case_name: $("runCaseName").value,
-            evaluation_profile: $("runProfile").value,
-            output_root_dir: $("runOutputDir").value || null,
             render_report: true,
           };
+          if (state.selectedCaseSpecPath || selectedCase.spec_path) {
+            payload.spec_path = state.selectedCaseSpecPath || selectedCase.spec_path;
+          }
+          if ($("runProfileOverrideEnabled") && $("runProfileOverrideEnabled").checked) {
+            payload.evaluation_profile = $("runProfile").value;
+          }
+          if ($("runOutputDir").value) {
+            payload.output_root_dir = $("runOutputDir").value;
+          }
           const data = await api(`/api/projects/${enc(state.selectedProject)}/runs`, "POST", payload);
           showResponse("validationResponseBox", data);
           await loadRuns();
@@ -13751,6 +13991,12 @@ ${styleText}
       });
       $("btnPreviewDraft").addEventListener("click", (e) => {
         withLoading(e.currentTarget, "预览导出草案", async () => { await previewDraft(); });
+      });
+      $("btnCreateArchiveDraft").addEventListener("click", (e) => {
+        withLoading(e.currentTarget, "创建归档草稿", async () => {
+          await createArchiveDraftFromPreview();
+          return "归档草稿已创建";
+        });
       });
       $("btnPatchDraft").addEventListener("click", (e) => {
         withLoading(e.currentTarget, "保存导出审阅", async () => {

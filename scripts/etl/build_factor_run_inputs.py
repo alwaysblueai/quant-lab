@@ -4,10 +4,10 @@ Why this exists
 ---------------
 ``alpha-lab real-case single-factor run`` loads the entire ``prices_path`` into
 pandas memory and then layers diagnostics on top. The joined prices+intraday
-dataset (101 cols × 7.21M rows post intraday-cutoff 2025-12-31) blows past the WSL2 user-cgroup budget under
-``default_research`` because diagnostics like ``run_param_sensitivity`` and
-``run_lag_sensitivity`` re-run the backtest on perturbed inputs and duplicate
-the working set several times.
+dataset (101 cols × 7.21M rows post intraday-cutoff 2025-12-31) blows past the
+WSL2 user-cgroup budget under ``default_research`` because diagnostics like
+``run_param_sensitivity`` and ``run_lag_sensitivity`` re-run the backtest on
+perturbed inputs and duplicate the working set several times.
 
 This helper standardises the per-factor optimisation:
 
@@ -98,7 +98,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--start-date", default=None, help="Inclusive lower bound (YYYY-MM-DD).")
     p.add_argument("--end-date", default=None, help="Inclusive upper bound (YYYY-MM-DD).")
     p.add_argument("--dataset-name", default=None, help="Override slim slice dir name.")
-    p.add_argument("--output-suffix", default="v1", help="Suffix for the precomputed factor parquet.")
+    p.add_argument(
+        "--output-suffix",
+        default="v1",
+        help="Suffix for the precomputed factor parquet.",
+    )
     p.add_argument(
         "--skip-precompute",
         action="store_true",
@@ -270,8 +274,12 @@ def main() -> int:
 
     print()
     print("DONE — wire into case YAML:")
-    print(f"  prices_path: ../../../data/processed/real_case_inputs/{dataset_name}/prices.parquet")
-    print(f"  universe.path: ../../../data/processed/real_case_inputs/{dataset_name}/universe_mask.parquet")
+    prices_rel = f"../../../data/processed/real_case_inputs/{dataset_name}/prices.parquet"
+    universe_rel = (
+        f"../../../data/processed/real_case_inputs/{dataset_name}/universe_mask.parquet"
+    )
+    print(f"  prices_path: {prices_rel}")
+    print(f"  universe.path: {universe_rel}")
     if factor_path is not None:
         rel = factor_path.relative_to(REPO_ROOT)
         print("  factor_input:")

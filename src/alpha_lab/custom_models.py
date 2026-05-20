@@ -1,7 +1,7 @@
 """Draft-model candidate metadata loader and audit helper.
 
 Mirror of :mod:`alpha_lab.custom_factors` for Stage 3 backend draft models.
-The audited artifact is ``model_candidates/research/<candidate>/model_candidate.json``.
+The audited artifact is ``custom_models/research/<candidate>/model_candidate.json``.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ class DraftModelSource:
     implementation_status: str
     implementation_type: str
     factor_name: str
+    archive_identity: str = ""
     feature_columns: tuple[str, ...] = ()
     feature_availability_mode: str | None = None
     feature_availability_column: str | None = None
@@ -53,6 +54,8 @@ class DraftModelSource:
         }
         if self.feature_columns:
             payload["feature_columns"] = list(self.feature_columns)
+        if self.archive_identity:
+            payload["archive_identity"] = self.archive_identity
         feature_availability: dict[str, object] = {}
         if self.feature_availability_mode is not None:
             feature_availability["mode"] = self.feature_availability_mode
@@ -153,6 +156,11 @@ def read_draft_model_source(path: str | Path) -> DraftModelSource:
         implementation_status=str(payload.get("implementation_status") or "").strip(),
         implementation_type=str(payload.get("implementation_type") or "").strip(),
         factor_name=factor_name,
+        archive_identity=str(
+            payload.get("archive_identity")
+            or case_spec_payload.get("archive_identity")
+            or ""
+        ).strip(),
         feature_columns=feature_columns,
         feature_availability_mode=(
             str(feature_availability.get("mode")).strip()
@@ -178,7 +186,7 @@ def model_candidate_write_path(workspace_root: str | Path, name: str) -> Path:
     normalized = name.strip().lower()
     return (
         Path(workspace_root).expanduser().resolve()
-        / "model_candidates"
+        / "custom_models"
         / "research"
         / normalized
         / "model_candidate.json"

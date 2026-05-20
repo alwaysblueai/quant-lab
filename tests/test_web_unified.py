@@ -16,7 +16,7 @@ import yaml
 
 import alpha_lab.research_bridge.model_idea as model_idea_module
 import alpha_lab.research_bridge.service as research_bridge_service
-from alpha_lab.exceptions import AlphaLabIOError
+from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabIOError
 from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.web_unified import (
     _build_frontend_batch_parallel_config,
@@ -34,6 +34,7 @@ from alpha_lab.web_unified import (
     _RunTask,
     _UnifiedService,
 )
+from alpha_lab.web_unified._subprocess import _build_single_factor_subprocess_command
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
 
@@ -1822,6 +1823,38 @@ def test_index_html_escapes_script_close_tag_in_print_template() -> None:
     assert "下载后端 PDF（兜底）" not in html
 
 
+def test_index_html_stacks_case_list_above_recommended_run_box() -> None:
+    html = _index_html_raw()
+    case_table_idx = html.index('id="caseTable"')
+    run_summary_idx = html.index('id="runTargetSummary"')
+    grid_start = html.rfind('<div class="grid"', 0, case_table_idx)
+    section = html[grid_start:run_summary_idx]
+
+    assert 'style="grid-template-columns: 1fr"' in section
+    assert 'style="grid-template-columns: 6fr 4fr"' not in section
+    assert case_table_idx < run_summary_idx
+
+
+def test_index_html_case_table_columns_have_stable_widths_and_wrapping() -> None:
+    html = _index_html_raw()
+    table_start = html.index(".case-table {")
+    table_end = html.index(".run-table {", table_start)
+    table_css = html[table_start:table_end]
+    flag_start = html.index(".case-flag-cell,")
+    flag_end = html.index("/* Keyboard navigation hints */", flag_start)
+    flag_css = html[flag_start:flag_end]
+
+    assert "min-width: 920px" in table_css
+    assert ".case-table th:nth-child(1)," in table_css
+    assert ".case-table td:nth-child(1) { width: 30%; }" in table_css
+    assert ".case-table td:nth-child(2) { width: 18%; }" in table_css
+    assert ".case-table td:nth-child(3) { width: 18%; }" in table_css
+    assert ".case-table td:nth-child(4) { width: 22%; }" in table_css
+    assert ".case-table td:nth-child(5) { width: 12%; }" in table_css
+    assert "overflow-wrap: anywhere" in flag_css
+    assert "white-space: nowrap" not in flag_css
+
+
 def test_model_lab_html_supports_original_pdf_export() -> None:
     html = _model_lab_html()
     start = html.find("function buildModelLabOverviewPrintDocument")
@@ -1861,7 +1894,8 @@ def test_model_lab_html_is_backend_first_report_workspace() -> None:
     html = _model_lab_html()
 
     assert "后端迭代优先" in html
-    assert "Validate + Run Full Report" in html
+    assert "导入并运行完整报告" in html
+    assert "Validate + Run Full Report" not in html
     assert "Validate + Run Screening" not in html
     assert "探索并生成双 Agent Prompt" not in html
     assert 'id="explorerIdea"' not in html
@@ -1875,6 +1909,45 @@ def test_model_lab_html_is_backend_first_report_workspace() -> None:
     assert 'id="btnIdeaCopyPrompt"' not in html
     assert 'id="btnIdeaApplyPatchHint"' not in html
     assert "共享 Prompt / 回灌响应 / Patch Hint" not in html
+
+
+def test_model_lab_html_keeps_editing_and_diagnostics_in_advanced_sections() -> None:
+    html = _model_lab_html()
+
+    spec_start = html.index('<details class="advanced-disclosure" id="advancedSpecTools">')
+    spec_end = html.index("</details>", spec_start)
+    spec_section = html[spec_start:spec_end]
+    assert "Advanced Spec Tools" in spec_section
+    assert 'id="specEditor"' in spec_section
+    assert 'id="btnSaveSpec"' in spec_section
+    assert '<details class="advanced-disclosure" id="advancedSpecTools" open>' not in html
+
+    candidate_start = html.index('id="draftCandidatePanel"')
+    candidate_end = html.index('<details class="advanced-disclosure" id="advancedSpecTools">')
+    candidate_section = html[candidate_start:candidate_end]
+    advanced_candidate_start = candidate_section.index(
+        '<details class="advanced-disclosure advanced-disclosure--compact" '
+        'id="advancedCandidateActions">'
+    )
+    default_candidate_section = candidate_section[:advanced_candidate_start]
+    advanced_candidate_section = candidate_section[advanced_candidate_start:]
+    assert "导入并运行完整报告" in default_candidate_section
+    assert "Advanced Candidate Actions" in advanced_candidate_section
+    assert 'id="btnCandidateSave"' in advanced_candidate_section
+    assert 'id="btnCandidateValidate"' in advanced_candidate_section
+    assert 'id="btnCandidateMaterialize"' in advanced_candidate_section
+    assert 'id="btnCandidateSave"' not in default_candidate_section
+
+    diagnostics_start = html.index(
+        '<details class="advanced-disclosure" id="advancedDiagnostics">'
+    )
+    diagnostics_end = html.index("</details>", diagnostics_start)
+    diagnostics_section = html[diagnostics_start:diagnostics_end]
+    assert "Advanced Diagnostics" in diagnostics_section
+    assert 'id="btnOpenSourceDrawer"' in diagnostics_section
+    assert 'id="btnOpenSourceDrawer"' not in html[:diagnostics_start]
+    assert html.index('id="btnOpenSourceDrawer"') < html.index('id="sourceDrawerBackdrop"')
+    assert '<details class="advanced-disclosure" id="advancedDiagnostics" open>' not in html
 
 
 def test_model_lab_html_supports_natural_overview_expansion() -> None:
@@ -2271,6 +2344,313 @@ def test_list_cases_returns_cases(tmp_path: Path) -> None:
     assert len(cases) == 1
     assert cases[0]["case_name"] == "mom_5d"
     assert cases[0]["spec_exists"] is True
+
+
+def _write_backend_single_factor_spec(
+    svc: _UnifiedService,
+    tmp_path: Path,
+    *,
+    factor_name: str,
+    project_slug: str | None = None,
+    archive_identity: str | None = None,
+    evaluation_profile: object | None = None,
+    case_name: str | None = None,
+) -> Path:
+    source_path = write_demo_single_factor_case(
+        tmp_path / f"backend-{factor_name}",
+        factor_name=factor_name,
+    )
+    payload = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+    payload["name"] = case_name or f"{factor_name}_v1"
+    if project_slug is not None:
+        payload["project_slug"] = project_slug
+    if archive_identity is not None:
+        payload["archive_identity"] = archive_identity
+    if evaluation_profile is not None:
+        payload["evaluation_profile"] = evaluation_profile
+    svc.single_factor_specs_root.mkdir(parents=True, exist_ok=True)
+    target = svc.single_factor_specs_root / f"{payload['name']}.yaml"
+    target.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    return target
+
+
+def test_backend_case_list_skips_template_specs(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    svc.create_project(
+        {
+            "slug": "template-skip",
+            "title_zh": "模板过滤",
+            "category": "factor_family",
+            "owner": "test",
+            "market": "ashare",
+            "frequency": "daily",
+            "chatgpt_project_name": "Template",
+            "origin_cards": [],
+        }
+    )
+    svc.single_factor_specs_root.mkdir(parents=True, exist_ok=True)
+    (svc.single_factor_specs_root / "_template_exploration.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "TODO_factor_v1",
+                "factor_name": "TODO_factor",
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="kept_alpha",
+        case_name="kept_alpha_v1",
+    )
+
+    rows = svc.list_cases("template-skip")
+    case_names = {str(row.get("case_name") or "") for row in rows}
+
+    assert "kept_alpha_v1" in case_names
+    assert "TODO_factor_v1" not in case_names
+
+
+def test_backend_case_claim_index_enables_recommendation_without_mutating_yaml(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    svc.create_project(
+        {
+            "slug": "claim-project",
+            "title_zh": "认领测试",
+            "category": "factor_family",
+            "owner": "test",
+            "market": "ashare",
+            "frequency": "daily",
+            "chatgpt_project_name": "Claim",
+            "origin_cards": [],
+        }
+    )
+    spec_path = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="legacy_alpha",
+        archive_identity="legacy_alpha",
+    )
+    before = spec_path.read_text(encoding="utf-8")
+
+    rows = svc.list_cases("claim-project")
+    backend_row = next(row for row in rows if row.get("source") == "backend_optimized")
+    assert backend_row["is_recommended"] is False
+    assert backend_row["requires_explicit_selection"] is True
+    assert backend_row["claim_status"] == "unclaimed"
+
+    claimed = svc.claim_backend_case("claim-project", {"spec_path": str(spec_path)})
+
+    assert claimed["status"] == "claimed"
+    assert spec_path.read_text(encoding="utf-8") == before
+    claim_index = vault / "55_projects" / "claim-project" / "claimed_backend_cases.json"
+    payload = json.loads(claim_index.read_text(encoding="utf-8"))
+    assert payload["claims"][0]["spec_path"] == (
+        "configs/real_cases/single_factor/legacy_alpha_v1.yaml"
+    )
+
+    rows = svc.list_cases("claim-project")
+    backend_row = next(row for row in rows if row.get("source") == "backend_optimized")
+    assert backend_row["is_recommended"] is True
+    assert backend_row["claim_status"] == "claimed_by_current_project"
+    assert backend_row["requires_explicit_selection"] is False
+
+
+def test_backend_case_claim_is_idempotent_and_rejects_other_project(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    for slug in ("claim-a", "claim-b"):
+        svc.create_project(
+            {
+                "slug": slug,
+                "title_zh": slug,
+                "category": "factor_family",
+                "owner": "test",
+                "market": "ashare",
+                "frequency": "daily",
+                "chatgpt_project_name": slug,
+                "origin_cards": [],
+            }
+        )
+    spec_path = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="shared_alpha",
+        archive_identity="shared_alpha",
+    )
+
+    first = svc.claim_backend_case("claim-a", {"spec_path": str(spec_path)})
+    second = svc.claim_backend_case("claim-a", {"spec_path": str(spec_path)})
+
+    assert first["status"] == "claimed"
+    assert second["status"] == "already_claimed_by_project"
+    with pytest.raises(AlphaLabConfigError, match="already claimed"):
+        svc.claim_backend_case("claim-b", {"spec_path": str(spec_path)})
+
+
+def test_backend_case_project_slug_ownership_is_idempotent_and_protected(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    for slug in ("owner-a", "owner-b"):
+        svc.create_project(
+            {
+                "slug": slug,
+                "title_zh": slug,
+                "category": "factor_family",
+                "owner": "test",
+                "market": "ashare",
+                "frequency": "daily",
+                "chatgpt_project_name": slug,
+                "origin_cards": [],
+            }
+        )
+    spec_path = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="owned_alpha",
+        project_slug="owner-a",
+        archive_identity="owned_alpha",
+    )
+
+    current = svc.claim_backend_case("owner-a", {"spec_path": str(spec_path)})
+
+    assert current["status"] == "already_owned_by_project_slug"
+    assert not (vault / "55_projects" / "owner-a" / "claimed_backend_cases.json").exists()
+    with pytest.raises(AlphaLabConfigError, match="owned by another project"):
+        svc.claim_backend_case("owner-b", {"spec_path": str(spec_path)})
+
+
+def test_backend_case_recommendation_prefers_archive_identity_then_factor(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    slug, _ = _create_project_and_case(svc)
+    current_case = vault / "55_projects" / slug / "current_case.md"
+    current_case.write_text(
+        "```yaml\n"
+        + yaml.safe_dump(
+            {
+                "name": "local_case",
+                "factor_name": "shared_factor",
+                "archive_identity": "target_identity",
+            },
+            sort_keys=False,
+        )
+        + "```\n",
+        encoding="utf-8",
+    )
+    target = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="shared_factor",
+        project_slug=slug,
+        archive_identity="target_identity",
+        case_name="older_identity_case",
+    )
+    newer = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="shared_factor",
+        project_slug=slug,
+        archive_identity="other_identity",
+        case_name="newer_factor_case",
+    )
+    old_time = 1_700_000_000
+    new_time = old_time + 100
+    os.utime(target, (old_time, old_time))
+    os.utime(newer, (new_time, new_time))
+
+    rows = svc.list_cases(slug)
+    recommended = [row for row in rows if row.get("is_recommended")]
+
+    assert len(recommended) == 1
+    assert recommended[0]["case_name"] == "older_identity_case"
+    assert recommended[0]["recommendation_reason"] == "archive_identity_match"
+
+
+def test_submit_run_uses_profile_precedence_without_empty_spec_values(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    svc.create_project(
+        {
+            "slug": "profile-project",
+            "title_zh": "profile",
+            "category": "factor_family",
+            "owner": "test",
+            "market": "ashare",
+            "frequency": "daily",
+            "chatgpt_project_name": "profile",
+            "origin_cards": [],
+            "alpha_lab_defaults": {"evaluation_profile": "exploratory_screening"},
+        }
+    )
+    spec_path = _write_backend_single_factor_spec(
+        svc,
+        tmp_path,
+        factor_name="profile_alpha",
+        project_slug="profile-project",
+        evaluation_profile="default_research",
+    )
+    observed: list[_RunTask] = []
+
+    def fake_submit(task: _RunTask) -> SimpleNamespace:
+        observed.append(task)
+        return SimpleNamespace(to_payload=lambda: {"ok": True, **task.__dict__})
+
+    svc.run_store.submit = fake_submit  # type: ignore[method-assign]
+
+    result = svc.submit_run("profile-project", {"case_name": "profile_alpha_v1"})
+    assert result["evaluation_profile"] == "default_research"
+    assert result["evaluation_profile_source"] == "case_spec"
+
+    payload = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    payload["evaluation_profile"] = ""
+    spec_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    result = svc.submit_run("profile-project", {"case_name": "profile_alpha_v1"})
+    assert result["evaluation_profile"] == "exploratory_screening"
+    assert result["evaluation_profile_source"] == "project_default"
+
+    result = svc.submit_run(
+        "profile-project",
+        {"case_name": "profile_alpha_v1", "evaluation_profile": "default_research"},
+    )
+    assert result["evaluation_profile"] == "default_research"
+    assert result["evaluation_profile_source"] == "request"
+    assert observed[-1].evaluation_profile_source == "request"
+
+
+def test_single_factor_web_subprocess_command_keeps_vault_export_skip(
+    tmp_path: Path,
+) -> None:
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="cmd_alpha")
+    task = _RunTask(
+        run_id="run-command",
+        project_slug="project",
+        case_name="demo_cmd_alpha_single_factor",
+        round_id=None,
+        spec_path=str(spec_path),
+        evaluation_profile="default_research",
+        output_root_dir=None,
+        render_report=True,
+    )
+
+    command = _build_single_factor_subprocess_command(task=task, spec_path=spec_path)
+
+    assert "--vault-export-mode" in command
+    assert command[command.index("--vault-export-mode") + 1] == "skip"
 
 
 def test_create_case_passes_frontend_controls_and_builder_kwargs(tmp_path: Path) -> None:
@@ -2956,7 +3336,7 @@ def test_model_lab_subprocess_command_includes_draft_candidate(
     output_root = tmp_path / "outputs"
     candidate_path = (
         tmp_path
-        / "model_candidates"
+        / "custom_models"
         / "research"
         / "candidate_alpha"
         / "model_candidate.json"
@@ -3102,71 +3482,35 @@ def test_run_store_claims_queued_tasks_into_batch_groups() -> None:
     assert store.get("run-c").status == "running"
 
 
-def test_run_store_reuses_input_bundle_cache_across_single_runs(
+def test_run_store_uses_single_factor_subprocess_runner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _RunStore()
     spec_path = tmp_path / "case.yaml"
     spec_path.write_text("name: demo\n", encoding="utf-8")
-    prices_path = tmp_path / "prices.parquet"
-    prices_path.write_text("stub", encoding="utf-8")
-    universe_path = tmp_path / "universe.parquet"
-    universe_path.write_text("stub", encoding="utf-8")
+    called_run_ids: list[str] = []
 
-    fake_spec = SimpleNamespace(
-        prices_path=str(prices_path),
-        output=SimpleNamespace(root_dir=str(tmp_path / "outputs")),
-        universe=SimpleNamespace(
-            path=str(universe_path),
-            in_universe_column="in_universe",
-        ),
-    )
-
-    bundle_load_count = 0
-
-    def _fake_load_spec(_path: Path) -> SimpleNamespace:
-        return fake_spec
-
-    def _fake_load_inputs(_spec: object) -> object:
-        nonlocal bundle_load_count
-        bundle_load_count += 1
-        return {"bundle_id": bundle_load_count}
-
-    call_bundles: list[object] = []
-    call_output_roots: list[Path] = []
-
-    class _FakeResult:
-        def __init__(self, output_dir: Path, metrics_path: Path) -> None:
-            self.output_dir = output_dir
-            self.artifact_paths = {"metrics": metrics_path}
-
-    def _fake_run_single_factor_case(
-        _spec: object,
+    def _fake_subprocess_task(
+        task: _RunTask,
         *,
-        output_root_dir: object,
-        evaluation_profile: str,
-        vault_export_mode: str,
         progress_callback: object,
-        input_bundle: object,
-    ) -> _FakeResult:
-        del evaluation_profile, vault_export_mode, progress_callback
-        call_output_roots.append(Path(str(output_root_dir)))
-        call_bundles.append(input_bundle)
-        run_idx = len(call_bundles)
-        output_dir = tmp_path / f"run-{run_idx}"
+    ) -> SimpleNamespace:
+        del progress_callback
+        called_run_ids.append(task.run_id)
+        output_dir = tmp_path / f"run-{len(called_run_ids)}"
         output_dir.mkdir(parents=True, exist_ok=True)
         metrics_path = output_dir / "metrics.json"
         metrics_path.write_text(
             json.dumps({"metrics": {"factor_verdict": "Pass"}}),
             encoding="utf-8",
         )
-        return _FakeResult(output_dir=output_dir, metrics_path=metrics_path)
+        return SimpleNamespace(output_dir=output_dir, artifact_paths={"metrics": metrics_path})
 
-    monkeypatch.setattr("alpha_lab.web_unified._run_store.load_single_factor_case_spec", _fake_load_spec)
-    monkeypatch.setattr("alpha_lab.web_unified._run_store.load_standard_inputs", _fake_load_inputs)
     monkeypatch.setattr(
-        "alpha_lab.web_unified._run_store.run_single_factor_case", _fake_run_single_factor_case
+        store,
+        "_execute_single_factor_subprocess_task",
+        _fake_subprocess_task,
     )
 
     tasks = [
@@ -3211,13 +3555,7 @@ def test_run_store_reuses_input_bundle_cache_across_single_runs(
     for task in tasks:
         store._execute_single_task(task, allow_fallback=False)  # noqa: SLF001
 
-    assert bundle_load_count == 1
-    assert len(call_bundles) == 2
-    assert call_bundles[0] is call_bundles[1]
-    assert call_output_roots == [
-        (tmp_path / "outputs" / "_web_runs" / "run-1").resolve(),
-        (tmp_path / "outputs" / "_web_runs" / "run-2").resolve(),
-    ]
+    assert called_run_ids == ["run-1", "run-2"]
     assert store.get("run-1").status == "succeeded"
     assert store.get("run-2").status == "succeeded"
 

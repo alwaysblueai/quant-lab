@@ -19,7 +19,7 @@ from alpha_lab.custom_factors import (
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.factor_recipe import FactorRecipeError, build_factor_from_recipe_mapping
 from alpha_lab.interfaces import validate_factor_output
-from alpha_lab.labels import forward_return
+from alpha_lab.labels import ExecutionPriceMode, forward_return
 from alpha_lab.neutralization import neutralize_signal
 from alpha_lab.real_cases.common_io import (
     apply_universe_to_factor,
@@ -57,7 +57,7 @@ from .evaluate import SingleFactorEvaluationResult, evaluate_single_factor_case
 from .spec import FactorInputSpec, SingleFactorCaseSpec, load_single_factor_case_spec
 
 FactorLoader = Callable[[SingleFactorCaseSpec], pd.DataFrame]
-InputBundleKey = tuple[str, str | None, str]
+InputBundleKey = tuple[str, str | None, str, str]
 BatchParallelMode = Literal["serial", "thread", "process"]
 
 
@@ -95,6 +95,7 @@ class SingleFactorInputBundle:
     universe_mask: pd.DataFrame | None
     max_price_date: pd.Timestamp
     base_feature_cache: SingleFactorBaseFeatureCache
+    execution_price_mode: ExecutionPriceMode = "close"
 
 
 @dataclass(frozen=True)
@@ -141,8 +142,15 @@ def prepare_base_features(
     *,
     trailing_return_horizons: Sequence[int] = (1, 5, 10, 20, 60),
     forward_label_horizons: Sequence[int] = (5, 10, 20),
+    execution_price_mode: ExecutionPriceMode = "close",
 ) -> SingleFactorBaseFeatureCache:
-    """Precompute frequently reused return series and close-to-close labels."""
+    """Precompute frequently reused return series and forward-return labels.
+
+    ``execution_price_mode`` is forwarded to
+    :func:`alpha_lab.labels.forward_return` for every cached horizon so that
+    downstream consumers (headline IC, RankIC, long-short returns, IC decay,
+    portfolio simulation, etc.) all see the same label convention.
+    """
     panel = prices.copy()
     panel = panel.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
     panel["close"] = pd.to_numeric(panel["close"], errors="coerce")
@@ -156,7 +164,11 @@ def prepare_base_features(
 
     labels: dict[int, pd.DataFrame] = {}
     for horizon in sorted({int(x) for x in forward_label_horizons if int(x) > 0}):
-        labels[horizon] = forward_return(panel, horizon=horizon)
+        labels[horizon] = forward_return(
+            panel,
+            horizon=horizon,
+            execution_price_mode=execution_price_mode,
+        )
 
     return SingleFactorBaseFeatureCache(
         prices_enriched=panel,
@@ -218,6 +230,7 @@ def load_standard_inputs(
         prices_panel,
         trailing_return_horizons=(1, 5, 10, 20, 60),
         forward_label_horizons=tuple(sorted({1, 2, 3, 5, 10, 20, int(spec.target.horizon)})),
+        execution_price_mode=spec.target.execution_price_mode,
     )
     prices_panel_enriched = base_feature_cache.prices_enriched
 
@@ -230,6 +243,7 @@ def load_standard_inputs(
         universe_mask=universe_mask,
         max_price_date=pd.Timestamp(prices_all["date"].max()),
         base_feature_cache=base_feature_cache,
+        execution_price_mode=spec.target.execution_price_mode,
     )
 
 
@@ -1109,6 +1123,7 @@ def _ensure_bundle_compatible(
         expected_prices_path,
         expected_universe_path,
         expected_universe_col,
+        expected_execution_price_mode,
     ) = _resolved_input_bundle_key(spec)
     if bundle.prices_path != expected_prices_path:
         raise AlphaLabConfigError("input_bundle.prices_path does not match spec.prices_path")
@@ -1118,6 +1133,11 @@ def _ensure_bundle_compatible(
         raise AlphaLabConfigError(
             "input_bundle.universe_in_column does not match spec.universe.in_universe_column"
         )
+    if bundle.execution_price_mode != expected_execution_price_mode:
+        raise AlphaLabConfigError(
+            "input_bundle.execution_price_mode does not match "
+            "spec.target.execution_price_mode"
+        )
 
 
 def _resolved_input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
@@ -1125,7 +1145,12 @@ def _resolved_input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
     universe_path: str | None = None
     if spec.universe.path is not None:
         universe_path = str(resolve_tabular_frame_path(spec.universe.path, object_name="universe"))
-    return (prices_path, universe_path, spec.universe.in_universe_column)
+    return (
+        prices_path,
+        universe_path,
+        spec.universe.in_universe_column,
+        spec.target.execution_price_mode,
+    )
 
 
 def _default_factor_loader(spec: SingleFactorCaseSpec) -> pd.DataFrame:

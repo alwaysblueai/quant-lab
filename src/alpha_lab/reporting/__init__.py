@@ -591,6 +591,8 @@ def _render_experiment_card(
         "type: experiment",
         f"name: {card_name}",
         'source: "alpha-lab / Self-developed"',
+        "generated_by: alpha_lab",
+        "export_kind: pipeline_auto",
         f"tags: {tag_str}",
         "status: draft",
         f"factor: {factor_name}",

@@ -126,6 +126,33 @@
       flex: 1 1 auto;
       min-height: 0;
     }
+    .advanced-disclosure {
+      margin: 18px 0;
+    }
+    .advanced-disclosure > summary {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7f3eb;
+      color: var(--brand-dark);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 10px 12px;
+      text-transform: uppercase;
+    }
+    .advanced-disclosure[open] > summary {
+      margin-bottom: 12px;
+    }
+    .advanced-disclosure--compact {
+      margin: 10px 0 0;
+    }
+    .advanced-disclosure--compact > summary {
+      background: #fff;
+      font-size: 12px;
+      padding: 8px 10px;
+      text-transform: none;
+    }
     .panel {
       padding: 16px;
       min-width: 0;
@@ -2008,11 +2035,16 @@
             placeholder="粘贴 Stage2 输出中的 JSON/YAML model_candidate_payload；自由文本只会提取明确的机器块。"
           ></textarea>
           <div class="toolbar">
-            <button id="btnCandidateSave">保存 Candidate</button>
-            <button id="btnCandidateValidate">Validate</button>
-            <button id="btnCandidateMaterialize">生成 Case YAML</button>
-            <button id="btnCandidateRun" class="primary">Validate + Run Full Report</button>
+            <button id="btnCandidateRun" class="primary">导入并运行完整报告</button>
           </div>
+          <details class="advanced-disclosure advanced-disclosure--compact" id="advancedCandidateActions">
+            <summary>Advanced Candidate Actions</summary>
+            <div class="toolbar">
+              <button id="btnCandidateSave">保存 Candidate</button>
+              <button id="btnCandidateValidate">Validate</button>
+              <button id="btnCandidateMaterialize">生成 Case YAML</button>
+            </div>
+          </details>
           <div id="candidatePreview">
             <div class="muted">粘贴 payload 后会预览 candidate、features 和 model family。</div>
           </div>
@@ -2023,8 +2055,10 @@
       </div>
     </div>
 
-    <div class="grid spec-workspace-grid">
-    <div class="panel">
+    <details class="advanced-disclosure" id="advancedSpecTools">
+      <summary>Advanced Spec Tools</summary>
+      <div class="grid spec-workspace-grid">
+      <div class="panel">
         <h2>Spec 列表</h2>
         <div class="toolbar">
           <button id="btnRefreshSpecs">刷新 Spec</button>
@@ -2077,7 +2111,8 @@
           <pre id="specDiffOutput" class="muted">Spec Diff 尚未运行</pre>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
 
     <div class="panel">
       <h2>Run 队列</h2>
@@ -2162,32 +2197,35 @@
       </div>
     </div>
 
-    <div class="bottom-grid">
-      <div class="panel">
-        <h2>训练监控台 / Run Diagnostics</h2>
-        <div class="diag-shell">
-          <div class="diag-toolbar">
-            <div>
-              <label>Run 选择</label>
-              <select id="diagRunSelect">
-                <option value="">请选择 run</option>
-              </select>
+    <details class="advanced-disclosure" id="advancedDiagnostics">
+      <summary>Advanced Diagnostics</summary>
+      <div class="bottom-grid">
+        <div class="panel">
+          <h2>训练监控台 / Run Diagnostics</h2>
+          <div class="diag-shell">
+            <div class="diag-toolbar">
+              <div>
+                <label>Run 选择</label>
+                <select id="diagRunSelect">
+                  <option value="">请选择 run</option>
+                </select>
+              </div>
+              <button id="btnDiagLoad">加载 Diagnostics</button>
+              <button id="btnDiagUseCurrent">使用当前 Run</button>
+              <button id="btnOpenSourceDrawer">源码抽屉</button>
+              <div class="metric-card">
+                <strong>状态</strong>
+                <span id="diagLoadStatus">idle</span>
+              </div>
             </div>
-            <button id="btnDiagLoad">加载 Diagnostics</button>
-            <button id="btnDiagUseCurrent">使用当前 Run</button>
-            <button id="btnOpenSourceDrawer">源码抽屉</button>
-            <div class="metric-card">
-              <strong>状态</strong>
-              <span id="diagLoadStatus">idle</span>
+            <div id="diagContent" class="diag-content">
+              <div class="diag-empty">请选择 run 并加载 diagnostics。</div>
             </div>
-          </div>
-          <div id="diagContent" class="diag-content">
-            <div class="diag-empty">请选择 run 并加载 diagnostics。</div>
           </div>
         </div>
-      </div>
 
-    </div>
+      </div>
+    </details>
 
     <div id="sourceDrawerBackdrop" class="source-drawer-backdrop" aria-hidden="true">
       <div class="source-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="sourceDrawerTitle">
@@ -2473,7 +2511,7 @@
       if (!data.ok) {
         state.candidateValidation = data.validation || null;
         renderCandidateValidation();
-        throw new Error("Validate + Run Full Report failed");
+        throw new Error("导入并运行完整报告失败");
       }
       state.candidateValidation = data.validation || null;
       renderCandidateValidation();
@@ -11349,6 +11387,11 @@ ${styleText}
     $("diagRunSelect")?.addEventListener("change", () => {
       const runId = String($("diagRunSelect")?.value || "").trim();
       state.selectedDiagnosticsRunId = runId;
+    });
+    $("advancedSpecTools")?.addEventListener("toggle", () => {
+      if (!$("advancedSpecTools")?.open) return;
+      syncSpecDiffPanelHeightWithEditor();
+      syncSpecListViewportHeight();
     });
     window.addEventListener("resize", () => {
       syncSourceViewerHeightWithDiagnostics();

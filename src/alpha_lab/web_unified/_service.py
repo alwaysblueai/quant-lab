@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,14 @@ from csv import DictReader
 from pathlib import Path
 from typing import cast
 
+from alpha_lab.archive import (
+    ARCHIVE_DRAFT_TYPE,
+    ArchiveRunIndex,
+    apply_archive_draft,
+    build_archive_preview,
+    cleanup_deprecated_writebacks,
+    write_archive_draft,
+)
 from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
 from alpha_lab.custom_factors import (
     BUILTIN_FACTOR_NAMES,
@@ -41,13 +50,13 @@ from alpha_lab.custom_factors import (
     iter_custom_factor_meta_paths,
     load_persisted_custom_factors,
 )
-from alpha_lab.draft_model_validation import validate_draft_model_file
-from alpha_lab.exceptions import AlphaLabConfigError
-from alpha_lab.factor_recipe import factor_registry
-from alpha_lab.model_candidates import (
+from alpha_lab.custom_models import (
     model_candidate_write_path,
     read_draft_model_source,
 )
+from alpha_lab.draft_model_validation import validate_draft_model_file
+from alpha_lab.exceptions import AlphaLabConfigError
+from alpha_lab.factor_recipe import factor_registry
 from alpha_lab.real_cases.model_factor.spec import load_model_factor_case_spec
 from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
 from alpha_lab.research_bridge.categories import get_category_profile
@@ -147,9 +156,46 @@ from alpha_lab.web_unified import (
     _strip_spec_diff_metadata,
     _utc_now_iso,
 )
-from alpha_lab.web_unified._models import _RunTask
+from alpha_lab.web_unified._models import RunWorkflow, _RunTask
 from alpha_lab.web_unified._run_store import _RunRecord, _RunStore
 from alpha_lab.web_unified._utils import _coerce_finite_or_text, _safe_slug
+
+_BACKEND_SINGLE_FACTOR_CASE_ROOT = Path("configs") / "real_cases" / "single_factor"
+_CLAIMED_BACKEND_CASES_FILENAME = "claimed_backend_cases.json"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _clean_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _case_row_updated_at_epoch(row: Mapping[str, object]) -> float:
+    value = row.get("updated_at_epoch")
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 class _UnifiedService:
@@ -160,7 +206,15 @@ class _UnifiedService:
         self._custom_factors_dir = self.workspace_root / "custom_factors"
         self._apply_saved_llm_settings()
         self._load_persisted_custom_factors()
-        self._restore_model_lab_web_runs()
+        self._restore_completed_web_runs()
+        self.archive_index = ArchiveRunIndex.build(
+            workspace_root=self.workspace_root,
+            records=self.run_store.list_records(),
+        )
+        try:
+            cleanup_deprecated_writebacks(vault_root=self.vault_root)
+        except OSError:
+            pass
 
     @property
     def projects_root(self) -> Path:
@@ -171,8 +225,12 @@ class _UnifiedService:
         return (self.workspace_root / "configs" / "real_cases" / "model_factor").resolve()
 
     @property
+    def single_factor_specs_root(self) -> Path:
+        return (self.workspace_root / "configs" / "real_cases" / "single_factor").resolve()
+
+    @property
     def model_lab_candidates_root(self) -> Path:
-        return (self.workspace_root / "model_candidates" / "research").resolve()
+        return (self.workspace_root / "custom_models" / "research").resolve()
 
     @property
     def _secret_settings_path(self) -> Path:
@@ -302,7 +360,7 @@ class _UnifiedService:
         self._write_secret_settings(settings)
         return self.llm_settings_status()
 
-    def _restore_model_lab_web_runs(self) -> None:
+    def _restore_completed_web_runs(self) -> None:
         web_runs_root = self.workspace_root / "outputs" / "real_cases" / "_web_runs"
         if not web_runs_root.exists():
             return
@@ -319,6 +377,9 @@ class _UnifiedService:
                     if key and value
                 }
                 artifact_paths.setdefault("run_manifest", str(manifest_path))
+                case_report_path = output_dir / "case_report.md"
+                if case_report_path.exists():
+                    artifact_paths.setdefault("case_report", str(case_report_path))
                 metrics_path = output_dir / "metrics.json"
                 summary = (
                     _extract_metrics_summary(metrics_path, run_status="succeeded")
@@ -336,6 +397,24 @@ class _UnifiedService:
                     or manifest.get("generated_at_utc")
                     or _utc_now_iso()
                 )
+                is_model_factor = (
+                    (output_dir / "model_definition.json").exists()
+                    or (output_dir / "feature_manifest.json").exists()
+                    or isinstance(manifest.get("draft_model_source"), Mapping)
+                )
+                is_single_factor = (output_dir / "factor_definition.json").exists()
+                workflow: RunWorkflow
+                if is_model_factor:
+                    project_slug = _MODEL_LAB_PROJECT_SLUG
+                    workflow = "model_factor"
+                elif is_single_factor:
+                    restored_project_slug = self._restore_single_factor_project_slug(manifest)
+                    if restored_project_slug is None:
+                        continue
+                    project_slug = restored_project_slug
+                    workflow = "single_factor"
+                else:
+                    continue
                 draft_model_source = (
                     manifest.get("draft_model_source")
                     if isinstance(manifest.get("draft_model_source"), Mapping)
@@ -360,7 +439,7 @@ class _UnifiedService:
                 )
                 record = _RunRecord(
                     run_id=run_id,
-                    project_slug=_MODEL_LAB_PROJECT_SLUG,
+                    project_slug=project_slug,
                     case_name=case_name,
                     round_id=None,
                     spec_path=str(manifest.get("spec_path") or ""),
@@ -384,7 +463,7 @@ class _UnifiedService:
                     ],
                     artifact_paths=artifact_paths,
                     summary=summary,
-                    workflow="model_factor",
+                    workflow=workflow,
                     draft_model_candidate_path=draft_model_candidate_path,
                     draft_model_candidate_name=draft_model_candidate_name,
                     draft_model_candidate_hash=(
@@ -396,6 +475,18 @@ class _UnifiedService:
                 self.run_store.restore_completed(record)
             except Exception:
                 continue
+
+    def _restore_single_factor_project_slug(self, manifest: Mapping[str, object]) -> str | None:
+        spec_path_raw = _coerce_finite_or_text(manifest.get("spec_path"))
+        if spec_path_raw:
+            try:
+                spec_path = Path(spec_path_raw).expanduser().resolve()
+                rel = spec_path.relative_to(self.projects_root)
+                if len(rel.parts) >= 2:
+                    return rel.parts[0]
+            except (OSError, ValueError):
+                pass
+        return None
 
     # ---- Dashboard --------------------------------------------------------
 
@@ -1824,14 +1915,470 @@ class _UnifiedService:
 
     def list_cases(self, slug: str) -> list[dict[str, object]]:
         paths = _project_paths(self.vault_root, slug)
-        return _list_cases(paths)
+        if not paths["project_yaml"].exists():
+            return []
+        project = load_project_config(paths["project_yaml"])
+        project_rows = [
+            self._decorate_project_case_row(row, slug=project.slug, project=project)
+            for row in _list_cases(paths)
+        ]
+        claim_owners = self._claim_owner_by_spec_path()
+        backend_rows = [
+            self._decorate_backend_case_row(
+                row,
+                slug=project.slug,
+                project=project,
+                claim_owners=claim_owners,
+            )
+            for row in self._list_backend_single_factor_cases()
+        ]
+        self._mark_recommended_backend_case(
+            backend_rows,
+            archive_identity=self._current_project_archive_identity(paths),
+            factor_name=self._current_project_factor_name(paths),
+        )
+        return [*backend_rows, *project_rows]
+
+    def _list_backend_single_factor_cases(self) -> list[dict[str, object]]:
+        specs_root = self.single_factor_specs_root
+        if not specs_root.exists():
+            return []
+        rows: list[dict[str, object]] = []
+        for spec_path in [*sorted(specs_root.glob("*.yaml")), *sorted(specs_root.glob("*.yml"))]:
+            if spec_path.name.startswith("_"):
+                continue
+            raw = _read_yaml_document_safe(str(spec_path)) or {}
+            case_name = _clean_text(raw.get("name") or spec_path.stem)
+            factor_name = _clean_text(raw.get("factor_name"))
+            if not case_name:
+                continue
+            stat_result = spec_path.stat()
+            rows.append(
+                {
+                    "case_name": case_name,
+                    "factor_name": factor_name,
+                    "archive_identity": _clean_text(
+                        raw.get("archive_identity") or raw.get("factor_name")
+                    ),
+                    "project_slug": _clean_text(raw.get("project_slug")),
+                    "evaluation_profile": _clean_text(raw.get("evaluation_profile")),
+                    "evaluation_profile_source": (
+                        "case_spec"
+                        if _clean_text(raw.get("evaluation_profile"))
+                        else "project_default"
+                    ),
+                    "spec_path": str(spec_path),
+                    "spec_relative_path": self._workspace_relative_path(spec_path),
+                    "spec_preview": _read_text_preview(
+                        spec_path,
+                        limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+                    ),
+                    "spec_summary": self._single_factor_spec_summary(raw),
+                    "handoff_path": "",
+                    "spec_exists": True,
+                    "handoff_exists": False,
+                    "is_current": False,
+                    "is_recommended": False,
+                    "source": "backend_optimized",
+                    "updated_at": dt.datetime.fromtimestamp(
+                        stat_result.st_mtime,
+                        dt.UTC,
+                    ).isoformat(),
+                    "updated_at_epoch": stat_result.st_mtime,
+                }
+            )
+        return sorted(
+            rows,
+            key=_case_row_updated_at_epoch,
+            reverse=True,
+        )
+
+    def _resolve_backend_single_factor_case_spec_path(self, case_name: str) -> Path | None:
+        normalized = case_name.strip()
+        if not normalized:
+            return None
+        specs_root = self.single_factor_specs_root
+        if not specs_root.exists():
+            return None
+        for suffix in (".yaml", ".yml"):
+            direct = specs_root / f"{normalized}{suffix}"
+            if direct.exists():
+                return direct.resolve()
+        for row in self._list_backend_single_factor_cases():
+            if str(row.get("case_name") or "") == normalized:
+                return Path(str(row["spec_path"])).resolve()
+        return None
+
+    def claim_backend_case(self, slug: str, payload: dict[str, object]) -> dict[str, object]:
+        paths = _project_paths(self.vault_root, slug)
+        if not paths["project_yaml"].exists():
+            raise FileNotFoundError(f"project not found: {slug}")
+        project = load_project_config(paths["project_yaml"])
+        spec_path, relative_path = self._resolve_claimable_backend_case_path(
+            payload.get("spec_path")
+        )
+        raw = _read_yaml_document_safe(str(spec_path)) or {}
+        yaml_project = _clean_text(raw.get("project_slug"))
+        if yaml_project:
+            if _safe_slug(yaml_project) == project.slug:
+                return self._claim_response(
+                    project_slug=project.slug,
+                    spec_path=spec_path,
+                    relative_path=relative_path,
+                    status="already_owned_by_project_slug",
+                    claimed=False,
+                    raw=raw,
+                )
+            raise AlphaLabConfigError(
+                f"backend case is owned by another project: {yaml_project}"
+            )
+
+        claim_owners = self._claim_owner_by_spec_path()
+        owner = claim_owners.get(relative_path, "")
+        if owner:
+            if owner == project.slug:
+                return self._claim_response(
+                    project_slug=project.slug,
+                    spec_path=spec_path,
+                    relative_path=relative_path,
+                    status="already_claimed_by_project",
+                    claimed=False,
+                    raw=raw,
+                )
+            raise AlphaLabConfigError(f"backend case is already claimed by project: {owner}")
+
+        claims = self._load_claims(project.slug)
+        claim: dict[str, object] = {
+            "spec_path": relative_path,
+            "case_name": _clean_text(raw.get("name") or spec_path.stem),
+            "factor_name": _clean_text(raw.get("factor_name")),
+            "archive_identity": _clean_text(raw.get("archive_identity") or raw.get("factor_name")),
+            "spec_sha256_at_claim": _file_sha256(spec_path),
+            "claimed_at_utc": _utc_now_iso(),
+            "claimed_by": "web_unified",
+        }
+        claims.append(claim)
+        self._write_claims(project.slug, claims)
+        return self._claim_response(
+            project_slug=project.slug,
+            spec_path=spec_path,
+            relative_path=relative_path,
+            status="claimed",
+            claimed=True,
+            raw=raw,
+        )
+
+    def _claim_response(
+        self,
+        *,
+        project_slug: str,
+        spec_path: Path,
+        relative_path: str,
+        status: str,
+        claimed: bool,
+        raw: Mapping[str, object],
+    ) -> dict[str, object]:
+        return {
+            "ok": True,
+            "project_slug": project_slug,
+            "status": status,
+            "claimed": claimed,
+            "spec_path": str(spec_path),
+            "spec_relative_path": relative_path,
+            "case_name": _clean_text(raw.get("name") or spec_path.stem),
+            "factor_name": _clean_text(raw.get("factor_name")),
+            "archive_identity": _clean_text(raw.get("archive_identity") or raw.get("factor_name")),
+        }
+
+    def _decorate_project_case_row(
+        self,
+        row: dict[str, object],
+        *,
+        slug: str,
+        project: object,
+    ) -> dict[str, object]:
+        spec_path = Path(str(row.get("spec_path") or ""))
+        raw = _read_yaml_document_safe(str(spec_path)) or {}
+        evaluation_profile = _clean_text(raw.get("evaluation_profile"))
+        project_default = _clean_text(
+            getattr(getattr(project, "alpha_lab_defaults", None), "evaluation_profile", "")
+        )
+        return {
+            **row,
+            "source": "project",
+            "project_slug": slug,
+            "claimed_by_project": "",
+            "claim_status": "project_local",
+            "archive_identity": _clean_text(raw.get("archive_identity") or raw.get("factor_name")),
+            "factor_name": _clean_text(raw.get("factor_name")),
+            "evaluation_profile": evaluation_profile or project_default,
+            "evaluation_profile_source": "case_spec" if evaluation_profile else "project_default",
+            "is_recommended": False,
+            "recommendation_reason": "",
+            "requires_explicit_selection": False,
+            "spec_preview": _read_text_preview(
+                spec_path,
+                limit_bytes=_PROJECT_DOC_PREVIEW_BYTES,
+            ),
+            "spec_summary": self._single_factor_spec_summary(raw),
+        }
+
+    def _decorate_backend_case_row(
+        self,
+        row: dict[str, object],
+        *,
+        slug: str,
+        project: object,
+        claim_owners: Mapping[str, str],
+    ) -> dict[str, object]:
+        relative_path = _clean_text(row.get("spec_relative_path"))
+        yaml_project = _clean_text(row.get("project_slug"))
+        claim_owner = _clean_text(claim_owners.get(relative_path, ""))
+        evaluation_profile = _clean_text(row.get("evaluation_profile"))
+        project_default = _clean_text(
+            getattr(getattr(project, "alpha_lab_defaults", None), "evaluation_profile", "")
+        )
+        claim_status = "unclaimed"
+        if yaml_project:
+            claim_status = (
+                "owned_by_current_project"
+                if _safe_slug(yaml_project) == slug
+                else "owned_by_other_project"
+            )
+        elif claim_owner:
+            claim_status = (
+                "claimed_by_current_project"
+                if claim_owner == slug
+                else "owned_by_other_project"
+            )
+        decorated = dict(row)
+        decorated.update(
+            {
+                "claimed_by_project": claim_owner,
+                "claim_status": claim_status,
+                "requires_explicit_selection": claim_status == "unclaimed",
+                "evaluation_profile": evaluation_profile or project_default,
+                "is_recommended": False,
+                "recommendation_reason": "",
+            }
+        )
+        return decorated
+
+    def _mark_recommended_backend_case(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        archive_identity: str,
+        factor_name: str,
+    ) -> None:
+        eligible = [
+            row
+            for row in rows
+            if row.get("claim_status") in {"owned_by_current_project", "claimed_by_current_project"}
+        ]
+        if not eligible:
+            return
+        selected: dict[str, object] | None = None
+        reason = "project_latest"
+        if archive_identity:
+            matches = [
+                row
+                for row in eligible
+                if _clean_text(row.get("archive_identity")) == archive_identity
+            ]
+            if matches:
+                selected = self._latest_backend_case(matches)
+                reason = "archive_identity_match"
+        if selected is None and factor_name:
+            matches = [
+                row for row in eligible if _clean_text(row.get("factor_name")) == factor_name
+            ]
+            if matches:
+                selected = self._latest_backend_case(matches)
+                reason = "factor_name_match"
+        if selected is None:
+            selected = self._latest_backend_case(eligible)
+        if selected is None:
+            return
+        selected["is_recommended"] = True
+        selected["recommendation_reason"] = reason
+
+    def _latest_backend_case(self, rows: list[dict[str, object]]) -> dict[str, object] | None:
+        if not rows:
+            return None
+        return sorted(
+            rows,
+            key=_case_row_updated_at_epoch,
+            reverse=True,
+        )[0]
+
+    def _current_project_archive_identity(self, paths: dict[str, Path]) -> str:
+        payload = _read_yaml_document_safe(str(paths["current_case"])) or {}
+        return _clean_text(payload.get("archive_identity"))
+
+    def _current_project_factor_name(self, paths: dict[str, Path]) -> str:
+        payload = _read_yaml_document_safe(str(paths["current_case"])) or {}
+        return _clean_text(payload.get("factor_name"))
+
+    def _single_factor_spec_summary(self, payload: Mapping[str, object]) -> dict[str, object]:
+        target = payload.get("target") if isinstance(payload.get("target"), Mapping) else {}
+        universe = payload.get("universe") if isinstance(payload.get("universe"), Mapping) else {}
+        return {
+            "factor_name": _clean_text(payload.get("factor_name")),
+            "target_horizon": target.get("horizon") if isinstance(target, Mapping) else None,
+            "execution_price_mode": (
+                _clean_text(target.get("execution_price_mode"))
+                if isinstance(target, Mapping)
+                else ""
+            ),
+            "rebalance_frequency": _clean_text(payload.get("rebalance_frequency")),
+            "direction": _clean_text(payload.get("direction")),
+            "prices_path": _clean_text(payload.get("prices_path")),
+            "universe_path": (
+                _clean_text(universe.get("path")) if isinstance(universe, Mapping) else ""
+            ),
+            "factor_path": _clean_text(payload.get("factor_path")),
+        }
+
+    def _workspace_relative_path(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.workspace_root).as_posix()
+        except ValueError:
+            return path.resolve().as_posix()
+
+    def _resolve_claimable_backend_case_path(self, value: object) -> tuple[Path, str]:
+        raw = _clean_text(value)
+        if not raw:
+            raise ValueError("spec_path is required")
+        candidate = Path(raw).expanduser()
+        resolved = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (self.workspace_root / candidate).resolve()
+        )
+        if resolved.parent != self.single_factor_specs_root:
+            raise PermissionError("spec_path must be a one-level single-factor backend case YAML")
+        if resolved.suffix.lower() not in {".yaml", ".yml"}:
+            raise PermissionError("spec_path must be a YAML single-factor backend case")
+        if not resolved.exists() or not resolved.is_file():
+            raise FileNotFoundError(f"case spec does not exist: {resolved}")
+        try:
+            relative = resolved.relative_to(self.workspace_root).as_posix()
+        except ValueError as exc:
+            raise PermissionError("spec_path must be under the workspace root") from exc
+        rel_path = Path(relative)
+        if rel_path.parent != _BACKEND_SINGLE_FACTOR_CASE_ROOT:
+            raise PermissionError("spec_path must be under configs/real_cases/single_factor")
+        return resolved, relative
+
+    def _claims_path(self, slug: str) -> Path:
+        return (
+            _project_paths(self.vault_root, slug)["project_dir"]
+            / _CLAIMED_BACKEND_CASES_FILENAME
+        )
+
+    def _load_claims(self, slug: str) -> list[dict[str, object]]:
+        path = self._claims_path(slug)
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        claims = payload.get("claims") if isinstance(payload, dict) else None
+        if not isinstance(claims, list):
+            return []
+        return [dict(item) for item in claims if isinstance(item, dict)]
+
+    def _write_claims(self, slug: str, claims: list[dict[str, object]]) -> None:
+        path = self._claims_path(slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "claims": sorted(claims, key=lambda item: _clean_text(item.get("spec_path"))),
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def _claim_owner_by_spec_path(self) -> dict[str, str]:
+        owners: dict[str, str] = {}
+        if not self.projects_root.exists():
+            return owners
+        for project_yaml in _iter_project_contracts(self.projects_root):
+            try:
+                project = load_project_config(project_yaml)
+                slug = project.slug
+            except Exception:
+                slug = _safe_slug(project_yaml.parent.name)
+            if not slug:
+                continue
+            for claim in self._load_claims(slug):
+                rel_path = _clean_text(claim.get("spec_path"))
+                if rel_path and rel_path not in owners:
+                    owners[rel_path] = slug
+        return owners
+
+    def _resolve_allowed_single_factor_spec_path(
+        self,
+        *,
+        project_paths: dict[str, Path],
+        raw_path: str,
+    ) -> Path:
+        candidate = Path(raw_path).expanduser().resolve()
+        allowed_roots = [
+            project_paths["project_dir"].resolve(),
+            self.single_factor_specs_root.resolve(),
+        ]
+        if not any(_is_relative_to(candidate, root) for root in allowed_roots):
+            raise PermissionError(
+                "spec_path must be under the project or backend case config roots"
+            )
+        if not candidate.exists():
+            raise FileNotFoundError(f"case spec does not exist: {candidate}")
+        return candidate
 
     def list_drafts(self, slug: str) -> list[dict[str, object]]:
         drafts_dir = _project_paths(self.vault_root, slug)["drafts_dir"]
         project_yaml = _project_paths(self.vault_root, slug)["project_yaml"]
-        if not project_yaml.exists():
+        if not project_yaml.exists() and not drafts_dir.exists():
             raise FileNotFoundError(f"project not found: {slug}")
         return _list_draft_summaries(drafts_dir)
+
+    def _refresh_archive_index(self) -> None:
+        self.archive_index.sync_run_records(self.run_store.list_records())
+
+    def archive_preview(self, workflow: str, run_id: str) -> dict[str, object]:
+        self._refresh_archive_index()
+        return build_archive_preview(
+            index=self.archive_index,
+            vault_root=self.vault_root,
+            workflow=workflow,
+            run_id=run_id,
+        )
+
+    def archive_draft(
+        self,
+        workflow: str,
+        run_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        preview = self.archive_preview(workflow, run_id)
+        record = self.archive_index.get(run_id)
+        project_slug = ""
+        if record is not None:
+            project_slug = _safe_slug(record.project_slug or "")
+        if not project_slug:
+            project_slug = _MODEL_LAB_PROJECT_SLUG if workflow == "model_factor" else "__archive__"
+        result = write_archive_draft(
+            vault_root=self.vault_root,
+            project_slug=project_slug,
+            preview=preview,
+            payload=payload,
+        )
+        result["project_slug"] = project_slug
+        return result
 
     def create_writeback_draft(self, payload: dict[str, object]) -> dict[str, object]:
         slug = _safe_slug(str(payload.get("project_slug") or "").strip())
@@ -1922,7 +2469,7 @@ class _UnifiedService:
 
     def read_draft(self, slug: str, draft_name: str) -> dict[str, object]:
         paths = _project_paths(self.vault_root, slug)
-        if not paths["project_yaml"].exists():
+        if not paths["project_yaml"].exists() and not paths["drafts_dir"].exists():
             raise FileNotFoundError(f"project not found: {slug}")
         draft_path = _resolve_draft_path(paths["drafts_dir"], draft_name)
         frontmatter, _ = _load_markdown_with_frontmatter(draft_path)
@@ -1948,7 +2495,7 @@ class _UnifiedService:
         payload: dict[str, object],
     ) -> dict[str, object]:
         paths = _project_paths(self.vault_root, slug)
-        if not paths["project_yaml"].exists():
+        if not paths["project_yaml"].exists() and not paths["drafts_dir"].exists():
             raise FileNotFoundError(f"project not found: {slug}")
         draft_path = _resolve_draft_path(paths["drafts_dir"], draft_name)
         frontmatter, body = _load_markdown_with_frontmatter(draft_path)
@@ -1992,11 +2539,19 @@ class _UnifiedService:
         payload: dict[str, object] | None = None,
     ) -> dict[str, object]:
         paths = _project_paths(self.vault_root, slug)
-        if not paths["project_yaml"].exists():
+        if not paths["project_yaml"].exists() and not paths["drafts_dir"].exists():
             raise FileNotFoundError(f"project not found: {slug}")
         draft_path = _resolve_draft_path(paths["drafts_dir"], draft_name)
         mode = _optional_text(payload.get("mode")) if payload is not None else None
         frontmatter, body = _load_markdown_with_frontmatter(draft_path)
+        if str(frontmatter.get("type") or "").strip() == ARCHIVE_DRAFT_TYPE:
+            return apply_archive_draft(
+                vault_root=self.vault_root,
+                draft_path=draft_path,
+                frontmatter=frontmatter,
+                body=body,
+                mode=mode,
+            )
         if str(frontmatter.get("type") or "").strip() == "knowledge_writeback_draft":
             return _apply_knowledge_writeback_draft(
                 vault_root=self.vault_root,
@@ -2169,14 +2724,42 @@ class _UnifiedService:
         if not case_name:
             raise ValueError("case_name is required")
         paths = _project_paths(self.vault_root, slug)
-        spec_path = _resolve_case_spec_path(paths, case_name)
+        explicit_spec_path = _optional_text(payload.get("spec_path"))
+        if explicit_spec_path is not None:
+            spec_path = self._resolve_allowed_single_factor_spec_path(
+                project_paths=paths,
+                raw_path=explicit_spec_path,
+            )
+        else:
+            spec_path = _resolve_case_spec_path(paths, case_name)
+            should_try_backend = not spec_path.exists()
+            if spec_path == paths["current_case"] and spec_path.exists():
+                raw_current_case = _read_yaml_document_safe(str(spec_path)) or {}
+                current_case_name = _clean_text(raw_current_case.get("name"))
+                should_try_backend = (
+                    current_case_name != case_name and spec_path.stem != case_name
+                )
+            if should_try_backend:
+                backend_spec_path = self._resolve_backend_single_factor_case_spec_path(case_name)
+                if backend_spec_path is not None:
+                    spec_path = backend_spec_path
         if not spec_path.exists():
             raise FileNotFoundError(f"case spec does not exist: {spec_path}")
         project = load_project_config(paths["project_yaml"])
         spec = load_single_factor_case_spec(spec_path)
-        evaluation_profile = str(
-            payload.get("evaluation_profile") or project.alpha_lab_defaults.evaluation_profile
-        )
+        case_name = spec.name
+        raw_spec = _read_yaml_document_safe(str(spec_path)) or {}
+        requested_profile = _optional_text(payload.get("evaluation_profile"))
+        spec_profile = _optional_text(raw_spec.get("evaluation_profile"))
+        if requested_profile is not None:
+            evaluation_profile = requested_profile
+            evaluation_profile_source = "request"
+        elif spec_profile is not None:
+            evaluation_profile = spec_profile
+            evaluation_profile_source = "case_spec"
+        else:
+            evaluation_profile = project.alpha_lab_defaults.evaluation_profile
+            evaluation_profile_source = "project_default"
         _preflight_strict_split_for_spec(
             spec,
             object_name="alpha-lab",
@@ -2189,6 +2772,7 @@ class _UnifiedService:
             round_id=_optional_text(payload.get("round_id")),
             spec_path=str(spec_path),
             evaluation_profile=evaluation_profile,
+            evaluation_profile_source=evaluation_profile_source,
             output_root_dir=_optional_text(payload.get("output_root_dir")),
             render_report=bool(payload.get("render_report", True)),
         )

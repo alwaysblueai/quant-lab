@@ -136,8 +136,8 @@ Stage 3 跑完之后，把后端实验摘要（见 Stage 3）**直接粘回**同
 
 | 路径 | 内容 |
 |---|---|
-| `custom_factors/research/<f>/factor.json` 或 `model_candidates/research/<c>/model_candidate.json` | Stage 2 payload 完整复制 |
-| `custom_factors/research/<f>/research_log.md` 或 `model_candidates/research/<c>/research_log.md` | append-only：每轮一行 timestamp + 摘要 |
+| `custom_factors/research/<f>/factor.json` 或 `custom_models/research/<c>/model_candidate.json` | Stage 2 payload 完整复制 |
+| `custom_factors/research/<f>/research_log.md` 或 `custom_models/research/<c>/research_log.md` | append-only：每轮一行 timestamp + 摘要 |
 | `configs/real_cases/{single_factor,model_factor}/<name>_v<n>.yaml` | case spec（模型侧从 `case_spec_payload` materialize） |
 
 ### 跑（exploratory_screening → default_research 渐进）
@@ -150,12 +150,12 @@ alpha-lab real-case single-factor run configs/.../<f>_v1.yaml \
   --render-report --vault-export-mode skip
 
 # 模型
-alpha-lab validate-draft-model model_candidates/research/<c>/model_candidate.json
+alpha-lab validate-draft-model custom_models/research/<c>/model_candidate.json
 alpha-lab real-case model-factor run configs/.../<c>_v1.yaml \
   --evaluation-profile exploratory_screening \
   --screening-retrain-every-n-dates 40 \
   --render-report --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<c>/model_candidate.json
+  --draft-model-candidate custom_models/research/<c>/model_candidate.json
 ```
 
 ### 迭代摘要（粘回网页 GPT）

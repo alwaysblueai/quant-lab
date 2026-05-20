@@ -670,7 +670,7 @@ def test_unified_cli_top_level_help_is_router(
     captured = capsys.readouterr()
     expected = (
         "{run,fast-screen,validate-draft-factor,validate-draft-model,real-case,"
-        "campaign,profiles,web,bridge,idea,vault,data,model-idea}"
+        "campaign,profiles,web,bridge,idea,archive,vault,data,model-idea}"
     )
     assert expected in captured.out
 

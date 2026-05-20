@@ -7,8 +7,8 @@ from typing import Any, cast
 
 import pandas as pd
 
+from alpha_lab.custom_models import DraftModelSource
 from alpha_lab.interfaces import validate_factor_output
-from alpha_lab.model_candidates import DraftModelSource
 from alpha_lab.model_factor import (
     ModelFactorBuildConfig,
     ModelFactorBuildResult,

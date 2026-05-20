@@ -75,6 +75,8 @@ def render_experiment_card_markdown(
         "type: experiment",
         f"name: {spec.name}",
         'source: "alpha-lab / real-case single-factor research package"',
+        "generated_by: alpha_lab",
+        "export_kind: pipeline_auto",
         f"tags: {tags}",
         "status: draft",
         f"factor: {spec.factor_name}",

@@ -32,6 +32,7 @@ class _RunTask:
     evaluation_profile: str
     output_root_dir: str | None
     render_report: bool
+    evaluation_profile_source: str = "request"
     workflow: RunWorkflow = "single_factor"
     note: str | None = None
     draft_model_candidate_path: str | None = None

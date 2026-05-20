@@ -219,6 +219,8 @@
     ],
     "is_end": "2024-05-03",
     "is_start": "2024-01-01",
+    "label_entry_assumption": "factor-date close (instant execution)",
+    "label_mode": "close",
     "lag_sensitivity_ic_decay_lag_1": -1.5778561887038616,
     "lag_sensitivity_lags": [
       0,
@@ -710,6 +712,7 @@
     "subperiod_long_short_positive_share_full": 0.3333333333333333,
     "subperiod_long_short_positive_share_is": 0.3333333333333333,
     "subperiod_long_short_positive_share_oos": 0.3333333333333333,
+    "target_execution_price_mode": "close",
     "target_horizon": 5,
     "target_kind": "forward_return",
     "tradability_filter_applied": false,

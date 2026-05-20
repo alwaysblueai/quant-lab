@@ -14,7 +14,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from alpha_lab.evaluation import compute_ic, compute_ic_summary, compute_rank_ic
-from alpha_lab.labels import forward_return
+from alpha_lab.labels import ExecutionPriceMode, forward_return
 from alpha_lab.sorted_panel import ensure_sorted
 
 AUTOCORR_FAST_PATH_COVERAGE = 1.0
@@ -94,6 +94,8 @@ def compute_ic_decay(
     prices_df: pd.DataFrame,
     horizons: tuple[int, ...] = (1, 2, 3, 5, 10, 20),
     precomputed_labels_by_horizon: Mapping[int, pd.DataFrame] | None = None,
+    *,
+    execution_price_mode: ExecutionPriceMode = "close",
 ) -> pd.DataFrame:
     """Compute IC summary at multiple forward-return horizons.
 
@@ -120,7 +122,10 @@ def compute_ic_decay(
         One row per horizon with columns:
         ``[horizon, mean_ic, mean_rank_ic, ic_ir, t_stat, p_value, n_dates]``.
     """
-    if precomputed_labels_by_horizon is None:
+    # The wide fast path inlines close-to-close return arithmetic; skip it for
+    # non-close execution modes so the slow path can honor the requested
+    # entry-price convention.
+    if precomputed_labels_by_horizon is None and execution_price_mode == "close":
         fast = _compute_ic_decay_wide_fast_path(
             factor_df=factor_df,
             prices_df=prices_df,
@@ -137,7 +142,11 @@ def compute_ic_decay(
             if cached is not None:
                 labels = cached.copy()
         if labels is None:
-            labels = forward_return(prices_df, horizon=h)
+            labels = forward_return(
+                prices_df,
+                horizon=h,
+                execution_price_mode=execution_price_mode,
+            )
         if labels.empty:
             rows.append(
                 {

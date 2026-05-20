@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
+from alpha_lab.custom_factors import find_custom_factor_workspace_root
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLabExperimentError
 from alpha_lab.research_bridge.categories import (
     CATEGORY_REGISTRY,
@@ -73,6 +74,7 @@ from .engine_prompts import (
     Engine,
     Lab,
     PromptContext,
+    _render_move_lines,
     normalize_engines,
 )
 from .engine_prompts import (
@@ -83,9 +85,6 @@ from .engine_prompts import (
 )
 from .engine_prompts import (
     prompt_filename_for as _engine_prompt_filename,
-)
-from .engine_prompts import (
-    _render_move_lines,
 )
 from .llm_rerank import (
     DEFAULT_MAX_CANDIDATES,
@@ -1033,6 +1032,26 @@ class IdeaDistributeResult:
         }
 
 
+def _resolve_distribute_workspace_root(workspace_root: str | Path) -> Path:
+    """Resolve workspace_root, walking up to a real ``custom_factors/`` anchor.
+
+    Default callers (web frontend, CLI ``--workspace-root .``) often launch
+    from a directory outside the repo (e.g. ``/mnt/c/Users/...``); the literal
+    ``"."`` resolves to that home dir which has no ``custom_factors/``, so the
+    codebase snapshot comes back empty and Stage 1 reviewer can't see existing
+    research factors. Walk up to find the nearest ancestor with ``custom_factors/``
+    so the snapshot actually reflects the repo state.
+    """
+
+    raw_path = Path(workspace_root).expanduser().resolve()
+    if (raw_path / "custom_factors").exists():
+        return raw_path
+    resolved = find_custom_factor_workspace_root(raw_path)
+    if (resolved / "custom_factors").exists():
+        return resolved
+    return raw_path
+
+
 def distribute_idea(
     *,
     vault_root: str | Path | None,
@@ -1065,7 +1084,7 @@ def distribute_idea(
     else:
         selected_engines = normalize_engines(engines)
     target_lab = Lab(lab) if isinstance(lab, str) else lab
-    resolved_workspace = Path(workspace_root).expanduser().resolve()
+    resolved_workspace = _resolve_distribute_workspace_root(workspace_root)
     resolved_vault = _resolve_bridge_vault_root(vault_root)
     explore_result = explore_idea(
         vault_root=resolved_vault,
@@ -1248,8 +1267,8 @@ def _render_retrieval_pack(
             "## Codebase snapshot",
             f"- single-factor promoted: {len(ctx.codebase.factors_promoted)}",
             f"- single-factor research: {len(ctx.codebase.factors_research)}",
-            f"- model candidates promoted: {len(ctx.codebase.model_candidates_promoted)}",
-            f"- model candidates research: {len(ctx.codebase.model_candidates_research)}",
+            f"- custom models promoted: {len(ctx.codebase.custom_models_promoted)}",
+            f"- custom models research: {len(ctx.codebase.custom_models_research)}",
             f"- single-factor cases registered: {len(ctx.codebase.single_factor_cases)}",
             f"- model-factor cases registered: {len(ctx.codebase.model_factor_cases)}",
             "",

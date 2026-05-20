@@ -1,5 +1,5 @@
 {
-  "base_case_spec_path": "model_candidates/research/turnover_technical_ridge_20/model_candidate.json",
+  "base_case_spec_path": "custom_models/research/turnover_technical_ridge_20/model_candidate.json",
   "candidate_name": "turnover_technical_ridge_20_smoke",
   "case_spec_payload": {
     "direction": "long",

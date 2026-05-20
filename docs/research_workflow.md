@@ -125,7 +125,7 @@ Part B 只负责"在 v1 schema 内能不能执行"；不否决、不淘汰、不
 | `available_data` 自动推断 | `scoring.py::infer_available_data_from_frequency` |
 | Retrieval 多分量评分 | `scoring.py::score_card` + `service.py::_typed_rank_candidates` |
 | Stage 3 validator | `draft_factor_validation.py::validate_draft_factor_file` / `draft_model_validation.py::validate_draft_model_file` |
-| Audit pass-through | `custom_factors.py::CustomFactorSource.to_audit_dict` / `model_candidates.py::DraftModelSource.to_audit_dict` |
+| Audit pass-through | `custom_factors.py::CustomFactorSource.to_audit_dict` / `custom_models.py::DraftModelSource.to_audit_dict` |
 
 ## 文档关系
 

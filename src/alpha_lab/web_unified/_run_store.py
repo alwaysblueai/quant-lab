@@ -33,7 +33,6 @@ from alpha_lab.real_cases.single_factor.pipeline import (
     SingleFactorCaseRunResult,
     SingleFactorInputBundle,
     load_standard_inputs,
-    run_single_factor_case,
 )
 from alpha_lab.real_cases.single_factor.spec import (
     SingleFactorCaseSpec,
@@ -52,9 +51,12 @@ from alpha_lab.web_unified._subprocess import (
     _build_model_lab_batch_worker_count,
     _build_model_lab_subprocess_command,
     _build_model_lab_subprocess_env,
+    _build_single_factor_subprocess_command,
+    _build_single_factor_subprocess_env,
     _format_model_lab_subprocess_failure,
     _format_run_error_text,
     _load_model_factor_artifact_paths_from_manifest,
+    _load_single_factor_artifact_paths_from_manifest,
     _model_lab_subprocess_failure_hint,
     _parse_time_peak_rss_kb,
     _read_text_tail,
@@ -172,6 +174,7 @@ class _RunRecord:
     evaluation_profile: str
     output_root_dir: str | None
     render_report: bool
+    evaluation_profile_source: str = "request"
     status: RunStatus = "queued"
     started_at_utc: str | None = None
     finished_at_utc: str | None = None
@@ -223,6 +226,7 @@ class _RunRecord:
             evaluation_profile=self.evaluation_profile,
             output_root_dir=self.output_root_dir,
             render_report=self.render_report,
+            evaluation_profile_source=self.evaluation_profile_source,
             status=self.status,
             started_at_utc=self.started_at_utc,
             finished_at_utc=self.finished_at_utc,
@@ -257,6 +261,7 @@ class _RunRecord:
             "spec_path": self.spec_path,
             "submitted_at_utc": self.submitted_at_utc,
             "evaluation_profile": self.evaluation_profile,
+            "evaluation_profile_source": self.evaluation_profile_source,
             "output_root_dir": self.output_root_dir,
             "render_report": self.render_report,
             "status": self.status,
@@ -294,6 +299,7 @@ class _RunRecord:
             "spec_path": self.spec_path,
             "submitted_at_utc": self.submitted_at_utc,
             "evaluation_profile": self.evaluation_profile,
+            "evaluation_profile_source": self.evaluation_profile_source,
             "output_root_dir": self.output_root_dir,
             "render_report": self.render_report,
             "status": self.status,
@@ -358,6 +364,7 @@ class _RunStore:
             spec_path=task.spec_path,
             submitted_at_utc=submitted_at,
             evaluation_profile=task.evaluation_profile,
+            evaluation_profile_source=task.evaluation_profile_source,
             output_root_dir=task.output_root_dir,
             render_report=task.render_report,
             workflow=task.workflow,
@@ -878,6 +885,164 @@ class _RunStore:
             artifact_paths={**manifest_paths, **artifact_paths},
         )
 
+    def _execute_single_factor_subprocess_task(
+        self,
+        task: _RunTask,
+        *,
+        progress_callback: Any,
+    ) -> _SubprocessCaseRunResult:
+        from alpha_lab.web_unified import _utc_now_iso, _write_json_file
+
+        spec_path = Path(task.spec_path).expanduser().resolve()
+        spec = load_single_factor_case_spec(spec_path)
+        output_root_dir = _resolve_single_factor_web_output_root_dir(
+            task,
+            spec=spec,
+        )
+        output_dir = (output_root_dir / spec.name).expanduser().resolve()
+        log_dir = output_dir / "_web_run_logs" / task.run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_path = log_dir / "stdout.log"
+        stderr_path = log_dir / "stderr.log"
+        status_path = log_dir / "status.json"
+        artifact_paths = {
+            "subprocess_stdout": stdout_path,
+            "subprocess_stderr": stderr_path,
+            "subprocess_status": status_path,
+        }
+        cli_cmd = _build_single_factor_subprocess_command(
+            task=task,
+            spec_path=spec_path,
+        )
+        cmd = _wrap_command_with_time(cli_cmd)
+        started_at = _utc_now_iso()
+        _write_json_file(
+            status_path,
+            {
+                "status": "starting",
+                "run_id": task.run_id,
+                "case_name": task.case_name,
+                "workflow": task.workflow,
+                "started_at_utc": started_at,
+                "command": cli_cmd,
+                "effective_command": cmd,
+                "cwd": str(Path.cwd().resolve()),
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
+            },
+        )
+        with self._lock:
+            record = self._records.get(task.run_id)
+            if record is not None:
+                record.output_dir = str(output_dir)
+                record.artifact_paths.update(
+                    {key: str(path) for key, path in artifact_paths.items()}
+                )
+                self._push_progress_locked(
+                    record,
+                    message="已启动隔离子进程执行单因子实验",
+                    percent=8,
+                )
+
+        env = _build_single_factor_subprocess_env()
+        start_monotonic = time.monotonic()
+        try:
+            with stdout_path.open("ab") as stdout, stderr_path.open("ab") as stderr:
+                proc = subprocess.Popen(  # noqa: S603 - argv is built without shell=True.
+                    cmd,
+                    cwd=str(Path.cwd().resolve()),
+                    env=env,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                _write_json_file(
+                    status_path,
+                    {
+                        "status": "running",
+                        "run_id": task.run_id,
+                        "case_name": task.case_name,
+                        "pid": proc.pid,
+                        "started_at_utc": started_at,
+                        "command": cli_cmd,
+                        "effective_command": cmd,
+                        "cwd": str(Path.cwd().resolve()),
+                        "stdout_log": str(stdout_path),
+                        "stderr_log": str(stderr_path),
+                    },
+                )
+                progress_callback(
+                    message=(
+                        f"单因子子进程运行中 pid={proc.pid}；日志写入 "
+                        f"{stdout_path.name}/{stderr_path.name}"
+                    ),
+                    percent=30,
+                )
+                returncode = self._wait_for_model_factor_subprocess(
+                    task=task,
+                    proc=proc,
+                )
+        except Exception as exc:
+            _annotate_exception_with_model_lab_subprocess_artifacts(
+                exc,
+                output_dir=output_dir,
+                artifact_paths=artifact_paths,
+            )
+            raise
+
+        finished_at = _utc_now_iso()
+        elapsed_seconds = round(time.monotonic() - start_monotonic, 3)
+        peak_rss_kb = _parse_time_peak_rss_kb(stderr_path)
+        status_payload: dict[str, object] = {
+            "status": "succeeded" if returncode == 0 else "failed",
+            "run_id": task.run_id,
+            "case_name": task.case_name,
+            "returncode": returncode,
+            "started_at_utc": started_at,
+            "finished_at_utc": finished_at,
+            "elapsed_seconds": elapsed_seconds,
+            "peak_rss_kb": peak_rss_kb,
+            "command": cli_cmd,
+            "effective_command": cmd,
+            "cwd": str(Path.cwd().resolve()),
+            "stdout_log": str(stdout_path),
+            "stderr_log": str(stderr_path),
+        }
+        _write_json_file(status_path, status_payload)
+
+        if returncode != 0:
+            stderr_tail = _read_text_tail(stderr_path)
+            stdout_tail = _read_text_tail(stdout_path)
+            hint = _model_lab_subprocess_failure_hint(
+                returncode=returncode,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+            )
+            message = _format_model_lab_subprocess_failure(
+                command=cmd,
+                returncode=returncode,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+                elapsed_seconds=elapsed_seconds,
+                peak_rss_kb=peak_rss_kb,
+            )
+            subprocess_error = _ModelLabSubprocessError(
+                message,
+                returncode=returncode,
+                hint=hint,
+            )
+            _annotate_exception_with_model_lab_subprocess_artifacts(
+                subprocess_error,
+                output_dir=output_dir,
+                artifact_paths=artifact_paths,
+            )
+            raise subprocess_error
+
+        manifest_paths = _load_single_factor_artifact_paths_from_manifest(output_dir)
+        return _SubprocessCaseRunResult(
+            output_dir=output_dir,
+            artifact_paths={**manifest_paths, **artifact_paths},
+        )
+
     def _wait_for_model_factor_subprocess(
         self,
         *,
@@ -903,7 +1068,7 @@ class _RunStore:
             if now - last_heartbeat >= 30:
                 self._push_progress(
                     task.run_id,
-                    message=f"模型因子子进程仍在运行 pid={proc.pid}",
+                    message=f"实验子进程仍在运行 pid={proc.pid}",
                     percent=30,
                 )
                 last_heartbeat = now
@@ -958,18 +1123,9 @@ class _RunStore:
                     progress_callback=progress_callback,
                 )
             else:
-                spec = load_single_factor_case_spec(Path(task.spec_path).resolve())
-                bundle, _ = self._load_cached_input_bundle(spec)
-                run_result = run_single_factor_case(
-                    spec,
-                    output_root_dir=_resolve_single_factor_web_output_root_dir(
-                        task,
-                        spec=spec,
-                    ),
-                    evaluation_profile=task.evaluation_profile,
-                    vault_export_mode="skip",
+                run_result = self._execute_single_factor_subprocess_task(
+                    task,
                     progress_callback=progress_callback,
-                    input_bundle=bundle,
                 )
             self._finalize_success(task=task, result=run_result)
         except Exception as exc:
@@ -1028,8 +1184,7 @@ class _RunStore:
         finally:
             with self._lock:
                 self._tasks.pop(run_id, None)
-            if task.workflow == "model_factor":
-                gc.collect()
+            gc.collect()
 
     def _finalize_success(self, *, task: _RunTask, result: RunSuccessResult) -> None:
         from alpha_lab.web_unified import (

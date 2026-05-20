@@ -129,6 +129,7 @@ class ModelFactorCaseSpec:
     n_quantiles: int
     transaction_cost: TransactionCostSpec
     output: OutputSpec
+    archive_identity: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -176,6 +177,7 @@ def model_factor_case_spec_from_mapping(data: Mapping[str, object]) -> ModelFact
 
     name = required_str(data, "name")
     factor_name = required_str(data, "factor_name")
+    archive_identity = _optional_text(data.get("archive_identity"))
     features_path = required_str(data, "features_path")
     prices_path = required_str(data, "prices_path")
     rebalance_frequency = required_str(data, "rebalance_frequency")
@@ -219,6 +221,7 @@ def model_factor_case_spec_from_mapping(data: Mapping[str, object]) -> ModelFact
     return ModelFactorCaseSpec(
         name=name,
         factor_name=factor_name,
+        archive_identity=archive_identity,
         features_path=features_path,
         feature_columns=feature_columns,
         prices_path=prices_path,
@@ -275,6 +278,8 @@ def spec_to_dict(spec: ModelFactorCaseSpec) -> dict[str, object]:
     """Convert typed spec to JSON/YAML-serializable dict."""
 
     payload = cast(dict[str, object], asdict(spec))
+    if payload.get("archive_identity") is None:
+        payload.pop("archive_identity", None)
     payload["feature_columns"] = list(spec.feature_columns)
     model_selection = cast(dict[str, object], payload.get("model_selection", {}))
     model_selection["candidates"] = [
@@ -299,6 +304,11 @@ def dump_spec_yaml(spec: ModelFactorCaseSpec) -> str:
             allow_unicode=False,
         )
     )
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _parse_feature_columns(value: object) -> tuple[str, ...]:

@@ -171,6 +171,8 @@
 - `instability_flags`: `[]`
 - `is_end`: `2024-05-03`
 - `is_start`: `2024-01-01`
+- `label_entry_assumption`: `factor-date close (instant execution)`
+- `label_mode`: `close`
 - `lag_sensitivity_ic_decay_lag_1`: `0.0987376642163248`
 - `lag_sensitivity_lags`: `[0, 1, 2, 3]`
 - `lag_sensitivity_long_short_ir_lag_0`: `0.19637844148848294`
@@ -473,6 +475,7 @@
 - `subperiod_long_short_positive_share_full`: `1.0`
 - `subperiod_long_short_positive_share_is`: `0.6666666666666666`
 - `subperiod_long_short_positive_share_oos`: `1.0`
+- `target_execution_price_mode`: `close`
 - `target_horizon`: `5`
 - `target_kind`: `forward_return`
 - `tradability_filter_applied`: `False`

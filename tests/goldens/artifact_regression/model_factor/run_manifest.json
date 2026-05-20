@@ -116,6 +116,7 @@
     }
   },
   "inputs": {
+    "archive_identity": "model_alpha",
     "factor_name": "model_alpha",
     "feature_availability_mode": "required_timestamp",
     "feature_columns": [
@@ -315,6 +316,7 @@
     "prices_path": "<TMP_ROOT>/inputs/prices.csv",
     "rebalance_frequency": "W",
     "target": {
+      "execution_price_mode": "close",
       "horizon": 5,
       "kind": "forward_return",
       "max_abs_forward_return": null,

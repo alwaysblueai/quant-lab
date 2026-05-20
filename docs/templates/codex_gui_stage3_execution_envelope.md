@@ -32,10 +32,12 @@
 必须完成：
 1. preflight 检查
 2. 写入 factor.json（保留 Stage2 输出中的 provenance 块；不要删 idea_id / stage2_payload_sha256 / audience_chain）
-3. 运行 validate-draft-factor
-4. 运行标准 single-factor backend experiment
-5. 检查 artifact custom_factor_source 审计字段（含 provenance.idea_id）
-6. 输出结果摘要和下一步建议
+3. 写入或更新 case YAML 时，根字段写入 `project_slug` / `archive_identity` / `evaluation_profile`；`project_slug` 只能来自本信封或用户明确给出的项目上下文，不能从名称猜测
+4. 覆盖已有 case YAML 前读取旧 YAML，并保留已有 `project_slug` / `archive_identity` / `evaluation_profile`，除非用户明确要求修改
+5. 运行 validate-draft-factor
+6. 运行标准 single-factor backend experiment
+7. 检查 artifact custom_factor_source 审计字段（含 provenance.idea_id）
+8. 输出结果摘要和下一步建议
 
 forbidden_actions（Stage 3 执行者硬约束，违反任一即视为本轮失败）：
 - 自行补全 Stage2 payload 中缺失的字段（缺什么停下来回写到 research_log 的 deferred 段，不要凭机制名补）

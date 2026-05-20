@@ -189,6 +189,18 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_error_payload(exc)
             return
+        if (
+            len(parts) == 6
+            and parts[0] == "api"
+            and parts[1] == "workflows"
+            and parts[3] == "runs"
+            and parts[5] == "archive-preview"
+        ):
+            try:
+                self._send_json(self.svc.archive_preview(parts[2], parts[4]))
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "model-lab":
             try:
                 if len(parts) == 4 and parts[2] == "specs":
@@ -367,6 +379,18 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     status=HTTPStatus.CREATED,
                 )
                 return
+            if (
+                len(parts) == 6
+                and parts[0] == "api"
+                and parts[1] == "workflows"
+                and parts[3] == "runs"
+                and parts[5] == "archive-draft"
+            ):
+                self._send_json(
+                    self.svc.archive_draft(parts[2], parts[4], payload),
+                    status=HTTPStatus.CREATED,
+                )
+                return
             if parsed.path == "/api/vault/preflight":
                 self._send_json(self.svc.run_preflight_check(payload))
                 return
@@ -456,6 +480,9 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     return
                 if len(parts) == 4 and parts[3] == "cases":
                     self._send_json(self.svc.create_case(slug, payload), status=HTTPStatus.CREATED)
+                    return
+                if len(parts) == 5 and parts[3] == "cases" and parts[4] == "claim":
+                    self._send_json(self.svc.claim_backend_case(slug, payload))
                     return
                 if len(parts) == 4 and parts[3] == "runs":
                     self._send_json(self.svc.submit_run(slug, payload), status=HTTPStatus.CREATED)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.adapt_stock_factor_csv import _prepare_raw_prices
+from scripts.data.adapt_stock_factor_csv import _prepare_raw_prices
 
 
 def test_prepare_raw_prices_preserves_raw_close_and_qfq_close() -> None:

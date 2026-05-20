@@ -106,8 +106,8 @@ class CodebaseSnapshot:
 
     factors_promoted: tuple[str, ...] = ()
     factors_research: tuple[str, ...] = ()
-    model_candidates_promoted: tuple[str, ...] = ()
-    model_candidates_research: tuple[str, ...] = ()
+    custom_models_promoted: tuple[str, ...] = ()
+    custom_models_research: tuple[str, ...] = ()
     single_factor_cases: tuple[str, ...] = ()
     model_factor_cases: tuple[str, ...] = ()
     factor_json_required_keys: tuple[str, ...] = field(
@@ -129,9 +129,9 @@ class CodebaseSnapshot:
                 "promoted": list(self.factors_promoted),
                 "research": list(self.factors_research),
             },
-            "model_candidates": {
-                "promoted": list(self.model_candidates_promoted),
-                "research": list(self.model_candidates_research),
+            "custom_models": {
+                "promoted": list(self.custom_models_promoted),
+                "research": list(self.custom_models_research),
             },
             "cases": {
                 "single_factor": list(self.single_factor_cases),
@@ -182,11 +182,11 @@ def build_codebase_snapshot(workspace_root: str | Path) -> CodebaseSnapshot:
     return CodebaseSnapshot(
         factors_promoted=_list_subdir_names(root / "custom_factors" / "promoted"),
         factors_research=_list_subdir_names(root / "custom_factors" / "research"),
-        model_candidates_promoted=_list_subdir_names(
-            root / "model_candidates" / "promoted"
+        custom_models_promoted=_list_subdir_names(
+            root / "custom_models" / "promoted"
         ),
-        model_candidates_research=_list_subdir_names(
-            root / "model_candidates" / "research"
+        custom_models_research=_list_subdir_names(
+            root / "custom_models" / "research"
         ),
         single_factor_cases=_list_yaml_stems(
             root / "configs" / "real_cases" / "single_factor"
