@@ -37,6 +37,15 @@ _MAX_REQUEST_BODY_BYTES: int = 2 * 1024 * 1024
 
 
 class _UnifiedRequestHandler(BaseHTTPRequestHandler):
+    """HTTP handler for the unified web UI.
+
+    ``do_GET`` / ``do_POST`` / ``do_PUT`` / ``do_PATCH`` / ``do_DELETE``
+    are dispatched by name from ``BaseHTTPRequestHandler.handle_one_request``
+    based on the request method; they have no visible Python callers.
+    ``log_message`` is the base class's per-request stderr-logging hook,
+    overridden here to a no-op so we don't spam access logs.
+    """
+
     svc: _UnifiedService
 
     def do_GET(self) -> None:  # noqa: N802
