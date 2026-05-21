@@ -222,6 +222,23 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
 source path 时，本轮 Stage3 视为失败。`provenance` 缺失仅产生 warning（兼容旧
 candidate），但所有走 `alpha-lab model-idea distribute` 流的候选必须有 provenance。
 
+## 后端契约自动化
+
+`alpha-lab real-case model-factor run` 在收尾时会自动检测本轮是否走的是
+`custom_models/research/<candidate>/model_candidate.json`，若是则按
+`docs/backend_run_contract.md` 中 `backend_run_contract_v1` 跑完整收尾：
+
+- 写 `comparison_summary.json`、`backend_run_receipt.json`
+- 把 `backend_run_contract.{contract_version,status,issue_count}` 与 sidecar
+  路径回挂到 `run_manifest.json`
+- audit 同时校验 `draft_model_source` 在 `run_manifest.json`、
+  `model_definition.json`、`feature_manifest.json` 中的 hash 一致性
+- audit 失败时仍写出两份 sidecar（`status=failed` + 完整 `issues`），并
+  以非零退出码返回；`run-batch` 模式下 `worst_rc` 表示整批是否全部通过
+
+非 research draft run（普通 case YAML、promoted candidate）不会触发契约收尾，
+行为与历史一致。
+
 ## 结果分析
 
 每轮运行后，Codex GUI 必须读取并总结：
