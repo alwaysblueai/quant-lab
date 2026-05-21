@@ -54,7 +54,6 @@ class Tier1Inputs:
     frequency: str = "daily"
     annualization: int = DEFAULT_ANNUALIZATION
     integrity_passed: bool = True
-    integrity_note: str = ""
 
 
 def run_tier1(inputs: Tier1Inputs, *, run_id: str | None = None) -> FastScreenResult:

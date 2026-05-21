@@ -38,9 +38,6 @@ class Tier2Module:
     label: str
     build: Callable[[Tier1Inputs], dict[str, Any]]
     estimated_seconds: int = 60  # UI hint only
-    requires: tuple[
-        str, ...
-    ] = ()  # named inputs that must be present (e.g. "neutralization_exposures")
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:

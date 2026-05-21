@@ -108,30 +108,6 @@ _KNOWN_CASE_PACKAGE_TYPES: frozenset[str] = frozenset({"single_factor", "composi
 _KNOWN_CASE_STATUSES: frozenset[str] = frozenset({"success", "failed", "skipped"})
 
 
-CORE_LEVEL12_JSON_ARTIFACTS: tuple[str, ...] = (
-    "run_manifest.json",
-    "metrics.json",
-    "purged_kfold_summary.json",
-    "factor_definition.json",
-    "signal_validation.json",
-    "portfolio_recipe.json",
-    "backtest_result.json",
-    "campaign_manifest.json",
-    "campaign_results.json",
-    "research_validation_package.json",
-    "portfolio_validation_summary.json",
-    "portfolio_validation_metrics.json",
-    "portfolio_validation_package.json",
-    "campaign_profile_comparison.json",
-    "factor_set_result.json",
-    "candidate_recipe_generation.json",
-    "winner_selection.json",
-    "next_step_recommendations.json",
-    "artifact_load_diagnostics.json",
-    "research_artifact_manifest.json",
-)
-
-
 def validate_level12_artifact_payload(
     payload: Mapping[str, object],
     *,
