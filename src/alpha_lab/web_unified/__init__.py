@@ -226,9 +226,8 @@ _PROJECT_DOC_PREVIEW_BYTES: int = 128 * 1024  # 128 KB for project snapshot docs
 
 # Maximum request body size accepted from the browser.
 _MAX_REQUEST_BODY_BYTES: int = 2 * 1024 * 1024  # 2 MB
-# _FRONTEND_BATCH_WINDOW_SECONDS / _FRONTEND_INPUT_BUNDLE_CACHE_MAX_ITEMS /
-# _MODEL_LAB_SUBPROCESS_POLL_SECONDS now live in
-# ``alpha_lab.web_unified._run_store`` next to ``_RunStore``.
+# _FRONTEND_BATCH_WINDOW_SECONDS / _MODEL_LAB_SUBPROCESS_POLL_SECONDS now
+# live in ``alpha_lab.web_unified._run_store`` next to ``_RunStore``.
 # _FRONTEND_BATCH_MAX_WORKERS / _FRONTEND_BATCH_FACTORS_PER_WORKER /
 # _MODEL_LAB_BATCH_MAX_WORKERS / _MODEL_LAB_BATCH_DEFAULT_WORKERS now live in
 # ``alpha_lab.web_unified._subprocess`` next to the helpers that consume them.
