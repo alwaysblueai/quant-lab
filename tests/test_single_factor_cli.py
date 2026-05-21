@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import alpha_lab.real_cases._cli_io as cli_io
 import alpha_lab.real_cases.single_factor.cli as single_factor_cli
 from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
 from tests.single_factor_case_helpers import write_demo_single_factor_case
@@ -98,7 +99,7 @@ def test_single_factor_cli_render_failure_is_warning_only(
     def _raise_render(*args, **kwargs):
         raise RuntimeError("render failed intentionally")
 
-    monkeypatch.setattr(single_factor_cli, "write_case_report", _raise_render)
+    monkeypatch.setattr(cli_io, "write_case_report", _raise_render)
 
     out_root = tmp_path / "cli_out"
     rc = single_factor_cli.main(

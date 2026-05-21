@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
-from alpha_lab.reporting.renderers import write_case_report
+from alpha_lab.real_cases._cli_io import render_case_report, update_run_manifest
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
@@ -380,12 +380,12 @@ def _run_one(
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
 
-    render_meta = _render_case_report(
+    render_meta = render_case_report(
         output_dir=result.output_dir,
         enabled=bool(args.render_report),
         overwrite=bool(args.render_overwrite),
     )
-    _update_run_manifest(result.artifact_paths["run_manifest"], render_meta)
+    update_run_manifest(result.artifact_paths["run_manifest"], render_meta)
     return result
 
 
@@ -500,68 +500,6 @@ def _expand_spec_patterns(patterns: list[str]) -> list[Path]:
             seen.add(resolved)
             paths.append(resolved)
     return paths
-
-
-def _render_case_report(
-    *,
-    output_dir: Path,
-    enabled: bool,
-    overwrite: bool,
-) -> dict[str, object]:
-    if not enabled:
-        return {
-            "rendered_report": False,
-            "rendered_report_path": None,
-            "render_status": "skipped",
-            "render_error": None,
-        }
-
-    try:
-        report_path = write_case_report(output_dir, overwrite=overwrite)
-        return {
-            "rendered_report": True,
-            "rendered_report_path": str(report_path),
-            "render_status": "success",
-            "render_error": None,
-        }
-    except Exception as exc:
-        logger.warning(
-            "Case report rendering failed for %s: %s",
-            output_dir,
-            exc,
-        )
-        return {
-            "rendered_report": False,
-            "rendered_report_path": None,
-            "render_status": "failed",
-            "render_error": str(exc),
-        }
-
-
-def _update_run_manifest(
-    manifest_path: Path,
-    render_meta: dict[str, object],
-) -> None:
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("run_manifest.json root must be an object")
-        payload.update(render_meta)
-        validate_level12_artifact_payload(
-            payload,
-            artifact_name=manifest_path.name,
-            source=manifest_path,
-        )
-        manifest_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to persist render metadata into %s: %s",
-            manifest_path,
-            exc,
-        )
 
 
 def _fmt_text(value: object) -> str:
