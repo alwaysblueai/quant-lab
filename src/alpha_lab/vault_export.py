@@ -128,6 +128,7 @@ def export_to_vault(
         name="manifest_path",
         required=False,
     )
+    contract_sidecars = _resolve_backend_contract_sidecars(manifest_src)
 
     if not experiment_card_src.exists() or not experiment_card_src.is_file():
         return ExportResult(
@@ -156,6 +157,7 @@ def export_to_vault(
                     experiment_name="latest.md",
                     summary_name="latest_summary.md",
                     manifest_name="latest_run_manifest.json",
+                    sidecars=_sidecar_targets(contract_sidecars, prefix=None),
                 )
             )
         else:
@@ -168,6 +170,7 @@ def export_to_vault(
                     experiment_name=f"{timestamp}__experiment_card.md",
                     summary_name=f"{timestamp}__summary.md",
                     manifest_name=f"{timestamp}__run_manifest.json",
+                    sidecars=_sidecar_targets(contract_sidecars, prefix=f"{timestamp}__"),
                 )
             )
             targets.extend(
@@ -179,6 +182,7 @@ def export_to_vault(
                     experiment_name="latest.md",
                     summary_name="latest_summary.md",
                     manifest_name="latest_run_manifest.json",
+                    sidecars=_sidecar_targets(contract_sidecars, prefix=None),
                 )
             )
 
@@ -228,6 +232,7 @@ def _copy_set(
     experiment_name: str,
     summary_name: str,
     manifest_name: str,
+    sidecars: tuple[tuple[Path, str], ...] = (),
 ) -> tuple[Path, ...]:
     targets: list[Path] = []
 
@@ -245,7 +250,46 @@ def _copy_set(
         shutil.copy2(manifest_src, manifest_target)
         targets.append(manifest_target)
 
+    for src, dest_name in sidecars:
+        if src.exists() and src.is_file():
+            dest = case_dir / dest_name
+            shutil.copy2(src, dest)
+            targets.append(dest)
+
     return tuple(targets)
+
+
+def _resolve_backend_contract_sidecars(
+    manifest_src: Path | None,
+) -> tuple[tuple[Path, str], ...]:
+    """Detect backend-run contract sidecars next to ``run_manifest.json``.
+
+    Returns ``(src_path, base_name)`` pairs for any sidecar present beside the
+    manifest. Non-draft runs (no sidecars on disk) yield an empty tuple, which
+    leaves vault export behavior unchanged.
+    """
+
+    if manifest_src is None:
+        return ()
+    if not manifest_src.exists() or not manifest_src.is_file():
+        return ()
+    run_dir = manifest_src.parent
+    found: list[tuple[Path, str]] = []
+    for base_name in ("backend_run_receipt.json", "comparison_summary.json"):
+        candidate = run_dir / base_name
+        if candidate.is_file():
+            found.append((candidate, base_name))
+    return tuple(found)
+
+
+def _sidecar_targets(
+    sidecars: tuple[tuple[Path, str], ...],
+    *,
+    prefix: str | None,
+) -> tuple[tuple[Path, str], ...]:
+    if prefix is None:
+        return tuple((src, f"latest_{base_name}") for src, base_name in sidecars)
+    return tuple((src, f"{prefix}{base_name}") for src, base_name in sidecars)
 
 
 def _safe_case_name(case_name: str) -> str:

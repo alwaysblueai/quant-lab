@@ -919,6 +919,66 @@ def test_model_lab_compare_runs_returns_metric_and_leakage_payload(tmp_path: Pat
     assert all(item["case_name"] in {"case_a", "case_b"} for item in result["run_failures"])
 
 
+def test_model_lab_compare_runs_surfaces_backend_contract_when_present(
+    tmp_path: Path,
+) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    _inject_model_lab_run_for_compare(
+        svc=svc,
+        tmp_path=tmp_path,
+        run_id="mrun_contract_ok",
+        case_name="case_contract_ok",
+        factor_name="factor_ok",
+        model_family="ridge",
+        metrics={"mean_ic": 0.02, "ic_ir": 0.4},
+        rank_ic_values=[0.01, 0.02],
+        top_features=["f1", "f2"],
+        integrity={"highest_severity": "pass"},
+    )
+    _inject_model_lab_run_for_compare(
+        svc=svc,
+        tmp_path=tmp_path,
+        run_id="mrun_no_contract",
+        case_name="case_no_contract",
+        factor_name="factor_plain",
+        model_family="gbdt",
+        metrics={"mean_ic": 0.01, "ic_ir": 0.2},
+        rank_ic_values=[0.0, 0.01],
+        top_features=["f1", "f3"],
+        integrity={"highest_severity": "pass"},
+    )
+
+    manifest_with_contract = tmp_path / "run-mrun_contract_ok" / "run_manifest.json"
+    manifest_payload = json.loads(manifest_with_contract.read_text(encoding="utf-8"))
+    manifest_payload["backend_run_contract"] = {
+        "contract_version": "backend_run_contract_v1",
+        "status": "passed",
+        "issue_count": 0,
+        "receipt_path": "backend_run_receipt.json",
+        "comparison_summary_path": "comparison_summary.json",
+        "audited_at_utc": "2026-05-21T00:00:00+00:00",
+    }
+    manifest_with_contract.write_text(
+        json.dumps(manifest_payload), encoding="utf-8"
+    )
+
+    result = svc.compare_model_lab_runs(
+        {"run_ids": ["mrun_contract_ok", "mrun_no_contract"]}
+    )
+    rows_by_run = {row["run_id"]: row for row in result["metric_rows"]}
+    contract_row = rows_by_run["mrun_contract_ok"]
+    plain_row = rows_by_run["mrun_no_contract"]
+
+    assert contract_row["backend_contract_status"] == "passed"
+    assert contract_row["backend_artifact_audit_ok"] is True
+    assert contract_row["backend_contract_issue_count"] == 0
+    assert "backend_contract_status" not in plain_row
+    assert "backend_artifact_audit_ok" not in plain_row
+    assert "backend_contract_issue_count" not in plain_row
+
+
 def test_model_lab_compare_runs_supports_eight_runs(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)

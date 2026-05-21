@@ -805,6 +805,28 @@ def _read_json_artifact(path: Path | None) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _load_run_backend_contract(run: _RunRecord) -> dict[str, object] | None:
+    """Return the ``backend_run_contract`` block from ``run_manifest.json``.
+
+    Returns ``None`` for non-draft runs (block absent) — callers should treat
+    that as "no backend contract surface for this run".
+    """
+
+    payload = _read_json_artifact(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="run_manifest",
+            fallback_name="run_manifest.json",
+        )
+    )
+    if not isinstance(payload, dict):
+        return None
+    block = payload.get("backend_run_contract")
+    if not isinstance(block, dict):
+        return None
+    return {str(key): value for key, value in block.items()}
+
+
 def _load_run_draft_model_source(run: _RunRecord) -> dict[str, object] | None:
     for artifact_key, fallback_name in (
         ("run_manifest", "run_manifest.json"),
@@ -1827,6 +1849,15 @@ def _collect_model_lab_run_compare_payload(
             value = summary.get(key)
         if value is not None:
             metric_row[key] = value
+
+    contract = _load_run_backend_contract(run)
+    if contract is not None:
+        status = str(contract.get("status") or "")
+        metric_row["backend_contract_status"] = status
+        metric_row["backend_artifact_audit_ok"] = status == "passed"
+        issue_count = contract.get("issue_count")
+        if isinstance(issue_count, int) and not isinstance(issue_count, bool):
+            metric_row["backend_contract_issue_count"] = issue_count
 
     return {
         "top_features": _extract_model_factor_top_features(run, top_k=top_k_features),
