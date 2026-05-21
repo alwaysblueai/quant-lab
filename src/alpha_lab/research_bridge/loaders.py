@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 from csv import DictReader
 from pathlib import Path
 
+from alpha_lab.research_bridge._text_utils import idea_keywords
 from alpha_lab.research_bridge.embeddings import SearchResult, VaultEmbeddings
 from alpha_lab.research_bridge.exploration import ExplorationMap
 from alpha_lab.research_bridge.graph_view import VaultGraph
@@ -113,7 +113,7 @@ def search_explore_matches(
         results = embeddings.search(idea, top_k=max(top_k, 1))
         if results:
             return results
-    keywords = _idea_keywords(idea)
+    keywords = idea_keywords(idea)
     if not keywords:
         return []
     scored_rows: list[tuple[float, dict[str, str]]] = []
@@ -147,16 +147,4 @@ def search_explore_matches(
         if row.get("name") and row.get("path")
     ]
 
-
-def _idea_keywords(text: str) -> set[str]:
-    keywords: set[str] = set()
-    for token in re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text):
-        normalized = token.lower().strip()
-        if len(normalized) <= 1:
-            continue
-        keywords.add(normalized)
-        if re.fullmatch(r"[\u4e00-\u9fff]+", normalized) and len(normalized) >= 4:
-            for idx in range(len(normalized) - 1):
-                keywords.add(normalized[idx : idx + 2])
-    return keywords
 

@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass, replace
 from typing import Any
 
+from alpha_lab.research_bridge._llm_usage import read_attr, usage_int
 from alpha_lab.research_bridge.llm_rerank import (
     DEFAULT_MODEL,
     anthropic_client_kwargs,
@@ -115,11 +116,11 @@ def expand_query(
             tool_input = extract_json_object_from_response(response)
         probes = _parse_probes(tool_input)
         probes = _enforce_probe_budget(_enforce_mode_constraints(probes, mode), mode)
-        usage = _read_attr(response, "usage", {})
-        input_tokens = _usage_int(usage, "input_tokens")
-        cache_creation = _usage_int(usage, "cache_creation_input_tokens")
-        cache_read = _usage_int(usage, "cache_read_input_tokens")
-        output_tokens = _usage_int(usage, "output_tokens")
+        usage = read_attr(response, "usage", {})
+        input_tokens = usage_int(usage, "input_tokens")
+        cache_creation = usage_int(usage, "cache_creation_input_tokens")
+        cache_read = usage_int(usage, "cache_read_input_tokens")
+        output_tokens = usage_int(usage, "output_tokens")
         return ExpansionOutcome(
             enabled=True,
             model=model_name,
@@ -248,14 +249,14 @@ def _submit_query_probes_tool_schema() -> dict[str, Any]:
 
 
 def _extract_tool_input(response: object) -> dict[str, Any]:
-    content = _read_attr(response, "content", [])
+    content = read_attr(response, "content", [])
     if not isinstance(content, list):
         raise ValueError("response content is not a list")
     for block in content:
-        block_type = _read_attr(block, "type", "")
-        block_name = _read_attr(block, "name", "")
+        block_type = read_attr(block, "type", "")
+        block_name = read_attr(block, "name", "")
         if block_type == "tool_use" and block_name == "submit_query_probes":
-            raw_input = _read_attr(block, "input", {})
+            raw_input = read_attr(block, "input", {})
             if isinstance(raw_input, dict):
                 return raw_input
             raise ValueError("tool input is not a dict")
@@ -303,17 +304,3 @@ def _enforce_probe_budget(probes: QueryProbes, mode: str) -> QueryProbes:
     )
 
 
-def _read_attr(obj: object, name: str, default: object) -> object:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
-def _usage_int(usage: object, name: str) -> int:
-    value = _read_attr(usage, name, 0)
-    if not isinstance(value, int | float | str):
-        return 0
-    try:
-        return int(value)
-    except ValueError:
-        return 0

@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from alpha_lab.research_bridge import loaders as bridge_loaders
+from alpha_lab.research_bridge._llm_usage import read_attr, usage_int
 from alpha_lab.research_bridge.embeddings import (
     WORD_RE,
     VaultEmbeddings,
@@ -218,13 +219,13 @@ def build_mechanism_index(
                 failed.append((rel_path, "invalid_fingerprint"))
                 continue
             _write_fingerprint_payload(cards_root, rel_path, payload)
-            usage = _read_attr(response, "usage", {})
+            usage = read_attr(response, "usage", {})
             tokens_input += (
-                _usage_int(usage, "input_tokens")
-                + _usage_int(usage, "cache_creation_input_tokens")
-                + _usage_int(usage, "cache_read_input_tokens")
+                usage_int(usage, "input_tokens")
+                + usage_int(usage, "cache_creation_input_tokens")
+                + usage_int(usage, "cache_read_input_tokens")
             )
-            tokens_output += _usage_int(usage, "output_tokens")
+            tokens_output += usage_int(usage, "output_tokens")
             regenerated += 1
             fingerprints.append((fingerprint, content_hash))
         except Exception as exc:
@@ -597,14 +598,14 @@ def _submit_fingerprint_tool_schema() -> dict[str, Any]:
 
 
 def _extract_tool_input(response: object, *, tool_name: str) -> dict[str, Any]:
-    content = _read_attr(response, "content", [])
+    content = read_attr(response, "content", [])
     if not isinstance(content, list):
         raise ValueError("response content is not a list")
     for block in content:
-        block_type = _read_attr(block, "type", "")
-        block_name = _read_attr(block, "name", "")
+        block_type = read_attr(block, "type", "")
+        block_name = read_attr(block, "name", "")
         if block_type == "tool_use" and block_name == tool_name:
-            raw_input = _read_attr(block, "input", {})
+            raw_input = read_attr(block, "input", {})
             if isinstance(raw_input, dict):
                 return raw_input
             raise ValueError("tool input is not a dict")
@@ -623,22 +624,6 @@ def _clean_str_list(value: object) -> list[str]:
         seen.add(text)
         rows.append(text[:120])
     return rows
-
-
-def _read_attr(obj: object, name: str, default: object) -> object:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
-def _usage_int(usage: object, name: str) -> int:
-    value = _read_attr(usage, name, 0)
-    if not isinstance(value, int | float | str):
-        return 0
-    try:
-        return int(value)
-    except ValueError:
-        return 0
 
 
 def _utc_now_iso() -> str:

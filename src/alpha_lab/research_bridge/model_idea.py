@@ -25,6 +25,7 @@ from alpha_lab.factor_recipe import factor_registry
 from alpha_lab.model_factor import list_model_contracts
 from alpha_lab.real_cases.model_factor.spec import load_model_factor_case_spec
 from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
+from alpha_lab.research_bridge._text_utils import idea_keywords
 from alpha_lab.research_bridge.embeddings import SearchResult, VaultEmbeddings
 from alpha_lab.research_bridge.scoring import (
     MECHANISM_DISCOVERY,
@@ -1627,7 +1628,7 @@ def _rank_inventory_rows(
     fields: tuple[str, ...],
     top_k: int,
 ) -> list[dict[str, object]]:
-    keywords = _idea_keywords(idea)
+    keywords = idea_keywords(idea)
     ranked: list[dict[str, object]] = []
     for row in rows:
         haystack_parts: list[str] = []
@@ -2180,7 +2181,7 @@ def _rank_run_rows(
 ) -> list[dict[str, object]]:
     """Rank experiment rows with explicit priority: contracts > failures > validated > others."""
 
-    keywords = _idea_keywords(idea)
+    keywords = idea_keywords(idea)
     current_model_family = str(current_spec.get("model_family") or "").strip().lower()
     current_factor_name = str(current_spec.get("factor_name") or "").strip().lower()
     ranked: list[dict[str, object]] = []
@@ -3219,19 +3220,6 @@ def _infer_target_family(idea_l: str, supported_families: list[str]) -> str:
         if token in idea_l and family in supported:
             return family
     return ""
-
-
-def _idea_keywords(text: str) -> set[str]:
-    keywords: set[str] = set()
-    for token in re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text):
-        normalized = token.lower().strip()
-        if len(normalized) <= 1:
-            continue
-        keywords.add(normalized)
-        if re.fullmatch(r"[\u4e00-\u9fff]+", normalized) and len(normalized) >= 4:
-            for idx in range(len(normalized) - 1):
-                keywords.add(normalized[idx : idx + 2])
-    return keywords
 
 
 def _first_non_empty(values: list[str]) -> str:
