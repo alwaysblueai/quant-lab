@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 from pathlib import Path
 from typing import cast
@@ -18,6 +17,7 @@ from alpha_lab.key_metrics_contracts import (
     project_portfolio_validation_metrics,
     project_promotion_gate_metrics,
 )
+from alpha_lab.reporting._shared import load_required_json
 from alpha_lab.reporting.display_helpers import (
     as_object_dict,
     as_object_list,
@@ -44,8 +44,8 @@ def render_case_report(case_output_dir: str | Path) -> str:
     """Render a standardized markdown report for one case output directory."""
 
     case_dir = Path(case_output_dir).resolve()
-    manifest = _load_required_json(case_dir / "run_manifest.json")
-    metrics_payload = _load_required_json(case_dir / "metrics.json")
+    manifest = load_required_json(case_dir / "run_manifest.json")
+    metrics_payload = load_required_json(case_dir / "metrics.json")
     metrics = _extract_metrics(metrics_payload)
     promotion_gate_metrics = project_promotion_gate_metrics(metrics)
     profile_summary_metrics = project_campaign_profile_summary_metrics(metrics)
@@ -819,15 +819,6 @@ def _read_text_if_exists(path: Path) -> str | None:
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8")
-
-
-def _load_required_json(path: Path) -> dict[str, object]:
-    if not path.exists():
-        raise FileNotFoundError(f"required artifact not found: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"expected JSON object in {path}")
-    return cast(dict[str, object], payload)
 
 
 def _format_flags(value: object) -> str:

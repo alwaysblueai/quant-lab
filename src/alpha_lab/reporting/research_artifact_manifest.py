@@ -8,6 +8,7 @@ from alpha_lab.artifact_contracts import (
     MODEL_FACTOR_DEFERRED_DIAGNOSTIC_CONTRACTS,
     validate_level12_artifact_payload,
 )
+from alpha_lab.reporting._shared import resolve_artifact_path
 from alpha_lab.reporting.display_helpers import (
     as_object_dict,
     as_object_list,
@@ -163,12 +164,12 @@ def _canonical_artifact_manifest_entries(
             profile_payload = as_object_dict(profile_payload_raw)
             status = safe_text(profile_payload.get("status")) or "unknown"
             artifact_paths = as_object_dict(profile_payload.get("artifact_paths"))
-            output_dir = _resolve_artifact_path(
+            output_dir = resolve_artifact_path(
                 artifact_paths.get("output_dir"),
                 base_dir=base_dir,
             )
             for object_label, filename, pointer_key in CANONICAL_ARTIFACT_REQUIREMENTS:
-                path = _resolve_artifact_path(
+                path = resolve_artifact_path(
                     artifact_paths.get(pointer_key),
                     base_dir=base_dir,
                 )
@@ -304,16 +305,6 @@ def _research_artifact_manifest_summary(
         "by_artifact_type": by_artifact_type,
         "by_validation_status": by_validation_status,
     }
-
-
-def _resolve_artifact_path(value: object, *, base_dir: Path) -> Path | None:
-    text = safe_text(value)
-    if not text:
-        return None
-    candidate = Path(text)
-    if not candidate.is_absolute():
-        candidate = base_dir / candidate
-    return candidate.resolve()
 
 
 def _artifact_validation_status(

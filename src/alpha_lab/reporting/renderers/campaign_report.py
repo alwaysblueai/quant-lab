@@ -17,6 +17,7 @@ from alpha_lab.key_metrics_contracts import (
     project_portfolio_validation_metrics,
     project_promotion_gate_metrics,
 )
+from alpha_lab.reporting._shared import load_required_json
 from alpha_lab.reporting.campaign_triage import (
     CAMPAIGN_RANK_RULE,
     build_campaign_triage,
@@ -55,7 +56,7 @@ def render_campaign_report(campaign_output_dir: str | Path) -> str:
 
     campaign_dir = Path(campaign_output_dir).resolve()
     manifest = _load_optional_json(campaign_dir / "campaign_manifest.json")
-    results = _load_required_json(campaign_dir / "campaign_results.json")
+    results = load_required_json(campaign_dir / "campaign_results.json")
 
     campaign_name = format_text(
         (manifest or {}).get("campaign_name", results.get("campaign_name")),
@@ -638,15 +639,6 @@ def _resolve_path(raw: str, *, base: Path) -> Path:
     if path.is_absolute():
         return path
     return (base / path).resolve()
-
-
-def _load_required_json(path: Path) -> dict[str, object]:
-    if not path.exists():
-        raise FileNotFoundError(f"required artifact not found: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"expected JSON object in {path}")
-    return cast(dict[str, object], payload)
 
 
 def _load_optional_json(path: Path) -> dict[str, object] | None:
