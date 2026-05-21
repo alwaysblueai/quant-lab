@@ -1,16 +1,21 @@
-"""Library-level tests for ``alpha_lab.backend_run_contract``.
+"""Tests for ``alpha_lab.backend_run_contract`` plus the ``real-case`` wiring.
 
-Commit 1: library + doc only — no ``real-case`` wiring exists yet, so these
-tests synthesize minimal-valid run directories and exercise the audit / receipt
-/ comparison / manifest-attach surfaces directly.
+The library-level tests synthesize minimal-valid run directories and exercise
+the audit / receipt / comparison / manifest-attach surfaces directly. The
+end-to-end tests drive the single-factor and model-factor ``real-case`` CLIs
+to confirm the contract finalizer triggers for research draft runs and stays
+silent for non-draft runs.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
+
+import yaml  # type: ignore[import-untyped]
 
 from alpha_lab.backend_run_contract import (
     BACKEND_RUN_CONTRACT_VERSION,
@@ -27,6 +32,8 @@ from alpha_lab.backend_run_contract import (
 )
 from alpha_lab.custom_factors import read_custom_factor_source
 from alpha_lab.custom_models import read_draft_model_source
+from tests.model_factor_case_helpers import write_demo_model_factor_case
+from tests.single_factor_case_helpers import write_demo_single_factor_case
 
 _FACTOR_CODE = (
     "def build_factor(frame):\n"
@@ -723,3 +730,200 @@ def test_detect_research_draft_run_returns_none_when_manifest_missing(
     run_dir.mkdir()
 
     assert detect_research_draft_run(run_dir, workflow="single_factor") is None
+
+
+# ----------------------------------------------------------------------------
+# end-to-end: real-case CLI hooks finalize_backend_contract on draft runs
+# ----------------------------------------------------------------------------
+
+
+def _research_factor_code() -> str:
+    return (
+        "def build_factor(frame):\n"
+        "    return frame['close']\n"
+    )
+
+
+def _write_research_factor(tmp_path: Path, name: str) -> Path:
+    factor_dir = tmp_path / "custom_factors" / "research" / name
+    factor_dir.mkdir(parents=True)
+    factor_json = factor_dir / "factor.json"
+    factor_json.write_text(
+        json.dumps(
+            {
+                "name": name,
+                "description": "e2e backend contract test factor",
+                "required_columns": ["date", "asset", "close"],
+                "frequency": "daily",
+                "unavailable_data_policy": "return_nan",
+                "pit_assumption": "uses trailing close only",
+                "code": _research_factor_code(),
+                "provenance": {
+                    "idea_id": "20260521T000000Z__e2e-contract",
+                    "stage2_payload_sha256": "a" * 64,
+                    "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return factor_json
+
+
+def _patch_case_to_use_custom_factor(spec_path: Path, factor_name: str) -> None:
+    payload = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    payload["name"] = f"e2e_{factor_name}_contract_case"
+    payload["factor_input"] = {
+        "mode": "recipe",
+        "disable_pipeline_preprocess": True,
+        "recipe": {"base": {"method": factor_name}},
+    }
+    spec_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def test_real_case_single_factor_cli_finalizes_contract_for_research_draft(
+    tmp_path: Path,
+) -> None:
+    from alpha_lab.real_cases.single_factor.cli import main as sf_main
+
+    factor_name = "e2e_draft_factor"
+    _write_research_factor(tmp_path, factor_name)
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    _patch_case_to_use_custom_factor(spec_path, factor_name)
+
+    rc = sf_main(
+        ["run", str(spec_path), "--evaluation-profile", "exploratory_screening"]
+    )
+
+    assert rc == 0
+    output_dir = tmp_path / "outputs" / f"e2e_{factor_name}_contract_case"
+    assert (output_dir / BACKEND_RUN_RECEIPT_NAME).exists()
+    assert (output_dir / COMPARISON_SUMMARY_NAME).exists()
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "single_factor"
+    assert receipt["status"] == "success"
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is True
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "passed"
+    assert contract["contract_version"] == BACKEND_RUN_CONTRACT_VERSION
+    outputs = manifest["outputs"]
+    assert isinstance(outputs, dict)
+    assert str(outputs["backend_run_receipt"]).endswith(BACKEND_RUN_RECEIPT_NAME)
+    assert str(outputs["comparison_summary"]).endswith(COMPARISON_SUMMARY_NAME)
+
+
+def test_real_case_single_factor_cli_skips_contract_for_non_research_run(
+    tmp_path: Path,
+) -> None:
+    from alpha_lab.real_cases.single_factor.cli import main as sf_main
+
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+
+    rc = sf_main(
+        ["run", str(spec_path), "--evaluation-profile", "exploratory_screening"]
+    )
+
+    assert rc == 0
+    output_dir = tmp_path / "outputs" / "demo_bp_single_factor"
+    assert not (output_dir / BACKEND_RUN_RECEIPT_NAME).exists()
+    assert not (output_dir / COMPARISON_SUMMARY_NAME).exists()
+    manifest = _read_json(output_dir / "run_manifest.json")
+    assert "backend_run_contract" not in manifest
+
+
+def _model_candidate_payload(spec_path: Path, candidate_name: str) -> dict[str, object]:
+    case_yaml = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    assert isinstance(case_yaml, Mapping)
+    case = copy.deepcopy(dict(case_yaml))
+    case["name"] = f"e2e_{candidate_name}_contract_case"
+    case["factor_name"] = candidate_name
+    case.setdefault(
+        "feature_availability",
+        {"mode": "required_timestamp", "column": "known_at"},
+    )
+    return {
+        "contract_version": "stage2_model_candidate_v1",
+        "candidate_name": candidate_name,
+        "implementation_status": "draft_for_stage3",
+        "implementation_type": "spec_variant",
+        "source_mechanisms": ["e2e_contract_test"],
+        "base_case_spec_path": str(spec_path),
+        "expected_horizon": "t_plus_1_or_later",
+        "data_contract": {
+            "prices_required_columns": ["date", "asset", "close"],
+            "feature_required_columns": list(case["feature_columns"]),
+            "feature_optional_columns": [],
+            "feature_availability": case["feature_availability"],
+        },
+        "risk_controls": {
+            "feature_availability_pit": "known_at column drives PIT",
+            "label_leakage": "forward_return horizon=5",
+            "overfit_complexity": "ridge with alpha=1",
+            "turnover_cost": "one_way_rate=0.001",
+            "feature_instability": "rolling stability baseline",
+            "split_regime_fragility": "purged kfold default",
+        },
+        "run_controls": {
+            "evaluation_profile": "exploratory_screening",
+            "screening_retrain_every_n_dates": 40,
+            "vault_export_mode": "skip",
+        },
+        "case_spec_payload": case,
+        "stage3_validation_focus": ["artifact audit", "PIT"],
+        "provenance": {
+            "idea_id": "20260521T010000Z__e2e-model-contract",
+            "stage2_payload_sha256": "b" * 64,
+            "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+        },
+    }
+
+
+def test_real_case_model_factor_cli_finalizes_contract_for_research_draft(
+    tmp_path: Path,
+) -> None:
+    from alpha_lab.real_cases.model_factor.cli import main as mf_main
+
+    candidate_name = "e2e_model_candidate"
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name=candidate_name)
+    payload = _model_candidate_payload(spec_path, candidate_name)
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    rc = mf_main(
+        [
+            "run",
+            str(spec_path),
+            "--draft-model-candidate",
+            str(candidate_json),
+            "--evaluation-profile",
+            "exploratory_screening",
+            "--screening-retrain-every-n-dates",
+            "40",
+        ]
+    )
+
+    assert rc == 0
+    output_dir = tmp_path / "outputs" / f"demo_{candidate_name}_model_factor"
+    assert (output_dir / BACKEND_RUN_RECEIPT_NAME).exists()
+    assert (output_dir / COMPARISON_SUMMARY_NAME).exists()
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "model_factor"
+    assert receipt["status"] == "success"
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is True
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "passed"

@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
-from alpha_lab.real_cases._cli_io import render_case_report, update_run_manifest
+from alpha_lab.real_cases._cli_io import (
+    finalize_contract_if_research_draft,
+    render_case_report,
+    update_run_manifest,
+)
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
@@ -321,9 +325,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "run":
         parser.error(f"unsupported command: {args.command!r}")
 
-    result = _run_one(args.spec_path, args, parser)
-    _print_single_success(result)
-    return 0
+    result, contract_rc = _run_one(args.spec_path, args, parser)
+    _print_single_success(result, contract_rc=contract_rc)
+    return contract_rc
 
 
 def _run_batch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -338,24 +342,28 @@ def _run_batch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int
     except Exception as exc:  # noqa: BLE001
         logger.debug("numba warmup skipped: %s", exc)
 
-    results = []
+    results: list[ModelFactorCaseRunResult] = []
+    worst_rc = 0
     for spec_path in spec_paths:
-        results.append(_run_one(spec_path, args, parser))
+        result, contract_rc = _run_one(spec_path, args, parser)
+        worst_rc = max(worst_rc, contract_rc)
+        results.append(result)
 
+    status_line = "success" if worst_rc == 0 else "contract_failed"
     print("")
     print("  Workflow : real-case-model-factor-batch")
-    print("  Status   : success")
+    print(f"  Status   : {status_line}")
     print(f"  Cases    : {len(results)}")
     for result in results:
         print(f"  - {result.spec.name}: {result.output_dir}")
-    return 0
+    return worst_rc
 
 
 def _run_one(
     spec_path: str | Path,
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
-) -> ModelFactorCaseRunResult:
+) -> tuple[ModelFactorCaseRunResult, int]:
     draft_model_source = None
     candidate_arg = getattr(args, "draft_model_candidate", None)
     if candidate_arg:
@@ -386,13 +394,25 @@ def _run_one(
         overwrite=bool(args.render_overwrite),
     )
     update_run_manifest(result.artifact_paths["run_manifest"], render_meta)
-    return result
+    contract_rc = finalize_contract_if_research_draft(
+        output_dir=result.output_dir,
+        workflow="model_factor",
+        case_spec_path=spec_path,
+        evaluation_profile=args.evaluation_profile,
+        command=tuple(sys.argv),
+    )
+    return result, contract_rc
 
 
-def _print_single_success(result: ModelFactorCaseRunResult) -> None:
+def _print_single_success(
+    result: ModelFactorCaseRunResult,
+    *,
+    contract_rc: int = 0,
+) -> None:
+    status_line = "success" if contract_rc == 0 else "contract_failed"
     print("")
     print("  Workflow : real-case-model-factor")
-    print("  Status   : success")
+    print(f"  Status   : {status_line}")
     print(f"  Case     : {result.spec.name}")
     print(f"  Output   : {result.output_dir}")
     print(f"  Manifest : {result.artifact_paths['run_manifest']}")
