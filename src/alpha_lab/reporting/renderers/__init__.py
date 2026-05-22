@@ -1,3 +1,13 @@
+"""``alpha_lab.reporting.renderers`` — HTML renderer entry points.
+
+Public names listed in ``__all__`` are resolved lazily via ``__getattr__`` so
+that simply touching this package (e.g. from CLI parser registration or other
+report-adjacent code paths) does not eagerly import
+``campaign_profile_dashboard`` (~6.4kLoC of template code) or pull in the
+case / campaign report modules' jinja / chart-rendering dependencies. Each
+renderer module is loaded only when one of its names is actually accessed.
+"""
+
 from typing import Any
 
 __all__ = [
