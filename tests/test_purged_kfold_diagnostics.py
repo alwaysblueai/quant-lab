@@ -38,6 +38,7 @@ def test_build_purged_kfold_diagnostics_outputs_summary_and_fold_table() -> None
         _factor_fn,
         horizon=5,
         n_quantiles=5,
+        allow_full_sample_evaluation=True,
     )
     diagnostics = build_purged_kfold_diagnostics(
         experiment_result=result,
@@ -64,6 +65,7 @@ def test_build_purged_kfold_diagnostics_returns_not_available_when_dates_missing
         _factor_fn,
         horizon=5,
         n_quantiles=5,
+        allow_full_sample_evaluation=True,
     )
     result.ic_df = result.ic_df.iloc[0:0].copy()
     result.rank_ic_df = result.rank_ic_df.iloc[0:0].copy()

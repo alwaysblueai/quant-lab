@@ -42,7 +42,9 @@ def test_experiment_fails_fast_on_obvious_future_factor_dates() -> None:
         return factor
 
     with pytest.raises(IntegrityHardFailure):
-        run_factor_experiment(prices, leaky_factor_fn, horizon=5, n_quantiles=5)
+        run_factor_experiment(
+            prices, leaky_factor_fn, horizon=5, n_quantiles=5, allow_full_sample_evaluation=True
+        )
 
 
 def test_walk_forward_builds_fold_and_aggregate_integrity_reports() -> None:
@@ -106,4 +108,5 @@ def test_experiment_raises_when_factor_values_clone_forward_labels() -> None:
             cloned_label_factor_fn,
             horizon=5,
             n_quantiles=5,
+            allow_full_sample_evaluation=True,
         )

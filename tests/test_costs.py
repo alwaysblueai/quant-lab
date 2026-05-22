@@ -230,7 +230,9 @@ def test_cost_adjusted_from_experiment_result():
             rows.append({"date": date, "asset": asset, "close": price})
     prices = pd.DataFrame(rows)
 
-    result = run_factor_experiment(prices, lambda p: momentum(p, window=5))
+    result = run_factor_experiment(
+        prices, lambda p: momentum(p, window=5), allow_full_sample_evaluation=True
+    )
     adj = cost_adjusted_long_short(
         result.long_short_df,
         result.long_short_turnover_df,

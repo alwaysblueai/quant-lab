@@ -82,7 +82,7 @@ def _pooled_ic(factor_df: pd.DataFrame, label_df: pd.DataFrame) -> float:
 
 def test_mean_ic_equals_mean_of_daily_ics_not_pooled():
     prices, factor_df = _build_unbalanced_panel()
-    result = run_factor_experiment(prices, _factor_fn(factor_df))
+    result = run_factor_experiment(prices, _factor_fn(factor_df), allow_full_sample_evaluation=True)
 
     daily = result.ic_df["ic"].dropna()
     assert len(daily) >= 4, "need several valid dates for this aggregation test"
@@ -127,7 +127,7 @@ def test_mean_ic_equal_to_pooled_on_balanced_panel():
             )
     prices = pd.DataFrame(rows_prices)
     factor_df = pd.DataFrame(rows_factor)
-    result = run_factor_experiment(prices, _factor_fn(factor_df))
+    result = run_factor_experiment(prices, _factor_fn(factor_df), allow_full_sample_evaluation=True)
 
     daily = result.ic_df["ic"].dropna()
     assert np.isfinite(result.summary.mean_ic)

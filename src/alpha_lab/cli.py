@@ -158,13 +158,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- Split ---
+    # Both flags are required by ``alpha-lab run`` (split-aware evaluation).
+    # The CLI fails fast when either is missing (see ``_run_main``). For
+    # intentional full-sample screening, use ``alpha-lab fast-screen``.
     p.add_argument(
         "--train-end",
         default=None,
         metavar="YYYY-MM-DD",
         help=(
-            "Last inclusive date of the training period.  "
-            "Must be provided together with --test-start."
+            "Last inclusive date of the training period.  Required together "
+            "with --test-start; ``alpha-lab run`` rejects full-sample runs."
         ),
     )
     p.add_argument(
@@ -172,8 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="YYYY-MM-DD",
         help=(
-            "First inclusive date of the evaluation period.  "
-            "Must be provided together with --train-end."
+            "First inclusive date of the evaluation period.  Required "
+            "together with --train-end."
         ),
     )
 
@@ -359,6 +362,20 @@ def _run_main(argv: list[str] | None = None) -> int:
     # --- Validate split arguments ---
     if (args.train_end is None) != (args.test_start is None):
         parser.error("--train-end and --test-start must be provided together or not at all")
+    # ``alpha-lab run`` is the legacy single-experiment CLI. Treat a fully
+    # absent split as a fail-fast misuse: the result would otherwise be a
+    # silent full-sample evaluation, which is not the intent of the
+    # split-aware experiment runner. Callers that genuinely want a
+    # full-sample screen should use ``alpha-lab fast-screen``; callers that
+    # want split-aware backtests should use ``alpha-lab real-case
+    # single-factor run`` with a case YAML.
+    if args.train_end is None and args.test_start is None:
+        parser.error(
+            "alpha-lab run requires both --train-end and --test-start "
+            "(split-aware evaluation). For intentional full-sample screening "
+            "use 'alpha-lab fast-screen'; for split-aware case-driven runs "
+            "use 'alpha-lab real-case single-factor run'."
+        )
 
     # --- Load data ---
     prices = _load_prices(Path(args.input_path))

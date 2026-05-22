@@ -337,11 +337,13 @@ def test_rolling_stability_threshold_override_changes_instability_flags() -> Non
     result_default = run_factor_experiment(
         _make_prices(n_assets=6, n_days=28),
         _momentum_fn,
+        allow_full_sample_evaluation=True,
     )
     result_override = run_factor_experiment(
         _make_prices(n_assets=6, n_days=28),
         _momentum_fn,
         rolling_stability_thresholds=RollingStabilityConfig(instability_short_eval_window_dates=5),
+        allow_full_sample_evaluation=True,
     )
     assert "short_eval_window" in result_default.summary.instability_flags
     assert "short_eval_window" not in result_override.summary.instability_flags

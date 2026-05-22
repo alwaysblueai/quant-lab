@@ -64,11 +64,14 @@ def run_tier1(inputs: Tier1Inputs, *, run_id: str | None = None) -> FastScreenRe
     errors (bad schema, wrong dtypes) are propagated from the underlying
     primitives.
     """
+    # Tier-1 fast screen is full-sample by design; the result is never
+    # presented as an OOS verdict. Explicit opt-in silences OPT-P0-2 warning.
     result = run_factor_experiment(
         inputs.prices,
         lambda _p: inputs.factor_df.copy(),
         horizon=inputs.horizon,
         n_quantiles=inputs.n_quantiles,
+        allow_full_sample_evaluation=True,
     )
     summary = result.summary
 

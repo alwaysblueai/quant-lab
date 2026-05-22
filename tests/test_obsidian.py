@@ -139,6 +139,10 @@ def test_obsidian_markdown_has_yaml_frontmatter(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -166,6 +170,10 @@ def test_obsidian_markdown_has_horizon_in_frontmatter(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -189,6 +197,10 @@ def test_obsidian_markdown_has_required_sections(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -220,6 +232,10 @@ def test_cli_obsidian_dir_path_creates_file_in_dir(tmp_path: Path) -> None:
             "dir_test",
             "--obsidian-markdown-path",
             str(notes_dir) + "/",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -245,6 +261,10 @@ def test_cli_obsidian_dir_path_filename_contains_experiment_name(tmp_path: Path)
             "dir_name_test",
             "--obsidian-markdown-path",
             str(notes_dir) + "/",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -272,6 +292,10 @@ def test_cli_obsidian_dir_path_filename_starts_with_date(tmp_path: Path) -> None
             "date_test",
             "--obsidian-markdown-path",
             str(notes_dir) + "/",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -301,6 +325,10 @@ def test_cli_obsidian_existing_dir_auto_generates_filename(tmp_path: Path) -> No
             "existing_dir_test",
             "--obsidian-markdown-path",
             str(notes_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     md_files = list(notes_dir.glob("*.md"))
@@ -324,6 +352,10 @@ def test_cli_obsidian_refuses_overwrite_by_default(tmp_path: Path) -> None:
         "5",
         "--quantiles",
         "5",
+        "--train-end",
+        "2024-01-22",
+        "--test-start",
+        "2024-01-25",
         "--output-dir",
         str(tmp_path / "out"),
         "--obsidian-markdown-path",
@@ -346,6 +378,10 @@ def test_cli_obsidian_overwrite_flag_allows_rewrite(tmp_path: Path) -> None:
         "5",
         "--quantiles",
         "5",
+        "--train-end",
+        "2024-01-22",
+        "--test-start",
+        "2024-01-25",
         "--output-dir",
         str(tmp_path / "out"),
         "--obsidian-markdown-path",
@@ -389,6 +425,10 @@ def test_cli_registry_stores_resolved_file_path_not_dir(
             "--obsidian-markdown-path",
             str(notes_dir) + "/",
             "--append-registry",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df = load_registry(registry_path)
@@ -424,6 +464,10 @@ def test_cli_registry_obsidian_path_matches_written_file(
             "--obsidian-markdown-path",
             str(md_path),
             "--append-registry",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df = load_registry(registry_path)
@@ -456,6 +500,10 @@ def test_obsidian_note_does_not_contain_literal_nan(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -495,7 +543,7 @@ def test_obsidian_note_nan_metric_renders_as_em_dash_unit() -> None:
             ]
         )
 
-    result = run_factor_experiment(prices, constant_fn)
+    result = run_factor_experiment(prices, constant_fn, allow_full_sample_evaluation=True)
     md = to_obsidian_markdown(result)
     assert "| nan |" not in md
     assert "| NaN |" not in md

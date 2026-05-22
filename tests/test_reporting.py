@@ -56,7 +56,7 @@ def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def _standard_result() -> ExperimentResult:
-    return run_factor_experiment(_make_prices(), _momentum_fn)
+    return run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
 
 
 def _close_or_both_nan(a: float, b: float) -> bool:
@@ -115,9 +115,7 @@ def test_tearsheet_ic_chart_falls_back_to_ic_when_rankic_empty() -> None:
         }
     )
 
-    chart = _build_ic_timeseries_with_cumulative_chart(
-        artifacts={"ic_timeseries": ic_timeseries}
-    )
+    chart = _build_ic_timeseries_with_cumulative_chart(artifacts={"ic_timeseries": ic_timeseries})
 
     assert chart is not None
     assert chart["series"][0]["name"] == "ic"
@@ -132,9 +130,7 @@ def test_tearsheet_ic_chart_falls_back_to_ic_when_rankic_empty() -> None:
         "2024-01-02",
         "2024-01-03",
     ]
-    assert [point[1] for point in chart["series"][1]["points"]] == pytest.approx(
-        [0.10, 0.05, 0.25]
-    )
+    assert [point[1] for point in chart["series"][1]["points"]] == pytest.approx([0.10, 0.05, 0.25])
 
 
 def test_tearsheet_ic_distribution_falls_back_to_ic_when_rankic_empty() -> None:
@@ -261,18 +257,14 @@ def test_tearsheet_payload_chart_inputs_match_artifact_csvs(tmp_path: Path) -> N
         "2024-01-02",
         "2024-01-03",
     ]
-    assert [point[1] for point in ic_chart["series"][1]["points"]] == pytest.approx(
-        [0.10, 0.05]
-    )
+    assert [point[1] for point in ic_chart["series"][1]["points"]] == pytest.approx([0.10, 0.05])
 
     nav_chart = chart_by_title["Cumulative Long-Short NAV"]
     assert [point[0] for point in nav_chart["series"][0]["points"]] == [
         "2024-01-02",
         "2024-01-03",
     ]
-    assert [point[1] for point in nav_chart["series"][0]["points"]] == pytest.approx(
-        [1.02, 1.0506]
-    )
+    assert [point[1] for point in nav_chart["series"][0]["points"]] == pytest.approx([1.02, 1.0506])
 
     group_bar = chart_by_title["Group Mean Return"]["series"][0]["bars"]
     assert [bar["group"] for bar in group_bar] == ["Q1", "Q2"]
@@ -497,7 +489,9 @@ def test_summarise_label_name_matches_label_df():
 
 
 def test_summarise_label_name_encodes_horizon():
-    result = run_factor_experiment(_make_prices(), _momentum_fn, horizon=3)
+    result = run_factor_experiment(
+        _make_prices(), _momentum_fn, horizon=3, allow_full_sample_evaluation=True
+    )
     df = summarise_experiment_result(result)
     assert df["label_name"].iloc[0] == "forward_return_3"
 
@@ -670,7 +664,7 @@ def test_summarise_uncertainty_ci_fields_are_present():
 
 
 def test_summarise_uncertainty_flags_show_unavailable_ci_for_constant_factor():
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     df = summarise_experiment_result(result)
     flags = str(df["uncertainty_flags"].iloc[0])
     assert "ic_ci_unavailable" in flags
@@ -748,7 +742,9 @@ def test_summarise_split_description_encodes_both_dates():
 
 def test_summarise_n_quantiles_matches_runner_parameter():
     """n_quantiles must reflect the exact runner parameter, not the max occupied bucket."""
-    result = run_factor_experiment(_make_prices(), _momentum_fn, n_quantiles=7)
+    result = run_factor_experiment(
+        _make_prices(), _momentum_fn, n_quantiles=7, allow_full_sample_evaluation=True
+    )
     df = summarise_experiment_result(result)
     assert int(df["n_quantiles"].iloc[0]) == 7
 
@@ -763,7 +759,12 @@ def test_summarise_n_quantiles_independent_of_occupied_buckets():
     """A degenerate cross-section may leave some buckets empty, but n_quantiles
     must still report the configured parameter, not max(quantile)."""
     # 2-asset cross-section with n_quantiles=5: only buckets 1 and 5 are occupied
-    result = run_factor_experiment(_make_prices(n_assets=2, n_days=20), _momentum_fn, n_quantiles=5)
+    result = run_factor_experiment(
+        _make_prices(n_assets=2, n_days=20),
+        _momentum_fn,
+        n_quantiles=5,
+        allow_full_sample_evaluation=True,
+    )
     df = summarise_experiment_result(result)
     assert int(df["n_quantiles"].iloc[0]) == 5
 
@@ -774,15 +775,17 @@ def test_summarise_n_quantiles_independent_of_occupied_buckets():
 
 
 def test_summarise_nan_metrics_preserved_for_constant_factor():
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     df = summarise_experiment_result(result)
     assert math.isnan(float(df["mean_ic"].iloc[0]))
     assert math.isnan(float(df["mean_rank_ic"].iloc[0]))
 
 
 def test_summarise_stackable_multiple_results():
-    r1 = run_factor_experiment(_make_prices(), _momentum_fn)
-    r2 = run_factor_experiment(_make_prices(seed=99), _momentum_fn)
+    r1 = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
+    r2 = run_factor_experiment(
+        _make_prices(seed=99), _momentum_fn, allow_full_sample_evaluation=True
+    )
     stacked = pd.concat(
         [summarise_experiment_result(r1), summarise_experiment_result(r2)],
         ignore_index=True,
@@ -846,8 +849,10 @@ def test_export_summary_csv_content_roundtrips(tmp_path: Path) -> None:
 
 
 def test_export_summary_csv_stacked_rows_roundtrip(tmp_path: Path) -> None:
-    r1 = run_factor_experiment(_make_prices(), _momentum_fn)
-    r2 = run_factor_experiment(_make_prices(seed=7), _momentum_fn)
+    r1 = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
+    r2 = run_factor_experiment(
+        _make_prices(seed=7), _momentum_fn, allow_full_sample_evaluation=True
+    )
     stacked = pd.concat(
         [summarise_experiment_result(r1), summarise_experiment_result(r2)],
         ignore_index=True,
@@ -1013,7 +1018,7 @@ def test_obsidian_markdown_no_notes_section_when_omitted():
 
 
 def test_obsidian_markdown_nan_metrics_render_as_dash():
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     md = to_obsidian_markdown(result)
     # constant factor → NaN IC → rendered as em dash
     assert "\u2014" in md

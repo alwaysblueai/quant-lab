@@ -46,12 +46,12 @@ def _constant_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def test_run_factor_experiment_returns_experiment_result():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result, ExperimentResult)
 
 
 def test_result_fields_are_dataframes():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result.factor_df, pd.DataFrame)
     assert isinstance(result.label_df, pd.DataFrame)
     assert isinstance(result.ic_df, pd.DataFrame)
@@ -62,7 +62,7 @@ def test_result_fields_are_dataframes():
 
 
 def test_summary_is_experiment_summary_instance():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result.summary, ExperimentSummary)
 
 
@@ -72,48 +72,48 @@ def test_summary_is_experiment_summary_instance():
 
 
 def test_factor_df_has_canonical_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "asset", "factor", "value"}.issubset(result.factor_df.columns)
 
 
 def test_label_df_has_canonical_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "asset", "factor", "value"}.issubset(result.label_df.columns)
 
 
 def test_ic_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "ic"}.issubset(result.ic_df.columns)
 
 
 def test_rank_ic_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "rank_ic"}.issubset(result.rank_ic_df.columns)
 
 
 def test_mutual_information_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "mutual_information"}.issubset(result.mutual_information_df.columns)
 
 
 def test_quantile_returns_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "quantile", "mean_return"}.issubset(result.quantile_returns_df.columns)
 
 
 def test_long_short_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert {"date", "long_short_return"}.issubset(result.long_short_df.columns)
 
 
 def test_factor_df_no_duplicate_rows():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     dupes = result.factor_df.duplicated(subset=["date", "asset", "factor"])
     assert not dupes.any()
 
 
 def test_label_df_no_duplicate_rows():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     dupes = result.label_df.duplicated(subset=["date", "asset", "factor"])
     assert not dupes.any()
 
@@ -124,7 +124,9 @@ def test_label_df_no_duplicate_rows():
 
 
 def test_summary_numeric_fields_are_finite_or_nan():
-    s = run_factor_experiment(_make_prices(), _momentum_fn).summary
+    s = run_factor_experiment(
+        _make_prices(), _momentum_fn, allow_full_sample_evaluation=True
+    ).summary
     for field in (
         s.mean_ic,
         s.mean_rank_ic,
@@ -137,20 +139,24 @@ def test_summary_numeric_fields_are_finite_or_nan():
 
 
 def test_summary_hit_rate_in_unit_interval():
-    hr = run_factor_experiment(_make_prices(), _momentum_fn).summary.long_short_hit_rate
+    hr = run_factor_experiment(
+        _make_prices(), _momentum_fn, allow_full_sample_evaluation=True
+    ).summary.long_short_hit_rate
     if not math.isnan(hr):
         assert 0.0 <= hr <= 1.0
 
 
 def test_summary_n_dates_is_non_negative_int():
-    s = run_factor_experiment(_make_prices(), _momentum_fn).summary
+    s = run_factor_experiment(
+        _make_prices(), _momentum_fn, allow_full_sample_evaluation=True
+    ).summary
     assert isinstance(s.n_dates, int)
     assert s.n_dates >= 0
 
 
 def test_summary_n_dates_counts_only_finite_ic_dates():
     """n_dates counts dates with a non-NaN IC value, not all dates in ic_df."""
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     finite_ic_dates = result.ic_df.loc[result.ic_df["ic"].notna(), "date"].nunique()
     assert result.summary.n_dates == finite_ic_dates
 
@@ -158,13 +164,17 @@ def test_summary_n_dates_counts_only_finite_ic_dates():
 def test_summary_ic_ir_nan_when_single_eval_date():
     """ic_ir requires at least 2 IC observations (ddof=1); with 1 date it is NaN."""
     # 1 asset × 10 days: no cross-section → all IC NaN → n_dates == 0, ic_ir NaN
-    result = run_factor_experiment(_make_prices(n_assets=1, n_days=10), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_assets=1, n_days=10), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert math.isnan(result.summary.ic_ir)
 
 
 def test_summary_n_dates_zero_when_all_ic_nan():
     """n_dates must be 0 when all IC values are NaN (no valid cross-sections)."""
-    result = run_factor_experiment(_make_prices(n_assets=1, n_days=15), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_assets=1, n_days=15), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert result.summary.n_dates == 0
 
 
@@ -174,25 +184,25 @@ def test_summary_n_dates_zero_when_all_ic_nan():
 
 
 def test_summary_mean_ic_matches_ic_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     expected = float(result.ic_df["ic"].dropna().mean())
     assert math.isclose(result.summary.mean_ic, expected)
 
 
 def test_summary_mean_rank_ic_matches_rank_ic_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     expected = float(result.rank_ic_df["rank_ic"].dropna().mean())
     assert math.isclose(result.summary.mean_rank_ic, expected)
 
 
 def test_summary_mean_mutual_information_matches_mutual_information_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     expected = float(result.mutual_information_df["mutual_information"].dropna().mean())
     assert math.isclose(result.summary.mean_mutual_information, expected)
 
 
 def test_summary_mean_long_short_return_matches_long_short_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     expected = float(result.long_short_df["long_short_return"].dropna().mean())
     assert math.isclose(result.summary.mean_long_short_return, expected)
 
@@ -205,7 +215,9 @@ def test_summary_mean_long_short_turnover_aligned_to_return_universe():
     so long_short_df has fewer dates than long_short_turnover_df.  The summary
     scalar must exclude those trailing dates.
     """
-    result = run_factor_experiment(_make_prices(n_days=40), _momentum_fn, horizon=5)
+    result = run_factor_experiment(
+        _make_prices(n_days=40), _momentum_fn, horizon=5, allow_full_sample_evaluation=True
+    )
     ls_dates = set(result.long_short_df["date"].unique())
     lsto_restricted = result.long_short_turnover_df[
         result.long_short_turnover_df["date"].isin(ls_dates)
@@ -219,14 +231,14 @@ def test_summary_mean_long_short_turnover_aligned_to_return_universe():
 
 
 def test_summary_long_short_hit_rate_matches_long_short_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     ls_vals = result.long_short_df["long_short_return"].dropna()
     expected = float((ls_vals > 0).mean())
     assert math.isclose(result.summary.long_short_hit_rate, expected)
 
 
 def test_summary_ic_ir_matches_mean_over_std():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     ic_vals = result.ic_df["ic"].dropna()
     if len(ic_vals) > 1:
         expected = float(ic_vals.mean()) / float(ic_vals.std(ddof=1))
@@ -234,7 +246,7 @@ def test_summary_ic_ir_matches_mean_over_std():
 
 
 def test_summary_ic_positive_rate_matches_ic_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     ic_vals = result.ic_df["ic"].dropna()
     expected = float((ic_vals > 0).mean()) if len(ic_vals) > 0 else float("nan")
     if math.isnan(expected):
@@ -244,13 +256,13 @@ def test_summary_ic_positive_rate_matches_ic_df():
 
 
 def test_summary_ic_valid_ratio_matches_ic_df():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     expected = float(result.ic_df["ic"].notna().mean())
     assert math.isclose(result.summary.ic_valid_ratio, expected)
 
 
 def test_summary_long_short_ir_matches_mean_over_std():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     ls_vals = result.long_short_df["long_short_return"].dropna()
     if len(ls_vals) <= 1:
         assert math.isnan(result.summary.long_short_ir)
@@ -264,7 +276,9 @@ def test_summary_long_short_ir_matches_mean_over_std():
 
 
 def test_summary_dsr_pvalue_is_unit_interval_or_nan() -> None:
-    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_days=80), _momentum_fn, allow_full_sample_evaluation=True
+    )
     dsr = result.summary.dsr_pvalue
     if math.isnan(dsr):
         assert math.isnan(dsr)
@@ -273,7 +287,7 @@ def test_summary_dsr_pvalue_is_unit_interval_or_nan() -> None:
 
 
 def test_summary_long_short_return_per_turnover_matches_ratio():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     mean_ls = result.summary.mean_long_short_return
     mean_turn = result.summary.mean_long_short_turnover
     if math.isnan(mean_turn) or mean_turn <= 0.0:
@@ -284,7 +298,9 @@ def test_summary_long_short_return_per_turnover_matches_ratio():
 
 
 def test_summary_subperiod_robustness_share_in_unit_interval():
-    result = run_factor_experiment(_make_prices(n_days=60), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_days=60), _momentum_fn, allow_full_sample_evaluation=True
+    )
     for value in (
         result.summary.subperiod_ic_positive_share,
         result.summary.subperiod_long_short_positive_share,
@@ -294,7 +310,9 @@ def test_summary_subperiod_robustness_share_in_unit_interval():
 
 
 def test_rolling_stability_df_has_expected_columns():
-    result = run_factor_experiment(_make_prices(n_days=80), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_days=80), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert {
         "date",
         "rolling_mean_ic",
@@ -309,7 +327,9 @@ def test_rolling_stability_df_has_expected_columns():
 
 
 def test_summary_rolling_metrics_match_rolling_stability_df():
-    result = run_factor_experiment(_make_prices(n_days=90), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_days=90), _momentum_fn, allow_full_sample_evaluation=True
+    )
     rolling = result.rolling_stability_df
 
     rolling_ic = rolling["rolling_mean_ic"].dropna()
@@ -353,7 +373,9 @@ def test_summary_rolling_metrics_match_rolling_stability_df():
 
 
 def test_summary_rolling_metrics_are_nan_for_short_samples():
-    result = run_factor_experiment(_make_prices(n_days=18), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_days=18), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert math.isnan(result.summary.rolling_ic_positive_share)
     assert math.isnan(result.summary.rolling_rank_ic_positive_share)
     assert math.isnan(result.summary.rolling_long_short_positive_share)
@@ -363,7 +385,7 @@ def test_summary_rolling_metrics_are_nan_for_short_samples():
 
 
 def test_summary_coverage_ratios_in_unit_interval():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     for value in (
         result.summary.eval_coverage_ratio_mean,
         result.summary.eval_coverage_ratio_min,
@@ -384,7 +406,9 @@ def test_summary_coverage_counts_all_missing_factor_dates_as_zero_coverage():
                 rows.append({"date": date, "asset": asset, "factor": "f", "value": value})
         return pd.DataFrame(rows)
 
-    result = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=2)
+    result = run_factor_experiment(
+        prices, factor_fn, horizon=1, n_quantiles=2, allow_full_sample_evaluation=True
+    )
 
     # Horizon=1 leaves the final date without a valid label, so coverage is
     # evaluated on the first three dates: full, zero, full.
@@ -395,7 +419,7 @@ def test_summary_coverage_counts_all_missing_factor_dates_as_zero_coverage():
 
 
 def test_summary_instability_flags_are_strings():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result.summary.instability_flags, tuple)
     assert all(isinstance(flag, str) for flag in result.summary.instability_flags)
 
@@ -408,7 +432,7 @@ def test_summary_instability_flags_are_strings():
 def test_factor_df_covers_full_price_panel():
     """factor_df must include all dates present in the price panel."""
     prices = _make_prices()
-    result = run_factor_experiment(prices, _momentum_fn)
+    result = run_factor_experiment(prices, _momentum_fn, allow_full_sample_evaluation=True)
     price_dates = set(pd.to_datetime(prices["date"]).unique())
     factor_dates = set(pd.to_datetime(result.factor_df["date"]).unique())
     assert factor_dates.issubset(price_dates)
@@ -416,7 +440,7 @@ def test_factor_df_covers_full_price_panel():
 
 def test_label_df_covers_full_price_panel():
     prices = _make_prices()
-    result = run_factor_experiment(prices, _momentum_fn)
+    result = run_factor_experiment(prices, _momentum_fn, allow_full_sample_evaluation=True)
     price_dates = set(pd.to_datetime(prices["date"]).unique())
     label_dates = set(pd.to_datetime(result.label_df["date"]).unique())
     assert label_dates.issubset(price_dates)
@@ -424,7 +448,7 @@ def test_label_df_covers_full_price_panel():
 
 def test_full_sample_eval_ic_dates_subset_of_factor_dates():
     """Without a split, IC dates must be a subset of factor dates."""
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     factor_dates = set(pd.to_datetime(result.factor_df["date"]).unique())
     ic_dates = set(pd.to_datetime(result.ic_df["date"]).unique())
     assert ic_dates.issubset(factor_dates)
@@ -432,7 +456,9 @@ def test_full_sample_eval_ic_dates_subset_of_factor_dates():
 
 def test_label_factor_name_encodes_horizon():
     """label_df must use 'forward_return_{horizon}' as the factor name."""
-    result = run_factor_experiment(_make_prices(), _momentum_fn, horizon=3)
+    result = run_factor_experiment(
+        _make_prices(), _momentum_fn, horizon=3, allow_full_sample_evaluation=True
+    )
     label_names = result.label_df["factor"].unique()
     assert len(label_names) == 1
     assert label_names[0] == "forward_return_3"
@@ -491,7 +517,7 @@ def test_split_label_df_includes_train_period():
 
 def test_split_produces_fewer_eval_dates_than_full_sample():
     prices = _make_prices(n_days=40)
-    full = run_factor_experiment(prices, _momentum_fn)
+    full = run_factor_experiment(prices, _momentum_fn, allow_full_sample_evaluation=True)
     split = run_factor_experiment(
         prices, _momentum_fn, train_end=_TRAIN_END, test_start=_TEST_START
     )
@@ -515,7 +541,9 @@ def test_test_start_without_train_end_raises():
 
 def test_val_start_without_split_raises():
     with pytest.raises(ValueError, match="val_start"):
-        run_factor_experiment(_make_prices(), _momentum_fn, val_start="2024-01-15")
+        run_factor_experiment(
+            _make_prices(), _momentum_fn, val_start="2024-01-15", allow_full_sample_evaluation=True
+        )
 
 
 def test_val_start_with_train_end_but_no_test_start_raises():
@@ -529,7 +557,7 @@ def test_val_start_with_train_end_but_no_test_start_raises():
 def test_no_split_uses_all_available_dates():
     """Without train_end/test_start, no dates are excluded from evaluation."""
     prices = _make_prices()
-    result = run_factor_experiment(prices, _momentum_fn)
+    result = run_factor_experiment(prices, _momentum_fn, allow_full_sample_evaluation=True)
     # ic_dates may be smaller (warm-up NaN, horizon trim), but must not exclude
     # dates that have valid factor and label values
     merged = result.factor_df.merge(
@@ -548,14 +576,14 @@ def test_no_split_uses_all_available_dates():
 
 
 def test_ic_df_dates_are_subset_of_factor_df_dates():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     factor_dates = set(pd.to_datetime(result.factor_df["date"]).unique())
     ic_dates = set(pd.to_datetime(result.ic_df["date"]).unique())
     assert ic_dates.issubset(factor_dates)
 
 
 def test_ic_df_dates_are_subset_of_label_df_dates():
-    result = run_factor_experiment(_make_prices(), _momentum_fn)
+    result = run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
     label_dates = set(pd.to_datetime(result.label_df["date"]).unique())
     ic_dates = set(pd.to_datetime(result.ic_df["date"]).unique())
     assert ic_dates.issubset(label_dates)
@@ -564,8 +592,8 @@ def test_ic_df_dates_are_subset_of_label_df_dates():
 def test_horizon_affects_label_not_factor():
     """Changing horizon shifts label dates but must not change factor values."""
     prices = _make_prices()
-    r1 = run_factor_experiment(prices, _momentum_fn, horizon=1)
-    r3 = run_factor_experiment(prices, _momentum_fn, horizon=3)
+    r1 = run_factor_experiment(prices, _momentum_fn, horizon=1, allow_full_sample_evaluation=True)
+    r3 = run_factor_experiment(prices, _momentum_fn, horizon=3, allow_full_sample_evaluation=True)
     # Factor values are identical regardless of horizon
     f1 = r1.factor_df.sort_values(["date", "asset"]).reset_index(drop=True)["value"]
     f3 = r3.factor_df.sort_values(["date", "asset"]).reset_index(drop=True)["value"]
@@ -581,25 +609,27 @@ def test_horizon_affects_label_not_factor():
 
 def test_constant_factor_mean_ic_is_nan():
     """Zero cross-sectional variance → Pearson IC undefined → NaN."""
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     assert math.isnan(result.summary.mean_ic)
 
 
 def test_constant_factor_mean_rank_ic_is_nan():
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     assert math.isnan(result.summary.mean_rank_ic)
 
 
 def test_constant_factor_long_short_is_nan():
     """All assets in bucket 1 → top == bottom → L/S return is NaN."""
-    result = run_factor_experiment(_make_prices(), _constant_fn)
+    result = run_factor_experiment(_make_prices(), _constant_fn, allow_full_sample_evaluation=True)
     if not result.long_short_df.empty:
         assert result.long_short_df["long_short_return"].isna().all()
 
 
 def test_single_asset_ic_is_nan():
     """Single asset per date → no cross-section → IC always NaN."""
-    result = run_factor_experiment(_make_prices(n_assets=1, n_days=15), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_assets=1, n_days=15), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert math.isnan(result.summary.mean_ic)
 
 
@@ -621,7 +651,9 @@ def test_empty_test_period_gives_empty_eval_outputs():
 
 def test_two_asset_experiment_runs_without_error():
     """Minimal viable cross-section (2 assets) should complete successfully."""
-    result = run_factor_experiment(_make_prices(n_assets=2, n_days=20), _momentum_fn)
+    result = run_factor_experiment(
+        _make_prices(n_assets=2, n_days=20), _momentum_fn, allow_full_sample_evaluation=True
+    )
     assert isinstance(result.summary, ExperimentSummary)
     assert result.summary.n_dates > 0
 
@@ -669,7 +701,7 @@ def test_ic_ir_is_nan_when_ic_has_zero_variance():
         return pd.DataFrame(rows)
 
     prices = matching_prices(pd.DataFrame())
-    result = run_factor_experiment(prices, flat_ic_fn)
+    result = run_factor_experiment(prices, flat_ic_fn, allow_full_sample_evaluation=True)
     ic_vals = result.ic_df["ic"].dropna()
     if len(ic_vals) > 1 and float(ic_vals.std(ddof=1)) == 0.0:
         assert math.isnan(result.summary.ic_ir)

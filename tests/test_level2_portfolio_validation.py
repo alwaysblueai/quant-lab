@@ -37,7 +37,9 @@ def _momentum_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def _base_metrics() -> tuple[dict[str, object], object]:
-    result = run_factor_experiment(_make_prices(), _momentum_fn, n_quantiles=5, horizon=5)
+    result = run_factor_experiment(
+        _make_prices(), _momentum_fn, n_quantiles=5, horizon=5, allow_full_sample_evaluation=True
+    )
     summary = summarise_experiment_result(result).iloc[0].to_dict()
     metrics = dict(summary)
     metrics["case_name"] = "demo_case"

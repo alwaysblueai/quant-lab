@@ -443,7 +443,9 @@ def test_portfolio_turnover_one_date_gives_single_nan_row() -> None:
 
 def test_experiment_portfolio_fields_none_by_default() -> None:
     prices = _make_prices(n_days=30)
-    result = run_factor_experiment(prices, lambda p: momentum(p, window=5))
+    result = run_factor_experiment(
+        prices, lambda p: momentum(p, window=5), allow_full_sample_evaluation=True
+    )
     assert result.portfolio_weights_df is None
     assert result.portfolio_return_df is None
     assert result.portfolio_turnover_df is None
@@ -456,6 +458,7 @@ def test_experiment_portfolio_fields_populated_when_params_provided() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_weights_df is not None
     assert result.portfolio_return_df is not None
@@ -469,6 +472,7 @@ def test_experiment_portfolio_turnover_columns() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_turnover_df is not None
     assert list(result.portfolio_turnover_df.columns) == ["date", "portfolio_turnover"]
@@ -481,6 +485,7 @@ def test_experiment_portfolio_turnover_first_date_is_nan() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_turnover_df is not None
     if not result.portfolio_turnover_df.empty:
@@ -500,6 +505,7 @@ def test_experiment_portfolio_return_uses_1period_labels_when_horizon_gt_1() -> 
         horizon=5,
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     result_h1 = run_factor_experiment(
         prices,
@@ -507,6 +513,7 @@ def test_experiment_portfolio_return_uses_1period_labels_when_horizon_gt_1() -> 
         horizon=1,
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     # Both should have portfolio_return_df populated.
     assert result_h5.portfolio_return_df is not None
@@ -538,6 +545,7 @@ def test_experiment_precomputed_labels_avoid_recomputing_forward_returns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prices = _make_prices(n_days=60)
+
     def factor_fn(prices_df: pd.DataFrame) -> pd.DataFrame:
         return momentum(prices_df, window=5)
 
@@ -561,6 +569,7 @@ def test_experiment_precomputed_labels_avoid_recomputing_forward_returns(
         horizon=5,
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     without_cache = calls["count"]
 
@@ -572,6 +581,7 @@ def test_experiment_precomputed_labels_avoid_recomputing_forward_returns(
         holding_period=1,
         rebalance_frequency=1,
         precomputed_forward_labels=cached_labels,
+        allow_full_sample_evaluation=True,
     )
     with_cache = calls["count"]
 
@@ -586,6 +596,7 @@ def test_experiment_portfolio_weights_columns() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_weights_df is not None
     assert list(result.portfolio_weights_df.columns) == list(_WEIGHT_COLUMNS)
@@ -598,6 +609,7 @@ def test_experiment_portfolio_return_columns() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_return_df is not None
     assert list(result.portfolio_return_df.columns) == list(_PORTFOLIO_RETURN_COLUMNS)
@@ -611,6 +623,7 @@ def test_experiment_portfolio_only_one_param_raises() -> None:
             lambda p: momentum(p, window=5),
             holding_period=2,
             # rebalance_frequency omitted
+            allow_full_sample_evaluation=True,
         )
 
 
@@ -622,6 +635,7 @@ def test_experiment_portfolio_weighting_method_rank() -> None:
         holding_period=1,
         rebalance_frequency=1,
         weighting_method="rank",
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_weights_df is not None
     # Rank weights at each date should sum to 1.
@@ -726,6 +740,7 @@ def test_portfolio_turnover_aligned_to_rebalance_frequency() -> None:
         lambda p: momentum(p, window=5),
         holding_period=2,
         rebalance_frequency=2,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_weights_df is not None
     assert result.portfolio_turnover_df is not None
@@ -747,6 +762,7 @@ def test_portfolio_turnover_rf1_has_same_dates_as_weights() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_weights_df is not None
     assert result.portfolio_turnover_df is not None
@@ -767,6 +783,7 @@ def test_experiment_cost_adj_none_without_cost_rate() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_cost_adjusted_return_df is None
 
@@ -779,6 +796,7 @@ def test_experiment_cost_adj_populated_with_cost_rate() -> None:
         holding_period=1,
         rebalance_frequency=1,
         portfolio_cost_rate=0.001,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_cost_adjusted_return_df is not None
     assert list(result.portfolio_cost_adjusted_return_df.columns) == list(
@@ -796,6 +814,7 @@ def test_experiment_cost_adj_none_when_no_portfolio_params() -> None:
             prices,
             lambda p: momentum(p, window=5),
             portfolio_cost_rate=0.001,
+            allow_full_sample_evaluation=True,
         )
     assert result.portfolio_cost_adjusted_return_df is None
 
@@ -809,6 +828,7 @@ def test_experiment_cost_adj_adjusted_return_le_portfolio_return() -> None:
         holding_period=1,
         rebalance_frequency=1,
         portfolio_cost_rate=0.01,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_cost_adjusted_return_df is not None
     df = result.portfolio_cost_adjusted_return_df.dropna()
@@ -823,7 +843,9 @@ def test_experiment_cost_adj_adjusted_return_le_portfolio_return() -> None:
 
 def test_portfolio_summary_none_without_portfolio_params() -> None:
     prices = _make_prices(n_days=30)
-    result = run_factor_experiment(prices, lambda p: momentum(p, window=5))
+    result = run_factor_experiment(
+        prices, lambda p: momentum(p, window=5), allow_full_sample_evaluation=True
+    )
     assert result.portfolio_summary is None
 
 
@@ -834,6 +856,7 @@ def test_portfolio_summary_populated_with_portfolio_params() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert isinstance(result.portfolio_summary, PortfolioSummary)
 
@@ -845,6 +868,7 @@ def test_portfolio_summary_mean_return_finite() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert math.isfinite(result.portfolio_summary.mean_portfolio_return)
@@ -857,6 +881,7 @@ def test_portfolio_summary_hit_rate_in_unit_interval() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     hr = result.portfolio_summary.portfolio_hit_rate
@@ -870,6 +895,7 @@ def test_portfolio_summary_mean_return_matches_manual_mean() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert result.portfolio_return_df is not None
@@ -884,6 +910,7 @@ def test_portfolio_summary_mean_turnover_matches_manual_mean() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert result.portfolio_turnover_df is not None
@@ -898,6 +925,7 @@ def test_portfolio_summary_n_portfolio_dates_correct() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert result.portfolio_return_df is not None
@@ -912,6 +940,7 @@ def test_portfolio_summary_cost_adj_nan_without_cost_rate() -> None:
         lambda p: momentum(p, window=5),
         holding_period=1,
         rebalance_frequency=1,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert math.isnan(result.portfolio_summary.mean_cost_adjusted_return)
@@ -925,6 +954,7 @@ def test_portfolio_summary_cost_adj_finite_with_cost_rate() -> None:
         holding_period=1,
         rebalance_frequency=1,
         portfolio_cost_rate=0.001,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_summary is not None
     assert math.isfinite(result.portfolio_summary.mean_cost_adjusted_return)
@@ -940,6 +970,7 @@ def test_portfolio_summary_cost_adj_le_portfolio_return_on_same_dates() -> None:
         holding_period=1,
         rebalance_frequency=1,
         portfolio_cost_rate=0.01,
+        allow_full_sample_evaluation=True,
     )
     assert result.portfolio_cost_adjusted_return_df is not None
     df = result.portfolio_cost_adjusted_return_df.dropna(

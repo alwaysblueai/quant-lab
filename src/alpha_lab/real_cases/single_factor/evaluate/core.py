@@ -250,6 +250,10 @@ def evaluate_single_factor_case(
             report_result = _run_with_stage_heartbeat(
                 stage_message="生成双口径报告路径",
                 stage_percent=22,
+                # Dual-scope report's "全样本视角" path: deliberately runs the
+                # backtest without a split so summary metrics describe the
+                # whole sample alongside the split-aware result. Explicit
+                # opt-in silences OPT-P0-2 warning.
                 fn=lambda: run_factor_experiment(
                     prices,
                     lambda _prices: core_factor_df,
@@ -260,6 +264,7 @@ def evaluate_single_factor_case(
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
                     execution_price_mode=spec.target.execution_price_mode,
+                    allow_full_sample_evaluation=True,
                 ),
             )
         with _stage("core_summary_full_report_path"):
@@ -277,6 +282,10 @@ def evaluate_single_factor_case(
             is_result = _run_with_stage_heartbeat(
                 stage_message="生成 IS 指标口径",
                 stage_percent=24,
+                # Dual-scope report's "IS 视角" path: factor is pre-filtered
+                # to ``is_end``, so a no-split experiment evaluates the
+                # in-sample window only. Explicit opt-in silences OPT-P0-2
+                # warning.
                 fn=lambda: run_factor_experiment(
                     prices,
                     lambda _prices: is_factor_df,
@@ -287,6 +296,7 @@ def evaluate_single_factor_case(
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
                     execution_price_mode=spec.target.execution_price_mode,
+                    allow_full_sample_evaluation=True,
                 ),
             )
         with _stage("core_summary_is_report_path"):
