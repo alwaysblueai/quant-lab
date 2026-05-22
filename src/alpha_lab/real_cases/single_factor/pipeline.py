@@ -857,6 +857,7 @@ def run_single_factor_case(
     fast_screen_artifact_root: str | Path | None = None,
     fast_screen_run_id: str | None = None,
     input_bundle: SingleFactorInputBundle | None = None,
+    defer_vault_export: bool = False,
 ) -> SingleFactorCaseRunResult:
     """Run one real-case single-factor study end-to-end and export artifacts."""
     integrity_checks: list[IntegrityCheckResult] = []
@@ -1043,6 +1044,7 @@ def run_single_factor_case(
         custom_factor_source=(
             custom_factor_source.to_audit_dict() if custom_factor_source is not None else None
         ),
+        defer_vault_export=defer_vault_export,
     )
     _emit_progress("实验产物导出完成", 90)
 

@@ -877,6 +877,46 @@ def test_real_case_single_factor_cli_fails_contract_when_validator_rejects_draft
     assert contract["status"] == "failed"
 
 
+def test_real_case_single_factor_cli_exports_contract_sidecars_to_vault(
+    tmp_path: Path,
+) -> None:
+    """P3-B: vault export runs after contract finalize, so vault contains sidecars
+    and the vault-side manifest copy carries the backend_run_contract block."""
+    from alpha_lab.real_cases.single_factor.cli import main as sf_main
+
+    factor_name = "e2e_vault_factor"
+    _write_research_factor(tmp_path, factor_name)
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    _patch_case_to_use_custom_factor(spec_path, factor_name)
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+
+    rc = sf_main(
+        [
+            "run",
+            str(spec_path),
+            "--evaluation-profile",
+            "exploratory_screening",
+            "--vault-root",
+            str(vault_root),
+            "--vault-export-mode",
+            "versioned",
+        ]
+    )
+
+    assert rc == 0
+    case_dir = vault_root / "50_experiments" / f"e2e_{factor_name}_contract_case"
+    assert (case_dir / "latest_backend_run_receipt.json").exists()
+    assert (case_dir / "latest_comparison_summary.json").exists()
+    assert list(case_dir.glob("*__backend_run_receipt.json"))
+    assert list(case_dir.glob("*__comparison_summary.json"))
+    vault_manifest = _read_json(case_dir / "latest_run_manifest.json")
+    contract = vault_manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "passed"
+    assert isinstance(vault_manifest.get("vault_export"), dict)
+
+
 def test_real_case_single_factor_cli_skips_contract_for_non_research_run(
     tmp_path: Path,
 ) -> None:

@@ -243,6 +243,7 @@ def export_artifact_bundle(
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
     custom_factor_source: Mapping[str, object] | None = None,
+    defer_vault_export: bool = False,
 ) -> SingleFactorArtifactPaths:
     """Write standardized artifact bundle for one single-factor case run."""
 
@@ -599,6 +600,12 @@ def export_artifact_bundle(
 
     _write_json(paths["run_manifest"], manifest)
 
+    if defer_vault_export:
+        # Caller (CLI) will run vault export after backend contract finalize so
+        # that backend_run_receipt.json / comparison_summary.json land in the
+        # same export pass and the vault manifest copy reflects the final
+        # backend_run_contract block.
+        return paths
     resolved_vault = resolve_vault_root(vault_root)
     enabled = resolved_vault is not None and vault_export_mode.strip().lower() != "skip"
     vault_result = export_to_vault(

@@ -136,6 +136,7 @@ def run_model_factor_case(
     progress_callback: Callable[[str, int], None] | None = None,
     stage_lifecycle_callback: StageLifecycleCallback | None = None,
     draft_model_source: DraftModelSource | None = None,
+    defer_vault_export: bool = False,
 ) -> ModelFactorCaseRunResult:
     """Run one real-case model-factor study end-to-end and export artifacts."""
 
@@ -709,6 +710,7 @@ def run_model_factor_case(
                 draft_model_source=(
                     draft_model_source.to_audit_dict() if draft_model_source is not None else None
                 ),
+                defer_vault_export=defer_vault_export,
             )
             export_stage.attach(
                 n_artifacts=int(len(artifact_paths)),

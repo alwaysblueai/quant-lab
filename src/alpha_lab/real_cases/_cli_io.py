@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from alpha_lab.backend_run_contract import (
 )
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting.renderers import write_case_report
+from alpha_lab.vault_export import ExportResult, export_to_vault, resolve_vault_root
 
 _logger = logging.getLogger(__name__)
 
@@ -125,6 +127,81 @@ def finalize_contract_if_research_draft(
         validation_payload=validation_payload,
     )
     return 0 if str(receipt.get("status") or "") == "success" else 1
+
+
+def export_to_vault_after_contract(
+    *,
+    case_name: str,
+    vault_root: str | Path | None,
+    vault_export_mode: str,
+    experiment_card_path: Path,
+    summary_path: Path,
+    manifest_path: Path,
+    workflow_label: str,
+) -> ExportResult:
+    """Run vault export after the backend contract finalize step.
+
+    Called by ``real-case`` CLIs that pass ``defer_vault_export=True`` to the
+    pipeline. Picks up ``backend_run_receipt.json`` / ``comparison_summary.json``
+    via ``vault_export.export_to_vault``'s auto-detect, then writes the
+    ``vault_export`` block into the local ``run_manifest.json`` and re-syncs
+    any vault-side manifest copies so they include the final
+    ``backend_run_contract`` block.
+    """
+
+    resolved_vault = resolve_vault_root(vault_root)
+    enabled = (
+        resolved_vault is not None and vault_export_mode.strip().lower() != "skip"
+    )
+    vault_result = export_to_vault(
+        {
+            "experiment_card_path": experiment_card_path,
+            "summary_path": summary_path,
+            "manifest_path": manifest_path,
+        },
+        case_name=case_name,
+        vault_root=vault_root,
+        mode=vault_export_mode,
+    )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning(
+            "vault export post-contract: cannot read %s: %s", manifest_path, exc
+        )
+        return vault_result
+    if not isinstance(manifest, dict):
+        _logger.warning(
+            "vault export post-contract: %s root must be an object", manifest_path
+        )
+        return vault_result
+    manifest["vault_export"] = vault_result.to_manifest_dict(enabled=enabled)
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if vault_result.status == "failed":
+        _logger.warning(
+            "Vault export failed for %s case %s: %s",
+            workflow_label,
+            case_name,
+            vault_result.error,
+        )
+    if vault_result.success and vault_result.target_paths:
+        for raw in vault_result.target_paths:
+            target = Path(raw)
+            if not target.name.endswith("run_manifest.json"):
+                continue
+            try:
+                shutil.copy2(manifest_path, target)
+            except OSError as exc:
+                _logger.warning(
+                    "Failed to sync %s vault manifest copy %s: %s",
+                    workflow_label,
+                    target,
+                    exc,
+                )
+    return vault_result
 
 
 def _validate_draft_for_contract(
