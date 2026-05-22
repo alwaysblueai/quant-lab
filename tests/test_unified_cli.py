@@ -722,3 +722,105 @@ def test_unified_cli_archive_migrate_rejects_dry_run_with_apply(
     err = capsys.readouterr().err
     assert "not allowed with argument" in err
     assert "--apply" in err or "--dry-run" in err
+
+
+# ---------------------------------------------------------------------------
+# OPT-P1-5: --require-llm-rerank wiring on `alpha-lab idea distribute`.
+# ---------------------------------------------------------------------------
+
+
+def test_unified_cli_idea_distribute_sets_require_llm_rerank_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--require-llm-rerank`` must set the strict-mode env var for the call."""
+    from alpha_lab.research_bridge.llm_rerank import REQUIRE_LLM_RERANK_ENV
+
+    monkeypatch.delenv(REQUIRE_LLM_RERANK_ENV, raising=False)
+    seen_env: dict[str, str | None] = {}
+
+    def _fake_distribute_idea(**kwargs: Any) -> Any:
+        import os as _os
+
+        seen_env["value"] = _os.environ.get(REQUIRE_LLM_RERANK_ENV)
+        # Return a minimal stub satisfying the attributes the CLI prints.
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            lab=SimpleNamespace(value="single_factor"),
+            engines=(),
+            idea_id="test_idea",
+            stage="mechanism_discovery",
+            draft_dir=Path("/tmp/draft"),
+            retrieval_pack_path=Path("/tmp/retrieval"),
+            stage2_input_path=Path("/tmp/stage2"),
+            manifest_path=Path("/tmp/manifest"),
+        )
+
+    monkeypatch.setattr(
+        "alpha_lab.research_bridge.service.distribute_idea", _fake_distribute_idea
+    )
+
+    rc = main(
+        [
+            "idea",
+            "distribute",
+            "--idea",
+            "test idea",
+            "--lab",
+            "single_factor",
+            "--require-llm-rerank",
+        ]
+    )
+
+    assert rc == 0
+    assert seen_env["value"] == "1"
+    # CLI must restore the prior (absent) state after the call completes.
+    import os as _os
+
+    assert REQUIRE_LLM_RERANK_ENV not in _os.environ
+
+
+def test_unified_cli_idea_distribute_default_leaves_strict_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the flag, the env var must not be set by the CLI."""
+    from alpha_lab.research_bridge.llm_rerank import REQUIRE_LLM_RERANK_ENV
+
+    monkeypatch.delenv(REQUIRE_LLM_RERANK_ENV, raising=False)
+    seen_env: dict[str, str | None] = {}
+
+    def _fake_distribute_idea(**kwargs: Any) -> Any:
+        import os as _os
+
+        seen_env["value"] = _os.environ.get(REQUIRE_LLM_RERANK_ENV)
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            lab=SimpleNamespace(value="single_factor"),
+            engines=(),
+            idea_id="test_idea",
+            stage="mechanism_discovery",
+            draft_dir=Path("/tmp/draft"),
+            retrieval_pack_path=Path("/tmp/retrieval"),
+            stage2_input_path=Path("/tmp/stage2"),
+            manifest_path=Path("/tmp/manifest"),
+        )
+
+    monkeypatch.setattr(
+        "alpha_lab.research_bridge.service.distribute_idea", _fake_distribute_idea
+    )
+
+    rc = main(
+        [
+            "idea",
+            "distribute",
+            "--idea",
+            "test idea",
+            "--lab",
+            "single_factor",
+        ]
+    )
+
+    assert rc == 0
+    # Default path must leave the strict env var unset.
+    assert seen_env["value"] is None

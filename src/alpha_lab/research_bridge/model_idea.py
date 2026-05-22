@@ -191,6 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
     )
+    distribute.add_argument(
+        "--require-llm-rerank",
+        action="store_true",
+        help=(
+            "Fail loudly if ANTHROPIC_API_KEY is missing instead of silently "
+            "falling back to deterministic hash-TFIDF ranking. Sets "
+            "ALPHA_LAB_REQUIRE_LLM_RERANK=1 for the duration of the run."
+        ),
+    )
 
     return parser
 
@@ -239,6 +248,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.action == "distribute":
+        from alpha_lab.research_bridge.llm_rerank import REQUIRE_LLM_RERANK_ENV
+
+        # ``--require-llm-rerank`` opt-in: see CLI help for details. Env var is
+        # set only for the duration of this call so non-CLI library callers
+        # keep the documented fallback behavior.
+        prior_require_env = os.environ.get(REQUIRE_LLM_RERANK_ENV)
+        if bool(getattr(args, "require_llm_rerank", False)):
+            os.environ[REQUIRE_LLM_RERANK_ENV] = "1"
         try:
             result = distribute_model_idea(
                 idea=str(args.idea),
@@ -260,6 +277,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         except ValueError as exc:
             parser.error(str(exc))
+        finally:
+            if bool(getattr(args, "require_llm_rerank", False)):
+                if prior_require_env is None:
+                    os.environ.pop(REQUIRE_LLM_RERANK_ENV, None)
+                else:
+                    os.environ[REQUIRE_LLM_RERANK_ENV] = prior_require_env
         print(json.dumps(result.to_payload(), ensure_ascii=False, indent=2))
         return 0
     parser.error(f'unsupported action: {args.action!r}')

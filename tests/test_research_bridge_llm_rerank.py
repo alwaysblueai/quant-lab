@@ -4,10 +4,15 @@ import sys
 import types
 from typing import Any
 
+import pytest
+
+from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.research_bridge.llm_rerank import (
     DEFAULT_MODEL,
+    REQUIRE_LLM_RERANK_ENV,
     RerankCandidate,
     anthropic_client_kwargs,
+    categorize_and_compress,
     rerank_candidates,
 )
 
@@ -91,6 +96,7 @@ def _install_fake_anthropic(
 
 def test_no_api_key_returns_disabled(monkeypatch: Any) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv(REQUIRE_LLM_RERANK_ENV, raising=False)
     monkeypatch.delitem(sys.modules, "anthropic", raising=False)
 
     outcome = rerank_candidates(
@@ -104,6 +110,77 @@ def test_no_api_key_returns_disabled(monkeypatch: Any) -> None:
     assert outcome.scores == {}
     assert outcome.fallback_reason == "no_api_key"
     assert "anthropic" not in sys.modules
+
+
+# ---------------------------------------------------------------------------
+# OPT-P1-5: --require-llm-rerank strict mode (env var ALPHA_LAB_REQUIRE_LLM_RERANK).
+# Default behavior must remain fallback-on-missing-key; strict mode raises.
+# ---------------------------------------------------------------------------
+
+
+def test_rerank_strict_mode_raises_when_api_key_missing(monkeypatch: Any) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv(REQUIRE_LLM_RERANK_ENV, "1")
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    with pytest.raises(AlphaLabConfigError, match="strict mode"):
+        rerank_candidates(
+            idea="strict idea",
+            mode="start",
+            candidates=[_candidate("Strict Probe")],
+        )
+
+
+@pytest.mark.parametrize("env_value", ["0", "no", "false", "off", "", "  "])
+def test_rerank_strict_mode_off_by_default_for_known_falsey_values(
+    monkeypatch: Any, env_value: str
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv(REQUIRE_LLM_RERANK_ENV, env_value)
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    outcome = rerank_candidates(
+        idea="non-strict idea",
+        mode="start",
+        candidates=[_candidate("Non-strict Probe")],
+    )
+
+    assert outcome.enabled is False
+    assert outcome.fallback_reason == "no_api_key"
+
+
+def test_rerank_strict_mode_does_not_fire_when_api_key_present(
+    monkeypatch: Any,
+) -> None:
+    # Strict mode is enabled but the key IS present — strict path must not
+    # short-circuit. Use the empty-candidate fast path to avoid network calls.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv(REQUIRE_LLM_RERANK_ENV, "1")
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    outcome = rerank_candidates(idea="idea", mode="start", candidates=[])
+
+    # Strict mode only kicks in on missing api key; empty candidates is its
+    # own fast-path and should still produce a no_candidates fallback.
+    assert outcome.enabled is False
+    assert outcome.fallback_reason == "no_candidates"
+
+
+def test_categorize_and_compress_strict_mode_raises_when_api_key_missing(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv(REQUIRE_LLM_RERANK_ENV, "1")
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    with pytest.raises(AlphaLabConfigError, match="strict mode"):
+        categorize_and_compress(
+            idea="strict categorize",
+            mode="start",
+            candidates=[_candidate("Strict Categorize")],
+            fingerprints={},
+            provenance={},
+        )
 
 
 def test_empty_candidates_short_circuits(monkeypatch: Any) -> None:

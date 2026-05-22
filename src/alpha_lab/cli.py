@@ -928,6 +928,15 @@ def build_unified_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional upstream explore session id for stage chaining.",
     )
+    idea_distribute.add_argument(
+        "--require-llm-rerank",
+        action="store_true",
+        help=(
+            "Fail loudly if ANTHROPIC_API_KEY is missing instead of silently "
+            "falling back to deterministic hash-TFIDF ranking. Sets "
+            "ALPHA_LAB_REQUIRE_LLM_RERANK=1 for the duration of the run."
+        ),
+    )
 
     idea_card = idea_commands.add_parser(
         "experiment-card",
@@ -1127,11 +1136,19 @@ def _handle_campaign(args: argparse.Namespace, parser: argparse.ArgumentParser) 
 def _handle_idea(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if args.idea_action == "distribute":
         from alpha_lab.research_bridge.engine_prompts import Lab
+        from alpha_lab.research_bridge.llm_rerank import REQUIRE_LLM_RERANK_ENV
         from alpha_lab.research_bridge.service import distribute_idea
 
         available_data = (
             frozenset(args.available_data) if args.available_data else None
         )
+        # ``--require-llm-rerank`` opt-in: surface a clear error when the API
+        # key is missing instead of silently falling back. The env var lives
+        # only for the duration of this call so library callers that do not
+        # set the flag keep the documented fallback behavior.
+        prior_require_env = os.environ.get(REQUIRE_LLM_RERANK_ENV)
+        if bool(getattr(args, "require_llm_rerank", False)):
+            os.environ[REQUIRE_LLM_RERANK_ENV] = "1"
         try:
             result = distribute_idea(
                 vault_root=args.vault_root,
@@ -1151,6 +1168,12 @@ def _handle_idea(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
             )
         except (ValueError, FileExistsError, OSError) as exc:
             parser.error(str(exc))
+        finally:
+            if bool(getattr(args, "require_llm_rerank", False)):
+                if prior_require_env is None:
+                    os.environ.pop(REQUIRE_LLM_RERANK_ENV, None)
+                else:
+                    os.environ[REQUIRE_LLM_RERANK_ENV] = prior_require_env
         print("")
         print("  Workflow : idea-distribute")
         print("  Status   : success")
