@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
+from alpha_lab.research_integrity.contracts import IntegrityCheckResult
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,45 @@ class TimeSeriesSplitContract:
             "target_horizon": self.target_horizon,
             "rebalance_step": self.rebalance_step,
         }
+
+
+def build_strict_split_contract_check_result(
+    contract: TimeSeriesSplitContract,
+    *,
+    object_name: str,
+    module_name: str,
+    usage_phrase: str = "evaluation",
+) -> IntegrityCheckResult:
+    """Build the canonical ``strict_time_series_split_contract`` integrity result.
+
+    Both real-case pipelines (single-factor and model-factor) emit this same
+    pass-status result to document that a chronological IS/OOS split contract
+    was resolved before the downstream step runs. The audit message phrasing
+    is line-specific — ``"evaluation"`` for the single-factor backtest, and
+    ``"model training"`` for the model-factor training step — so the
+    ``usage_phrase`` kwarg preserves that wording without scattering identical
+    builder copies across the codebase.
+
+    The function is intentionally pure: it always returns ``status="pass"``
+    and ``severity="info"``; callers fold the result into their integrity
+    report via ``_record_integrity`` so the resolved IS/OOS window shows up
+    in the run audit trail.
+    """
+    metadata = contract.to_metadata()
+    return IntegrityCheckResult(
+        check_name="strict_time_series_split_contract",
+        status="pass",
+        severity="info",
+        object_name=object_name,
+        module_name=module_name,
+        message=(
+            f"Strict chronological IS/OOS split resolved before {usage_phrase}: "
+            f"IS {metadata['is_start']}..{metadata['is_end']}, "
+            f"OOS {metadata['oos_start']}..{metadata['oos_end']}, "
+            f"embargo={metadata['embargo_days']}."
+        ),
+        metrics=metadata,
+    )
 
 
 def rebalance_frequency_to_step(rebalance_frequency: str | int | None) -> int:

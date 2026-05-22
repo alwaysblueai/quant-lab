@@ -157,7 +157,11 @@ from alpha_lab.web_unified import (
 )
 from alpha_lab.web_unified._models import RunWorkflow, _RunTask
 from alpha_lab.web_unified._run_store import _RunRecord, _RunStore
-from alpha_lab.web_unified._utils import _coerce_finite_or_text, _safe_slug
+from alpha_lab.web_unified._utils import (
+    _coerce_finite_or_text,
+    _safe_slug,
+    _warn_web_config_load,
+)
 
 _BACKEND_SINGLE_FACTOR_CASE_ROOT = Path("configs") / "real_cases" / "single_factor"
 _CLAIMED_BACKEND_CASES_FILENAME = "claimed_backend_cases.json"
@@ -471,7 +475,12 @@ class _UnifiedService:
                     ),
                 )
                 self.run_store.restore_completed(record)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 — see WebUnifiedConfigLoadWarning
+                _warn_web_config_load(
+                    source=manifest_path,
+                    action="restore completed run from manifest",
+                    exc=exc,
+                )
                 continue
 
     def _restore_single_factor_project_slug(self, manifest: Mapping[str, object]) -> str | None:
@@ -1714,7 +1723,12 @@ class _UnifiedService:
         for project_yaml in _iter_project_contracts(root):
             try:
                 project = load_project_config(project_yaml)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 — see WebUnifiedConfigLoadWarning
+                _warn_web_config_load(
+                    source=project_yaml,
+                    action="load project config",
+                    exc=exc,
+                )
                 continue
             paths = _project_paths(self.vault_root, project_yaml.parent.name)
             rows.append(

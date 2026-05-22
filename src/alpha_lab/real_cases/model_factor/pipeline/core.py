@@ -48,6 +48,7 @@ from alpha_lab.research_integrity.leakage_checks import (
 from alpha_lab.research_integrity.reporting import build_integrity_report
 from alpha_lab.splits import (
     TimeSeriesSplitContract,
+    build_strict_split_contract_check_result,
     infer_default_time_series_split_contract,
     rebalance_frequency_to_step,
 )
@@ -98,29 +99,6 @@ class ModelFactorCaseRunResult:
     model_factor_result: ModelFactorBuildResult
     stage_timings: dict[str, float]
     draft_model_source: DraftModelSource | None = None
-
-
-def _strict_split_contract_check(
-    contract: TimeSeriesSplitContract,
-    *,
-    object_name: str,
-    module_name: str,
-) -> IntegrityCheckResult:
-    metadata = contract.to_metadata()
-    return IntegrityCheckResult(
-        check_name="strict_time_series_split_contract",
-        status="pass",
-        severity="info",
-        object_name=object_name,
-        module_name=module_name,
-        message=(
-            "Strict chronological IS/OOS split resolved before model training: "
-            f"IS {metadata['is_start']}..{metadata['is_end']}, "
-            f"OOS {metadata['oos_start']}..{metadata['oos_end']}, "
-            f"embargo={metadata['embargo_days']}."
-        ),
-        metrics=metadata,
-    )
 
 
 def run_model_factor_case(
@@ -474,10 +452,11 @@ def run_model_factor_case(
                 source="model_factor_pipeline",
             )
             _record_integrity(
-                _strict_split_contract_check(
+                build_strict_split_contract_check_result(
                     split_contract,
                     object_name="model_factor_strict_split",
                     module_name="real_cases.model_factor.pipeline",
+                    usage_phrase="model training",
                 )
             )
             data_stage.attach(split_contract=split_contract.to_metadata())

@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from alpha_lab.splits import (
+    build_strict_split_contract_check_result,
     infer_default_time_series_split_contract,
     preflight_split_contract,
     rebalance_frequency_to_step,
@@ -364,3 +365,79 @@ def test_rebalance_frequency_to_step_parses_common_labels():
     assert rebalance_frequency_to_step("W") == 5
     assert rebalance_frequency_to_step("M") == 21
     assert rebalance_frequency_to_step("2W") == 10
+
+
+# ---------------------------------------------------------------------------
+# OPT-P2-6: consolidated strict-split contract integrity-check builder
+#
+# The single-factor and model-factor pipelines used to carry byte-identical
+# helpers that only differed in the audit phrase ("evaluation" vs
+# "model training"). The builder lives in splits.py now; the tests below pin
+# the contract:
+#
+#   * status / severity / check_name fields are stable.
+#   * usage_phrase only affects the human-readable message.
+#   * audit metadata is preserved verbatim from the contract.
+# ---------------------------------------------------------------------------
+
+
+def _build_contract_for_phrase_test() -> object:
+    dates = _dates("2020-01-01", 252)
+    return infer_default_time_series_split_contract(
+        dates,
+        target_horizon=5,
+        rebalance_frequency="W",
+    )
+
+
+def test_strict_split_contract_check_result_single_factor_phrase():
+    contract = _build_contract_for_phrase_test()
+    result = build_strict_split_contract_check_result(
+        contract,
+        object_name="single_factor_strict_split",
+        module_name="real_cases.single_factor.pipeline",
+        usage_phrase="evaluation",
+    )
+
+    assert result.check_name == "strict_time_series_split_contract"
+    assert result.status == "pass"
+    assert result.severity == "info"
+    assert result.object_name == "single_factor_strict_split"
+    assert result.module_name == "real_cases.single_factor.pipeline"
+    # Audit phrasing is verbatim — golden artifacts compare this string.
+    assert (
+        "Strict chronological IS/OOS split resolved before evaluation:"
+        in result.message
+    )
+    assert result.metrics == contract.to_metadata()
+
+
+def test_strict_split_contract_check_result_model_factor_phrase():
+    contract = _build_contract_for_phrase_test()
+    result = build_strict_split_contract_check_result(
+        contract,
+        object_name="model_factor_strict_split",
+        module_name="real_cases.model_factor.pipeline",
+        usage_phrase="model training",
+    )
+
+    assert result.object_name == "model_factor_strict_split"
+    assert result.module_name == "real_cases.model_factor.pipeline"
+    assert (
+        "Strict chronological IS/OOS split resolved before model training:"
+        in result.message
+    )
+
+
+def test_strict_split_contract_check_result_default_phrase_is_evaluation():
+    contract = _build_contract_for_phrase_test()
+    result = build_strict_split_contract_check_result(
+        contract,
+        object_name="default_phrase",
+        module_name="test",
+    )
+
+    # Default kwarg preserves the single-factor legacy phrasing so existing
+    # callers that didn't specify usage_phrase still emit the same audit
+    # string. Pin this so default flips become deliberate.
+    assert "resolved before evaluation:" in result.message

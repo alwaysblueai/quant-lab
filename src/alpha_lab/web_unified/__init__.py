@@ -127,8 +127,12 @@ from alpha_lab.web_unified._templates import _md_render_js as _md_render_js
 from alpha_lab.web_unified._templates import _model_lab_html as _model_lab_html
 
 # Small dependency-free helpers (slug + JSON-value coercion).
+from alpha_lab.web_unified._utils import (
+    WebUnifiedConfigLoadWarning as WebUnifiedConfigLoadWarning,
+)
 from alpha_lab.web_unified._utils import _coerce_finite_or_text as _coerce_finite_or_text
 from alpha_lab.web_unified._utils import _safe_slug as _safe_slug
+from alpha_lab.web_unified._utils import _warn_web_config_load as _warn_web_config_load
 
 _KNOWLEDGE_WRITEBACK_STAGES: frozenset[str] = frozenset({"stage2", "stage3", "run"})
 _KNOWLEDGE_WRITEBACK_CARD_TYPES: frozenset[str] = frozenset(
@@ -1201,8 +1205,12 @@ def _resolve_run_factor_label(run: _RunRecord) -> str:
             factor_name = str(payload.get("factor_name") or "").strip()
             if factor_name:
                 return factor_name
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — see WebUnifiedConfigLoadWarning
+            _warn_web_config_load(
+                source=spec_path,
+                action="resolve factor_name from case spec",
+                exc=exc,
+            )
     return run.case_name
 
 
