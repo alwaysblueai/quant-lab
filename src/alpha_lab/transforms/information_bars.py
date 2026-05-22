@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 
 
 def dollar_bars(ohlcv_df: pd.DataFrame, target_dollar_volume: float) -> pd.DataFrame:
     """Build dollar bars from intraday OHLCV rows."""
-    _require_columns(
+    require_columns(
         ohlcv_df,
         ("datetime", "asset", "open", "high", "low", "close", "volume", "amount"),
         "ohlcv_df",
@@ -22,7 +23,7 @@ def dollar_bars(ohlcv_df: pd.DataFrame, target_dollar_volume: float) -> pd.DataF
 
 def volume_bars(ohlcv_df: pd.DataFrame, target_volume: float) -> pd.DataFrame:
     """Build volume bars from intraday OHLCV rows."""
-    _require_columns(
+    require_columns(
         ohlcv_df,
         ("datetime", "asset", "open", "high", "low", "close", "volume", "amount"),
         "ohlcv_df",
@@ -36,7 +37,7 @@ def volume_bars(ohlcv_df: pd.DataFrame, target_volume: float) -> pd.DataFrame:
 
 def tick_bars(tick_df: pd.DataFrame, target_ticks: int) -> pd.DataFrame:
     """Build tick bars from tick-level rows."""
-    _require_columns(tick_df, ("datetime", "asset"), "tick_df")
+    require_columns(tick_df, ("datetime", "asset"), "tick_df")
     if "price" not in tick_df.columns and "close" not in tick_df.columns:
         raise AlphaLabDataError("tick_df must contain either 'price' or 'close'")
 
@@ -178,7 +179,3 @@ def _build_information_bars(
     )
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

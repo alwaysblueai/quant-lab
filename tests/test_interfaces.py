@@ -107,3 +107,70 @@ def test_validate_rejects_empty_string_factor_name() -> None:
     df.iloc[0, df.columns.get_loc("factor")] = ""
     with pytest.raises(ValueError, match="empty string"):
         validate_factor_output(df)
+
+
+# ---------------------------------------------------------------------------
+# Fingerprint cache hardening (OPT-P0-1)
+#
+# The previous fingerprint only sampled ``(len, value.iat[0])`` and could be
+# bypassed by a caller mutating any row past the first. These tests pin the
+# stronger fingerprint behavior: any meaningful in-place mutation must force
+# re-validation.
+# ---------------------------------------------------------------------------
+
+
+def _larger_canonical() -> pd.DataFrame:
+    """A multi-row frame so mid/last-row mutations are testable."""
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]
+            ),
+            "asset": ["A", "A", "B", "B"],
+            "factor": ["momentum_20d"] * 4,
+            "value": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
+
+
+def test_validate_factor_output_fingerprint_detects_mid_row_value_mutation() -> None:
+    df = _larger_canonical()
+    validate_factor_output(df)  # primes the fingerprint cache
+
+    # Replace a middle row's value with NaN; len + value.iat[0] are unchanged,
+    # but n_value_nan changes, so the fingerprint must invalidate the cache.
+    df.iloc[2, df.columns.get_loc("value")] = float("nan")
+
+    # Validation must run again; the frame still has at least one non-NaN value
+    # so it should pass cleanly. Importantly: it must NOT silently short-circuit.
+    validate_factor_output(df)
+
+    # Now turn every value NaN to make the validator's all-NaN check fire,
+    # proving the cache is being rebuilt rather than reused.
+    df["value"] = float("nan")
+    with pytest.raises(ValueError, match="all NaN"):
+        validate_factor_output(df)
+
+
+def test_validate_factor_output_fingerprint_detects_last_row_replacement() -> None:
+    df = _larger_canonical()
+    validate_factor_output(df)
+
+    # Mutate the boundary row's date to NaT. Old fingerprint only sampled
+    # value.iat[0], which is unchanged; new fingerprint includes date.iat[-1].
+    df.iloc[-1, df.columns.get_loc("date")] = pd.NaT
+    with pytest.raises(ValueError, match="NaT"):
+        validate_factor_output(df)
+
+
+def test_validate_factor_output_fingerprint_detects_duplicate_insertion() -> None:
+    df = _larger_canonical()
+    validate_factor_output(df)
+
+    # Force a duplicate (date, asset, factor) by overwriting the last row with
+    # the first row's coordinates. value.iat[0] is unchanged; new fingerprint
+    # changes via date.iat[-1] and asset.iat[-1].
+    df.iloc[-1, df.columns.get_loc("date")] = df["date"].iat[0]
+    df.iloc[-1, df.columns.get_loc("asset")] = df["asset"].iat[0]
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_factor_output(df)

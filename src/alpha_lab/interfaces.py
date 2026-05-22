@@ -112,10 +112,43 @@ def validate_factor_output(df: pd.DataFrame) -> None:
 
 
 def _validation_fingerprint(df: pd.DataFrame) -> tuple:
+    """Build a cache key that is sensitive to in-place mutation.
+
+    The fingerprint must change whenever a mutation could invalidate any of the
+    checks ``validate_factor_output`` performs (row count, NaN coverage,
+    boundary date/value identity, duplicate-row count). The old fingerprint
+    only sampled ``(len, value.iat[0])``, which a caller could bypass by
+    mutating any row past the first while keeping the length unchanged.
+
+    Cheap O(1)/O(n_columns) summary, computed once per validated frame and
+    cached on ``df.attrs``.
+    """
     n = len(df)
     if n == 0:
-        return (0, None)
-    top = df["value"].iat[0]
-    if isinstance(top, float) and top != top:
-        top = "__nan__"
-    return (n, top)
+        return (0,)
+
+    def _scalar(value: object) -> object:
+        if isinstance(value, float) and value != value:
+            return "__nan__"
+        return value
+
+    value_col = df["value"]
+    date_col = df["date"]
+    asset_col = df["asset"]
+    # ``isna`` count guards against a NaN being introduced (or removed) in any
+    # position without changing the row count.
+    n_value_nan = int(value_col.isna().sum())
+    # Sampling boundary rows and the midpoint catches the bulk of in-place
+    # edits without scanning the full column.
+    mid = n // 2
+    return (
+        n,
+        n_value_nan,
+        _scalar(value_col.iat[0]),
+        _scalar(value_col.iat[-1]),
+        _scalar(value_col.iat[mid]),
+        _scalar(date_col.iat[0]),
+        _scalar(date_col.iat[-1]),
+        _scalar(asset_col.iat[0]),
+        _scalar(asset_col.iat[-1]),
+    )

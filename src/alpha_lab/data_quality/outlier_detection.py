@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 
 
 def detect_price_jumps(
@@ -20,7 +20,7 @@ def detect_price_jumps(
     """
     if threshold <= 0:
         raise ValueError("threshold must be > 0")
-    _require_columns(prices_df, ("date", "asset", "close"), "prices_df")
+    require_columns(prices_df, ("date", "asset", "close"), "prices_df")
 
     out = prices_df.copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
@@ -42,7 +42,7 @@ def filter_zero_volume(
     ``action="flag"`` adds ``is_suspended``.
     ``action="drop"`` removes rows where volume <= 0.
     """
-    _require_columns(prices_df, ("date", "asset", "volume"), "prices_df")
+    require_columns(prices_df, ("date", "asset", "volume"), "prices_df")
     mode = action.strip().lower()
     if mode not in {"flag", "drop"}:
         raise ValueError("action must be 'flag' or 'drop'")
@@ -65,7 +65,7 @@ def detect_stale_prices(
     """Flag assets whose close is unchanged for ``max_identical_days``+ runs."""
     if max_identical_days < 2:
         raise ValueError("max_identical_days must be >= 2")
-    _require_columns(prices_df, ("date", "asset", "close"), "prices_df")
+    require_columns(prices_df, ("date", "asset", "close"), "prices_df")
 
     out = prices_df.copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
@@ -80,7 +80,3 @@ def detect_stale_prices(
     return out
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

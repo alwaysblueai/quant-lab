@@ -5,6 +5,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 from alpha_lab.interfaces import validate_factor_output
 
 
@@ -17,7 +18,7 @@ def compute_ic_by_group(
     """Compute per-date cross-sectional IC by group."""
     validate_factor_output(factor_df)
     validate_factor_output(labels_df)
-    _require_columns(group_df, ("date", "asset", group_col), "group_df")
+    require_columns(group_df, ("date", "asset", group_col), "group_df")
 
     factor_name = _extract_single_name(factor_df, "factor_df")
     label_name = _extract_single_name(labels_df, "labels_df")
@@ -91,7 +92,7 @@ def compute_ic_by_size_bucket(
     """Compute IC by per-date market-cap quantile bucket."""
     if n_buckets < 2:
         raise ValueError("n_buckets must be >= 2")
-    _require_columns(market_cap_df, ("date", "asset"), "market_cap_df")
+    require_columns(market_cap_df, ("date", "asset"), "market_cap_df")
 
     cap_col = _resolve_cap_col(market_cap_df)
     cap = market_cap_df[["date", "asset", cap_col]].copy()
@@ -328,12 +329,6 @@ def _resolve_cap_col(frame: pd.DataFrame) -> str:
     )
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")
-
-
 def _merge_factor_and_label_values(
     factor_df: pd.DataFrame,
     labels_df: pd.DataFrame,
@@ -380,7 +375,7 @@ def _normalize_bucket_frame(bucket_df: pd.DataFrame, *, bucket_col: str) -> pd.D
     required = (
         ("date", "asset", bucket_col) if "asset" in bucket_df.columns else ("date", bucket_col)
     )
-    _require_columns(bucket_df, required, "bucket_df")
+    require_columns(bucket_df, required, "bucket_df")
     out = bucket_df.loc[:, list(required)].copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out = out.dropna(subset=["date"]).copy()

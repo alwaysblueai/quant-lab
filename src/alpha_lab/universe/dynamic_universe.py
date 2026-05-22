@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 
 
 def build_liquidity_universe(
@@ -15,14 +16,14 @@ def build_liquidity_universe(
         raise ValueError("min_adv_pct must be in (0, 100]")
     if lookback < 2:
         raise ValueError("lookback must be >= 2")
-    _require_columns(prices_df, ("date", "asset"), "prices_df")
+    require_columns(prices_df, ("date", "asset"), "prices_df")
 
     panel = prices_df.copy()
     panel["date"] = pd.to_datetime(panel["date"], errors="coerce")
     if "amount" in panel.columns:
         panel["amount"] = pd.to_numeric(panel["amount"], errors="coerce")
     else:
-        _require_columns(panel, ("volume", "close"), "prices_df")
+        require_columns(panel, ("volume", "close"), "prices_df")
         panel["amount"] = pd.to_numeric(panel["volume"], errors="coerce") * pd.to_numeric(
             panel["close"],
             errors="coerce",
@@ -51,7 +52,7 @@ def build_market_cap_universe(
     """Build a dynamic top-market-cap universe."""
     if min_cap_pct <= 0 or min_cap_pct > 100:
         raise ValueError("min_cap_pct must be in (0, 100]")
-    _require_columns(daily_basic_df, ("date", "asset"), "daily_basic_df")
+    require_columns(daily_basic_df, ("date", "asset"), "daily_basic_df")
 
     cap_col = _resolve_cap_col(daily_basic_df)
     panel = daily_basic_df[["date", "asset", cap_col]].copy()
@@ -74,7 +75,7 @@ def combine_universe_filters(*filters: pd.DataFrame) -> pd.DataFrame:
     merged: pd.DataFrame | None = None
     flag_cols: list[str] = []
     for i, filt in enumerate(filters):
-        _require_columns(filt, ("date", "asset", "in_universe"), f"filters[{i}]")
+        require_columns(filt, ("date", "asset", "in_universe"), f"filters[{i}]")
         part = filt[["date", "asset", "in_universe"]].copy()
         part["date"] = pd.to_datetime(part["date"], errors="coerce")
         flag_col = f"in_universe_{i}"
@@ -99,9 +100,3 @@ def _resolve_cap_col(frame: pd.DataFrame) -> str:
     raise AlphaLabDataError(
         "daily_basic_df must contain one of: circ_mv, total_mv, market_cap, value"
     )
-
-
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

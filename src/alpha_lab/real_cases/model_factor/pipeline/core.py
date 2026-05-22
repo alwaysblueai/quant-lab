@@ -591,6 +591,10 @@ def run_model_factor_case(
 
         _emit_progress("运行模型因子评估", 68)
         with diagnostics.stage("evaluate") as evaluate_stage:
+            # Shared-contract call: ``evaluate_single_factor_case`` is the
+            # canonical evaluator for the single-factor line and is reused here
+            # for the model-factor line. ``spec`` is duck-typed; see that
+            # function's docstring for the subset of attributes it reads.
             evaluation_result = evaluate_single_factor_case(
                 prices=prices,
                 factor_df=factor_df,
