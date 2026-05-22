@@ -233,15 +233,29 @@ def build_backend_run_receipt(
     evaluation_profile: str,
     comparison_summary_path: str | Path | None = None,
     command: Sequence[str] = (),
+    contract_ok: bool | None = None,
 ) -> dict[str, object]:
+    """Build a backend-run receipt payload.
+
+    ``contract_ok`` is the unified contract pass/fail flag combining validator
+    and artifact audit. When omitted, it falls back to ``artifact_audit.ok``
+    so callers that don't run a validator (and library tests) keep current
+    behavior.
+    """
+
     run_dir = Path(output_dir).expanduser().resolve()
     manifest = _read_json_object(run_dir / "run_manifest.json")
+    resolved_ok = (
+        bool(contract_ok)
+        if contract_ok is not None
+        else bool(artifact_audit.get("ok"))
+    )
     return {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_backend_run_receipt",
         "contract_version": BACKEND_RUN_CONTRACT_VERSION,
         "workflow": workflow,
-        "status": "success" if bool(artifact_audit.get("ok")) else "failed",
+        "status": "success" if resolved_ok else "failed",
         "generated_at_utc": _utc_now(),
         "case_name": _text(manifest.get("case_name")) or run_dir.name,
         "output_dir": str(run_dir),
@@ -347,16 +361,25 @@ def finalize_backend_contract(
         workflow=workflow,
         draft_source_path=draft_source_path,
     )
+    validation_dict = dict(validation_payload or {})
+    validation_ok_field = validation_dict.get("ok")
+    validation_ok = (
+        bool(validation_ok_field)
+        if isinstance(validation_ok_field, bool)
+        else True
+    )
+    contract_ok = validation_ok and bool(artifact_audit.get("ok"))
     receipt = build_backend_run_receipt(
         workflow=workflow,
         output_dir=run_dir,
         case_spec_path=case_spec_path,
         draft_source_path=draft_source_path,
-        validation_payload=dict(validation_payload or {}),
+        validation_payload=validation_dict,
         artifact_audit=artifact_audit,
         evaluation_profile=evaluation_profile,
         comparison_summary_path=comparison_path,
         command=command,
+        contract_ok=contract_ok,
     )
     receipt_path = write_backend_run_receipt(run_dir, receipt)
     attach_backend_contract_to_manifest(
@@ -364,6 +387,7 @@ def finalize_backend_contract(
         receipt_path=receipt_path,
         comparison_summary_path=comparison_path,
         artifact_audit=artifact_audit,
+        contract_ok=contract_ok,
     )
     return receipt
 
@@ -374,8 +398,13 @@ def attach_backend_contract_to_manifest(
     receipt_path: str | Path,
     comparison_summary_path: str | Path,
     artifact_audit: Mapping[str, object],
+    contract_ok: bool | None = None,
 ) -> None:
-    """Record backend-run sidecar artifacts in run_manifest.json."""
+    """Record backend-run sidecar artifacts in run_manifest.json.
+
+    ``contract_ok`` is the unified contract pass/fail flag combining validator
+    and artifact audit. When omitted, it falls back to ``artifact_audit.ok``.
+    """
 
     run_dir = Path(output_dir).expanduser().resolve()
     manifest_path = run_dir / "run_manifest.json"
@@ -386,9 +415,14 @@ def attach_backend_contract_to_manifest(
     manifest["outputs"] = outputs
     raw_issues = artifact_audit.get("issues")
     issue_count = len(raw_issues) if isinstance(raw_issues, list) else 0
+    resolved_ok = (
+        bool(contract_ok)
+        if contract_ok is not None
+        else bool(artifact_audit.get("ok"))
+    )
     manifest["backend_run_contract"] = {
         "contract_version": BACKEND_RUN_CONTRACT_VERSION,
-        "status": "passed" if bool(artifact_audit.get("ok")) else "failed",
+        "status": "passed" if resolved_ok else "failed",
         "receipt_path": outputs["backend_run_receipt"],
         "comparison_summary_path": outputs["comparison_summary"],
         "audited_at_utc": _utc_now(),

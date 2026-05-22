@@ -740,11 +740,19 @@ def test_detect_research_draft_run_returns_none_when_manifest_missing(
 def _research_factor_code() -> str:
     return (
         "def build_factor(frame):\n"
-        "    return frame['close']\n"
+        "    work = frame.sort_values(['asset', 'date']).copy()\n"
+        "    return work.groupby('asset', sort=False)['close']\\\n"
+        "        .pct_change(5)\\\n"
+        "        .reindex(frame.index)\n"
     )
 
 
-def _write_research_factor(tmp_path: Path, name: str) -> Path:
+def _write_research_factor(
+    tmp_path: Path,
+    name: str,
+    *,
+    code: str | None = None,
+) -> Path:
     factor_dir = tmp_path / "custom_factors" / "research" / name
     factor_dir.mkdir(parents=True)
     factor_json = factor_dir / "factor.json"
@@ -754,10 +762,11 @@ def _write_research_factor(tmp_path: Path, name: str) -> Path:
                 "name": name,
                 "description": "e2e backend contract test factor",
                 "required_columns": ["date", "asset", "close"],
+                "optional_columns": [],
                 "frequency": "daily",
                 "unavailable_data_policy": "return_nan",
                 "pit_assumption": "uses trailing close only",
-                "code": _research_factor_code(),
+                "code": code if code is not None else _research_factor_code(),
                 "provenance": {
                     "idea_id": "20260521T000000Z__e2e-contract",
                     "stage2_payload_sha256": "a" * 64,
@@ -808,6 +817,10 @@ def test_real_case_single_factor_cli_finalizes_contract_for_research_draft(
     audit = receipt["artifact_audit"]
     assert isinstance(audit, dict)
     assert audit["ok"] is True
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    assert validation["ok"] is True
+    assert validation["factor_name"] == factor_name
     manifest = _read_json(output_dir / "run_manifest.json")
     contract = manifest["backend_run_contract"]
     assert isinstance(contract, dict)
@@ -817,6 +830,51 @@ def test_real_case_single_factor_cli_finalizes_contract_for_research_draft(
     assert isinstance(outputs, dict)
     assert str(outputs["backend_run_receipt"]).endswith(BACKEND_RUN_RECEIPT_NAME)
     assert str(outputs["comparison_summary"]).endswith(COMPARISON_SUMMARY_NAME)
+    # P2: render meta reflects the auto-rendered case_report
+    assert (output_dir / "case_report.md").exists()
+    assert manifest.get("rendered_report") is True
+    assert manifest.get("render_status") == "success"
+    rendered_path = manifest.get("rendered_report_path")
+    assert isinstance(rendered_path, str) and rendered_path.endswith("case_report.md")
+
+
+def test_real_case_single_factor_cli_fails_contract_when_validator_rejects_draft(
+    tmp_path: Path,
+) -> None:
+    from alpha_lab.real_cases.single_factor.cli import main as sf_main
+
+    factor_name = "e2e_bad_factor"
+    bad_code = (
+        "def build_factor(frame):\n"
+        "    return frame['close']\n"  # required cols 'date' / 'asset' not referenced
+    )
+    _write_research_factor(tmp_path, factor_name, code=bad_code)
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    _patch_case_to_use_custom_factor(spec_path, factor_name)
+
+    rc = sf_main(
+        ["run", str(spec_path), "--evaluation-profile", "exploratory_screening"]
+    )
+
+    assert rc == 1
+    output_dir = tmp_path / "outputs" / f"e2e_{factor_name}_contract_case"
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["status"] == "failed"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    assert validation["ok"] is False
+    error_codes = {
+        str(cast(Mapping[str, object], err)["code"])
+        for err in cast(list[object], validation["errors"])
+    }
+    assert "required_column_not_checked" in error_codes
+    # Audit may have passed independently; contract still fails because validator failed.
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
 
 
 def test_real_case_single_factor_cli_skips_contract_for_non_research_run(

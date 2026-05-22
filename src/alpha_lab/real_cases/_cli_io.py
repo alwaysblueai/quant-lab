@@ -107,14 +107,14 @@ def finalize_contract_if_research_draft(
         return 0
     case_report = output_dir / "case_report.md"
     if not case_report.exists():
-        try:
-            write_case_report(output_dir, overwrite=False)
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning(
-                "backend contract: case_report render failed for %s: %s",
-                output_dir,
-                exc,
-            )
+        new_render_meta = render_case_report(
+            output_dir=output_dir, enabled=True, overwrite=False
+        )
+        update_run_manifest(
+            output_dir / "run_manifest.json",
+            new_render_meta,
+        )
+    validation_payload = _validate_draft_for_contract(workflow, draft_path)
     receipt = finalize_backend_contract(
         output_dir,
         workflow=workflow,
@@ -122,5 +122,28 @@ def finalize_contract_if_research_draft(
         case_spec_path=case_spec_path,
         evaluation_profile=evaluation_profile,
         command=command,
+        validation_payload=validation_payload,
     )
     return 0 if str(receipt.get("status") or "") == "success" else 1
+
+
+def _validate_draft_for_contract(
+    workflow: BackendRunWorkflow,
+    draft_path: Path,
+) -> dict[str, object]:
+    """Run the draft validator that matches the workflow and return its payload.
+
+    Validation failures still produce a payload (with ``ok=False`` and
+    ``errors``) so the receipt records the issues even when the contract is
+    going to fail.
+    """
+
+    if workflow == "single_factor":
+        from alpha_lab.draft_factor_validation import validate_draft_factor_file
+
+        return validate_draft_factor_file(draft_path).to_payload()
+    if workflow == "model_factor":
+        from alpha_lab.draft_model_validation import validate_draft_model_file
+
+        return validate_draft_model_file(draft_path).to_payload()
+    raise ValueError(f"unsupported backend workflow: {workflow!r}")
