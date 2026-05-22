@@ -1858,6 +1858,18 @@ def _collect_model_lab_run_compare_payload(
         issue_count = contract.get("issue_count")
         if isinstance(issue_count, int) and not isinstance(issue_count, bool):
             metric_row["backend_contract_issue_count"] = issue_count
+        validation_error_count = contract.get("validation_error_count")
+        if isinstance(validation_error_count, int) and not isinstance(
+            validation_error_count, bool
+        ):
+            metric_row["backend_contract_validation_error_count"] = (
+                validation_error_count
+            )
+        artifact_issue_count = contract.get("artifact_issue_count")
+        if isinstance(artifact_issue_count, int) and not isinstance(
+            artifact_issue_count, bool
+        ):
+            metric_row["backend_contract_artifact_issue_count"] = artifact_issue_count
 
     return {
         "top_features": _extract_model_factor_top_features(run, top_k=top_k_features),

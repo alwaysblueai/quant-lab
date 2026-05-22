@@ -388,6 +388,7 @@ def finalize_backend_contract(
         comparison_summary_path=comparison_path,
         artifact_audit=artifact_audit,
         contract_ok=contract_ok,
+        validation_payload=validation_dict,
     )
     return receipt
 
@@ -399,11 +400,18 @@ def attach_backend_contract_to_manifest(
     comparison_summary_path: str | Path,
     artifact_audit: Mapping[str, object],
     contract_ok: bool | None = None,
+    validation_payload: Mapping[str, object] | None = None,
 ) -> None:
     """Record backend-run sidecar artifacts in run_manifest.json.
 
     ``contract_ok`` is the unified contract pass/fail flag combining validator
     and artifact audit. When omitted, it falls back to ``artifact_audit.ok``.
+
+    The recorded ``issue_count`` is the **total** count across validator
+    errors and artifact-audit issues, so a validator-only failure still
+    surfaces a non-zero count. ``validation_error_count`` and
+    ``artifact_issue_count`` expose the two components for callers (e.g.
+    Web compare) that want to attribute the failure.
     """
 
     run_dir = Path(output_dir).expanduser().resolve()
@@ -414,7 +422,12 @@ def attach_backend_contract_to_manifest(
     outputs["comparison_summary"] = str(Path(comparison_summary_path).expanduser().resolve())
     manifest["outputs"] = outputs
     raw_issues = artifact_audit.get("issues")
-    issue_count = len(raw_issues) if isinstance(raw_issues, list) else 0
+    artifact_issue_count = len(raw_issues) if isinstance(raw_issues, list) else 0
+    validation_error_count = 0
+    if validation_payload is not None:
+        raw_errors = validation_payload.get("errors")
+        if isinstance(raw_errors, list):
+            validation_error_count = len(raw_errors)
     resolved_ok = (
         bool(contract_ok)
         if contract_ok is not None
@@ -426,7 +439,9 @@ def attach_backend_contract_to_manifest(
         "receipt_path": outputs["backend_run_receipt"],
         "comparison_summary_path": outputs["comparison_summary"],
         "audited_at_utc": _utc_now(),
-        "issue_count": issue_count,
+        "issue_count": artifact_issue_count + validation_error_count,
+        "artifact_issue_count": artifact_issue_count,
+        "validation_error_count": validation_error_count,
     }
     _write_json(manifest_path, manifest)
 

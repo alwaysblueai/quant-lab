@@ -641,6 +641,8 @@ def test_finalize_backend_contract_writes_sidecars_and_manifest_block(
     assert isinstance(contract, dict)
     assert contract["status"] == "passed"
     assert contract["issue_count"] == 0
+    assert contract["artifact_issue_count"] == 0
+    assert contract["validation_error_count"] == 0
 
 
 def test_finalize_marks_failure_when_required_artifact_missing(tmp_path: Path) -> None:
@@ -669,7 +671,49 @@ def test_finalize_marks_failure_when_required_artifact_missing(tmp_path: Path) -
     contract = manifest["backend_run_contract"]
     assert isinstance(contract, dict)
     assert contract["status"] == "failed"
-    assert int(contract["issue_count"]) >= 1  # type: ignore[arg-type]
+    assert int(cast(int, contract["issue_count"])) >= 1
+    assert int(cast(int, contract["artifact_issue_count"])) >= 1
+    assert contract["validation_error_count"] == 0
+
+
+def test_finalize_marks_failure_when_only_validator_fails(tmp_path: Path) -> None:
+    """Validator-only failure must surface non-zero ``issue_count`` so the Web
+    compare summary does not show 'failed with 0 issues'."""
+
+    factor_json = _write_factor_draft(tmp_path)
+    run_dir = _make_single_factor_run(tmp_path, factor_json=factor_json)
+    write_comparison_summary(run_dir, workflow="single_factor")
+    case_spec = tmp_path / "configs" / "real_cases" / "single_factor" / "demo.yaml"
+    case_spec.parent.mkdir(parents=True)
+    case_spec.write_text("name: demo\n", encoding="utf-8")
+
+    receipt = finalize_backend_contract(
+        run_dir,
+        workflow="single_factor",
+        draft_source_path=factor_json,
+        case_spec_path=case_spec,
+        evaluation_profile="exploratory_screening",
+        validation_payload={
+            "ok": False,
+            "errors": [
+                {"severity": "error", "code": "missing_keys", "message": "x"},
+                {"severity": "error", "code": "unsafe_call", "message": "y"},
+            ],
+            "warnings": [],
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is True  # only validator failed, artifact audit was clean
+    manifest = _read_json(run_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    assert contract["artifact_issue_count"] == 0
+    assert contract["validation_error_count"] == 2
+    assert contract["issue_count"] == 2
 
 
 # ----------------------------------------------------------------------------
@@ -875,6 +919,10 @@ def test_real_case_single_factor_cli_fails_contract_when_validator_rejects_draft
     contract = manifest["backend_run_contract"]
     assert isinstance(contract, dict)
     assert contract["status"] == "failed"
+    assert int(cast(int, contract["validation_error_count"])) >= 1
+    assert int(cast(int, contract["issue_count"])) >= int(
+        cast(int, contract["validation_error_count"])
+    )
 
 
 def test_real_case_single_factor_cli_exports_contract_sidecars_to_vault(
