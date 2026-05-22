@@ -523,6 +523,7 @@ def migrate_auto_exports(
     experiments = root / "50_experiments"
     rows: dict[str, list[object]] = {
         "will_move": [],
+        "will_move_legacy_no_hash": [],
         "will_skip_no_marker": [],
         "will_skip_manually_edited": [],
     }
@@ -545,12 +546,19 @@ def migrate_auto_exports(
             frontmatter.get("source_content_sha256")
             or frontmatter.get("body_sha256")
         )
-        if expected_body_sha is None or expected_body_sha != sha256_text(body):
+        # Hash present and mismatched -> body was edited post-export; skip.
+        # Hash absent -> legacy pipeline_auto card written before body
+        # hashes were emitted; still eligible to migrate, but surfaced in a
+        # dedicated bucket so callers can audit which moves had no integrity
+        # check.
+        if expected_body_sha is not None and expected_body_sha != sha256_text(body):
             rows["will_skip_manually_edited"].append(str(path))
             manual_review.append(str(path))
             continue
         target = archive_root / path.relative_to(experiments)
         rows["will_move"].append({"source": str(path), "target": str(target)})
+        if expected_body_sha is None:
+            rows["will_move_legacy_no_hash"].append(str(path))
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(path), str(target))

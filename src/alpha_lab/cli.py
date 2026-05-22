@@ -1003,13 +1003,14 @@ def build_unified_parser() -> argparse.ArgumentParser:
         required=True,
         help="Quant-knowledge vault root.",
     )
-    archive_migrate.add_argument(
+    archive_migrate_mode = archive_migrate.add_mutually_exclusive_group()
+    archive_migrate_mode.add_argument(
         "--dry-run",
         action="store_true",
         default=True,
-        help="Classify without moving files.",
+        help="Classify without moving files (default).",
     )
-    archive_migrate.add_argument(
+    archive_migrate_mode.add_argument(
         "--apply",
         action="store_true",
         help="Actually move will_move cards and write migration manifests.",

@@ -281,6 +281,45 @@ def test_migrate_auto_exports_skips_manually_edited_marker_card(
     assert result["will_move"] == []
 
 
+def test_migrate_auto_exports_moves_legacy_card_without_body_hash(
+    tmp_path: Path,
+) -> None:
+    # Legacy pipeline_auto cards written before body hashes were emitted
+    # carry the marker but no source_content_sha256 / body_sha256. The
+    # migration command must move them rather than treating absent hashes
+    # as evidence of manual editing.
+    vault = tmp_path / "vault"
+    card = vault / "50_experiments" / "Exp - legacy.md"
+    card.parent.mkdir(parents=True)
+    card.write_text(
+        "---\n"
+        "type: experiment\n"
+        "generated_by: alpha_lab\n"
+        "export_kind: pipeline_auto\n"
+        "---\n\n"
+        "# Legacy auto export\n\n"
+        "no body hash recorded\n",
+        encoding="utf-8",
+    )
+
+    preview = migrate_auto_exports(vault_root=vault, dry_run=True)
+
+    assert preview["will_skip_manually_edited"] == []
+    assert str(card) in preview["will_move_legacy_no_hash"]
+    will_move = preview["will_move"]
+    assert isinstance(will_move, list) and len(will_move) == 1
+    assert will_move[0]["source"] == str(card)
+    assert card.exists()
+
+    applied = migrate_auto_exports(vault_root=vault, dry_run=False)
+
+    assert applied["will_skip_manually_edited"] == []
+    assert str(card) in applied["will_move_legacy_no_hash"]
+    assert not card.exists()
+    moved = vault / "50_experiments" / "_archived_auto_exports" / "Exp - legacy.md"
+    assert moved.exists()
+
+
 def test_archive_preview_does_not_use_recursive_walk(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
