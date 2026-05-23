@@ -32,11 +32,21 @@ def _merge_dual_scope_report_metrics(
 
     metrics["split_semantics"] = "factor_time_series_holdout"
     metrics["split_semantics_label"] = "Alpha-Lab: IS/OOS = 因子时序样本内/外"
-    metrics["metric_scope"] = "oos" if full_result is not None else "full_sample"
+    # A split contract means the headline ``result`` is OOS-gated regardless of
+    # whether the full-sample/IS report paths were run. When those paths are
+    # suppressed by profile (e.g. exploratory_screening), keep ``metric_scope=oos``
+    # and mark the report scope ``suppressed_by_profile`` rather than mislabeling
+    # it ``full_sample`` (which would imply the headline covers the whole sample).
+    has_split = oos_result.split_contract is not None
+    metrics["metric_scope"] = "oos" if has_split else "full_sample"
     metrics["primary_metric_scope"] = metrics["metric_scope"]
     if full_result is None or full_row is None:
-        metrics["report_metric_scope"] = "full_sample"
-        metrics["report_timeseries_scope"] = "full_sample"
+        if has_split:
+            metrics["report_metric_scope"] = "suppressed_by_profile"
+            metrics["report_timeseries_scope"] = "oos"
+        else:
+            metrics["report_metric_scope"] = "full_sample"
+            metrics["report_timeseries_scope"] = "full_sample"
         return
 
     metrics["report_metric_scope"] = "full_sample_with_oos_parentheses"
