@@ -50,6 +50,20 @@ class AlphaLabExperimentError(AlphaLabError, RuntimeError):
     """
 
 
+class AlphaLabMemoryError(AlphaLabError, MemoryError):
+    """Raised when a run's resident memory exceeds its configured budget.
+
+    This is a *soft* guard: a :class:`RunMemoryMonitor` samples RSS at stage
+    boundaries and raises this when the peak exceeds ``ALPHA_LAB_MAX_RSS_MB``, so
+    a run fails with an auditable, attributable error instead of being silently
+    killed by the OS OOM-killer. Because sampling is periodic, a single large
+    allocation between samples can still trip the OS limit first; the budget
+    should therefore be set below the host's hard memory limit.
+
+    Inherits from ``MemoryError`` so generic memory handlers still match.
+    """
+
+
 class VaultWriteError(AlphaLabError, PermissionError):
     """Raised when a vault write would land outside the authorized root.
 

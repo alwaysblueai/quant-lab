@@ -46,6 +46,7 @@ from alpha_lab.research_integrity.leakage_checks import (
     check_no_future_dates_in_input,
 )
 from alpha_lab.research_integrity.reporting import build_integrity_report
+from alpha_lab.run_memory import RunMemoryMonitor
 from alpha_lab.signal_transforms import (
     apply_min_coverage_gate,
     rank_cross_section,
@@ -1003,12 +1004,16 @@ def run_single_factor_case(
     evaluation_config = get_research_evaluation_config(evaluation_profile)
     _emit_progress("实验合同与评估配置已加载", 10)
 
+    memory_monitor = RunMemoryMonitor.from_env(label=spec.name)
+    memory_monitor.sample("run_start")
+
     _emit_progress("加载行情与可选股票池", 15)
-    bundle = (
-        input_bundle
-        if input_bundle is not None
-        else load_standard_inputs(spec, evaluation_profile=evaluation_profile)
-    )
+    with memory_monitor.stage("load_inputs"):
+        bundle = (
+            input_bundle
+            if input_bundle is not None
+            else load_standard_inputs(spec, evaluation_profile=evaluation_profile)
+        )
     _ensure_bundle_compatible(bundle, spec=spec)
     universe_mask = bundle.universe_mask
     prices_all = bundle.prices_all
@@ -1113,21 +1118,22 @@ def run_single_factor_case(
     )
 
     _emit_progress("运行评估与完整性检查", 68)
-    evaluation_result = evaluate_single_factor_case(
-        prices=prices,
-        factor_df=factor_df,
-        raw_factor_df=raw_factor_df,
-        spec=spec,
-        coverage_by_date=coverage_by_date,
-        neutralization_summary=neutral_diag,
-        precomputed_forward_labels=bundle.base_feature_cache.forward_labels_by_horizon,
-        evaluation_config=evaluation_config,
-        split_contract=split_contract,
-        progress_callback=lambda message, percent: _emit_progress(
-            message,
-            min(83, 68 + max(0, min(int(percent), 100)) * 15 // 100),
-        ),
-    )
+    with memory_monitor.stage("evaluate"):
+        evaluation_result = evaluate_single_factor_case(
+            prices=prices,
+            factor_df=factor_df,
+            raw_factor_df=raw_factor_df,
+            spec=spec,
+            coverage_by_date=coverage_by_date,
+            neutralization_summary=neutral_diag,
+            precomputed_forward_labels=bundle.base_feature_cache.forward_labels_by_horizon,
+            evaluation_config=evaluation_config,
+            split_contract=split_contract,
+            progress_callback=lambda message, percent: _emit_progress(
+                message,
+                min(83, 68 + max(0, min(int(percent), 100)) * 15 // 100),
+            ),
+        )
     for check in evaluation_result.experiment_result.integrity_checks:
         _record_integrity(check)
     _record_integrity(
@@ -1176,6 +1182,9 @@ def run_single_factor_case(
         defer_vault_export=defer_vault_export,
     )
     _emit_progress("实验产物导出完成", 90)
+
+    memory_monitor.sample("artifacts_exported")
+    memory_monitor.write_resource_usage(output_dir)
 
     if fast_screen_artifact_root is not None:
         try:
