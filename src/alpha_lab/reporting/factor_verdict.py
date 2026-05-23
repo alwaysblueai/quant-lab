@@ -14,6 +14,7 @@ from alpha_lab.key_metrics_contracts import (
     project_tail_risk_metrics,
     project_uncertainty_evidence_metrics,
 )
+from alpha_lab.reporting._shared import finalize_reasons
 from alpha_lab.reporting.neutralization_comparison import (
     EXPOSURE_DRIVEN_FLAG,
     MATERIAL_REDUCTION_FLAG,
@@ -435,7 +436,7 @@ def build_factor_verdict(
 
     if critical_failures:
         label = "Fails basic robustness"
-        reasons = _finalize_reasons(
+        reasons = finalize_reasons(
             critical_failures,
             neutralization_concern_reasons,
             weak_evidence,
@@ -454,7 +455,7 @@ def build_factor_verdict(
         positives_without_uncertainty = tuple(
             token for token in positives if token not in uncertainty_positive
         )
-        reasons = _finalize_reasons(
+        reasons = finalize_reasons(
             uncertainty_positive,
             neutralization_positive_reasons,
             positives_without_uncertainty,
@@ -462,7 +463,7 @@ def build_factor_verdict(
         )
     elif positive_score >= 3 and not has_weak_core_signal:
         label = "Promising but fragile"
-        reasons = _finalize_reasons(
+        reasons = finalize_reasons(
             neutralization_positive_reasons,
             positives[:2],
             neutralization_concern_reasons,
@@ -473,7 +474,7 @@ def build_factor_verdict(
         )
     elif positive_score <= 1 or has_weak_core_signal:
         label = "Weak / noisy"
-        reasons = _finalize_reasons(
+        reasons = finalize_reasons(
             weak_evidence,
             neutralization_concern_reasons,
             concerns,
@@ -483,7 +484,7 @@ def build_factor_verdict(
         )
     else:
         label = "Mixed evidence"
-        reasons = _finalize_reasons(
+        reasons = finalize_reasons(
             neutralization_positive_reasons,
             positives,
             neutralization_concern_reasons,
@@ -628,16 +629,3 @@ def _short_join(values: Sequence[str], *, max_items: int) -> str:
     return f"{prefix}, +{len(values) - max_items} more"
 
 
-def _finalize_reasons(*groups: Sequence[str], max_items: int) -> tuple[str, ...]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        for reason in group:
-            token = reason.strip()
-            if not token or token in seen:
-                continue
-            merged.append(token)
-            seen.add(token)
-            if len(merged) >= max_items:
-                return tuple(merged)
-    return tuple(merged)

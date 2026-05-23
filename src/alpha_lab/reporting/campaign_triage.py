@@ -11,6 +11,7 @@ from alpha_lab.key_metrics_contracts import (
     PromotionGateMetrics,
     project_promotion_gate_metrics,
 )
+from alpha_lab.reporting._shared import finalize_reasons
 from alpha_lab.reporting.neutralization_comparison import (
     EXPOSURE_DRIVEN_FLAG,
     MATERIAL_REDUCTION_FLAG,
@@ -373,10 +374,10 @@ def build_campaign_triage(
     reasons: tuple[str, ...]
     if blockers:
         label = "Drop for now"
-        reasons = _finalize_reasons(blockers, concerns, positives, max_items=5)
+        reasons = finalize_reasons(blockers, concerns, positives, max_items=5)
     elif advance_gate:
         label = "Advance to Level 2"
-        reasons = _finalize_reasons(positives, max_items=5)
+        reasons = finalize_reasons(positives, max_items=5)
     elif (
         (has_strong_verdict or has_fragile_verdict)
         and not neutralization_material
@@ -386,16 +387,16 @@ def build_campaign_triage(
         and not ic_decay_concern
     ):
         label = "Strong Level 1 candidate"
-        reasons = _finalize_reasons(positives, concerns, max_items=5)
+        reasons = finalize_reasons(positives, concerns, max_items=5)
     elif (
         fragility_signal_count >= thresholds.fragile_signal_count_for_fragile_min
         or has_fragile_verdict
     ):
         label = "Fragile / monitor"
-        reasons = _finalize_reasons(concerns, positives, max_items=5)
+        reasons = finalize_reasons(concerns, positives, max_items=5)
     else:
         label = "Needs refinement"
-        reasons = _finalize_reasons(concerns, positives, max_items=5)
+        reasons = finalize_reasons(concerns, positives, max_items=5)
 
     if not reasons:
         reasons = ("insufficient diagnostics for campaign triage",)
@@ -463,23 +464,8 @@ def _build_decision(
     )
 
 
-def _finalize_reasons(*groups: Sequence[str], max_items: int) -> tuple[str, ...]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        for reason in group:
-            token = reason.strip()
-            if not token or token in seen:
-                continue
-            out.append(token)
-            seen.add(token)
-            if len(out) >= max_items:
-                return tuple(out)
-    return tuple(out)
-
-
 def _dedupe(values: Sequence[str]) -> tuple[str, ...]:
-    return _finalize_reasons(values, max_items=10_000)
+    return finalize_reasons(values, max_items=10_000)
 
 
 def _descending_for_sort(value: float | None) -> float:

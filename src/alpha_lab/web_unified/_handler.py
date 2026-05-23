@@ -37,6 +37,15 @@ _MAX_REQUEST_BODY_BYTES: int = 2 * 1024 * 1024
 
 
 class _UnifiedRequestHandler(BaseHTTPRequestHandler):
+    """HTTP handler for the unified web UI.
+
+    ``do_GET`` / ``do_POST`` / ``do_PUT`` / ``do_PATCH`` / ``do_DELETE``
+    are dispatched by name from ``BaseHTTPRequestHandler.handle_one_request``
+    based on the request method; they have no visible Python callers.
+    ``log_message`` is the base class's per-request stderr-logging hook,
+    overridden here to a no-op so we don't spam access logs.
+    """
+
     svc: _UnifiedService
 
     def do_GET(self) -> None:  # noqa: N802
@@ -186,6 +195,18 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
             try:
                 content_type, content = _load_model_lab_artifact_fixture(parts[4], parts[6])
                 self._send_text(content, content_type=content_type)
+            except Exception as exc:
+                self._send_error_payload(exc)
+            return
+        if (
+            len(parts) == 6
+            and parts[0] == "api"
+            and parts[1] == "workflows"
+            and parts[3] == "runs"
+            and parts[5] == "archive-preview"
+        ):
+            try:
+                self._send_json(self.svc.archive_preview(parts[2], parts[4]))
             except Exception as exc:
                 self._send_error_payload(exc)
             return
@@ -367,6 +388,18 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     status=HTTPStatus.CREATED,
                 )
                 return
+            if (
+                len(parts) == 6
+                and parts[0] == "api"
+                and parts[1] == "workflows"
+                and parts[3] == "runs"
+                and parts[5] == "archive-draft"
+            ):
+                self._send_json(
+                    self.svc.archive_draft(parts[2], parts[4], payload),
+                    status=HTTPStatus.CREATED,
+                )
+                return
             if parsed.path == "/api/vault/preflight":
                 self._send_json(self.svc.run_preflight_check(payload))
                 return
@@ -456,6 +489,9 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     return
                 if len(parts) == 4 and parts[3] == "cases":
                     self._send_json(self.svc.create_case(slug, payload), status=HTTPStatus.CREATED)
+                    return
+                if len(parts) == 5 and parts[3] == "cases" and parts[4] == "claim":
+                    self._send_json(self.svc.claim_backend_case(slug, payload))
                     return
                 if len(parts) == 4 and parts[3] == "runs":
                     self._send_json(self.svc.submit_run(slug, payload), status=HTTPStatus.CREATED)

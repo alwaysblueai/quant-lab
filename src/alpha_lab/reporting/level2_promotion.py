@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
 from alpha_lab.key_metrics_contracts import project_promotion_gate_metrics
+from alpha_lab.reporting._shared import finalize_reasons
 from alpha_lab.reporting.neutralization_comparison import (
     EXPOSURE_DRIVEN_FLAG,
     MATERIAL_REDUCTION_FLAG,
@@ -264,15 +265,15 @@ def build_level2_promotion(
     )
 
     if blockers:
-        reasons = _finalize_reasons(blockers, concerns, supports, max_items=6)
+        reasons = finalize_reasons(blockers, concerns, supports, max_items=6)
         return Level2PromotionDecision(
             label="Blocked from Level 2",
             reasons=reasons or tuple(blockers),
-            blockers=_finalize_reasons(blockers, max_items=6),
+            blockers=finalize_reasons(blockers, max_items=6),
         )
 
     if promote_gate:
-        reasons = _finalize_reasons(supports, max_items=6)
+        reasons = finalize_reasons(supports, max_items=6)
         if not reasons:
             reasons = ("evidence satisfies Level 2 promotion gate",)
         return Level2PromotionDecision(
@@ -281,7 +282,7 @@ def build_level2_promotion(
             blockers=(),
         )
 
-    reasons = _finalize_reasons(concerns, supports, max_items=6)
+    reasons = finalize_reasons(concerns, supports, max_items=6)
     if not reasons:
         reasons = ("additional robustness evidence is required before Level 2",)
     return Level2PromotionDecision(
@@ -289,21 +290,6 @@ def build_level2_promotion(
         reasons=reasons,
         blockers=(),
     )
-
-
-def _finalize_reasons(*groups: Sequence[str], max_items: int) -> tuple[str, ...]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        for reason in group:
-            token = reason.strip()
-            if not token or token in seen:
-                continue
-            merged.append(token)
-            seen.add(token)
-            if len(merged) >= max_items:
-                return tuple(merged)
-    return tuple(merged)
 
 
 def _append_extended_promotion_signals(

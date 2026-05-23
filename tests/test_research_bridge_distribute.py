@@ -70,7 +70,7 @@ def _build_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     (workspace / "custom_factors" / "research" / "alpha_one").mkdir(parents=True)
     (workspace / "custom_factors" / "promoted" / "alpha_promoted").mkdir(parents=True)
-    (workspace / "model_candidates" / "research" / "ridge_smoke").mkdir(parents=True)
+    (workspace / "custom_models" / "research" / "ridge_smoke").mkdir(parents=True)
     (workspace / "configs" / "real_cases" / "single_factor").mkdir(parents=True)
     (workspace / "configs" / "real_cases" / "model_factor").mkdir(parents=True)
     (workspace / "configs" / "real_cases" / "single_factor" / "alpha_one_v1.yaml").write_text(
@@ -98,8 +98,8 @@ def _ctx(*, lab: Lab, draft_dir: Path, vault_root: Path) -> PromptContext:
         codebase=CodebaseSnapshot(
             factors_promoted=("alpha_promoted",),
             factors_research=("alpha_one",),
-            model_candidates_promoted=(),
-            model_candidates_research=("ridge_smoke",),
+            custom_models_promoted=(),
+            custom_models_research=("ridge_smoke",),
             single_factor_cases=("alpha_one_v1",),
             model_factor_cases=(),
         ),
@@ -315,12 +315,50 @@ def test_render_move_lines_indents_continuation() -> None:
     assert _render_move_lines("\n  \n") == []
 
 
+def test_distribute_idea_resolves_workspace_root_up_to_custom_factors(
+    tmp_path: Path,
+) -> None:
+    """distribute_idea should resolve workspace_root to a real custom_factors anchor.
+
+    Bug fingerprint: web frontend default `--workspace-root .` launched from
+    `/mnt/c/Users/<name>` resolved to that home dir, which has no
+    `custom_factors/`, so codebase_snapshot was empty and Stage 1 reviewer
+    couldn't see existing factors. Walk up to the nearest ancestor that does
+    have `custom_factors/`.
+    """
+
+    from alpha_lab.research_bridge.service import (
+        _resolve_distribute_workspace_root,
+    )
+
+    repo_root = tmp_path / "repo"
+    (repo_root / "custom_factors" / "research" / "demo").mkdir(parents=True)
+    nested = repo_root / "scripts" / "subdir"
+    nested.mkdir(parents=True)
+
+    # Caller's "." resolves up to the repo root.
+    resolved = _resolve_distribute_workspace_root(nested)
+    assert resolved == repo_root.resolve()
+
+    # If the path itself contains custom_factors/, use as-is.
+    resolved_direct = _resolve_distribute_workspace_root(repo_root)
+    assert resolved_direct == repo_root.resolve()
+
+    # Sibling that isn't a repo ancestor still walks up via start path first.
+    sibling_repo = tmp_path / "other_repo"
+    (sibling_repo / "custom_factors" / "research").mkdir(parents=True)
+    nested_in_sibling = sibling_repo / "deeply" / "nested"
+    nested_in_sibling.mkdir(parents=True)
+    resolved_sibling = _resolve_distribute_workspace_root(nested_in_sibling)
+    assert resolved_sibling == sibling_repo.resolve()
+
+
 def test_codebase_snapshot_walks_research_and_promoted(tmp_path: Path) -> None:
     workspace = _build_workspace(tmp_path)
     snap = build_codebase_snapshot(workspace)
     assert "alpha_one" in snap.factors_research
     assert "alpha_promoted" in snap.factors_promoted
-    assert "ridge_smoke" in snap.model_candidates_research
+    assert "ridge_smoke" in snap.custom_models_research
     assert "alpha_one_v1" in snap.single_factor_cases
     assert snap.model_factor_cases == ()
     assert "name" in snap.factor_json_required_keys
@@ -335,7 +373,7 @@ def test_codebase_snapshot_walks_research_and_promoted(tmp_path: Path) -> None:
 def test_codebase_snapshot_handles_missing_dirs(tmp_path: Path) -> None:
     snap = build_codebase_snapshot(tmp_path / "does_not_exist")
     assert snap.factors_research == ()
-    assert snap.model_candidates_research == ()
+    assert snap.custom_models_research == ()
     assert snap.single_factor_cases == ()
 
 

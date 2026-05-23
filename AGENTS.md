@@ -109,19 +109,19 @@
 - Only `model_candidate_payload` (and its embedded `case_spec_payload`) and explicit
   local paths/commands from the user are machine facts. If prose conflicts with
   `case_spec_payload`, use `case_spec_payload` and record the conflict in
-  `model_candidates/research/<candidate_name>/research_log.md`.
+  `custom_models/research/<candidate_name>/research_log.md`.
 - Allowed writes are limited to:
-  - `model_candidates/research/<candidate_name>/model_candidate.json`
-  - `model_candidates/research/<candidate_name>/research_log.md`
+  - `custom_models/research/<candidate_name>/model_candidate.json`
+  - `custom_models/research/<candidate_name>/research_log.md`
   - the matching `configs/real_cases/model_factor/<candidate_name>_vN.yaml`
 - Do not create one-off scripts, notebooks, scattered `.py` files, promoted
   candidates, frontend registrations, custom feature builders, or custom
   estimator code during Stage 3 draft-model runs. v1 only supports spec-variant
   candidates.
 - Before running a case, validate the candidate with:
-  - `uv run --no-sync --frozen alpha-lab validate-draft-model model_candidates/research/<candidate_name>/model_candidate.json`
+  - `uv run --no-sync --frozen alpha-lab validate-draft-model custom_models/research/<candidate_name>/model_candidate.json`
 - Run experiments only through:
-  - `uv run --no-sync --frozen alpha-lab real-case model-factor run <case.yaml> --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json ...`
+  - `uv run --no-sync --frozen alpha-lab real-case model-factor run <case.yaml> --draft-model-candidate custom_models/research/<candidate_name>/model_candidate.json ...`
 - If the Web Model Lab is available, the `/model-lab` Draft Candidates panel may
   be used as the orchestrator, but it must still perform the same save ->
   validate -> materialize-spec -> standard run sequence and preserve artifact
@@ -180,9 +180,9 @@ each layer owns its own contract; this table is what makes that layout legible.
 | Templates | `src/alpha_lab/real_cases/model_factor/templates.py` |
 | CLI | `src/alpha_lab/real_cases/model_factor/cli.py` |
 | Benchmark runner | `src/alpha_lab/real_cases/model_factor/benchmark.py` |
-| Candidate loader | `src/alpha_lab/model_candidates.py` |
+| Candidate loader | `src/alpha_lab/custom_models.py` |
 | Draft validator | `src/alpha_lab/draft_model_validation.py` |
-| Persisted candidate defs | `model_candidates/{research,promoted}/<name>/model_candidate.json` |
+| Persisted candidate defs | `custom_models/{research,promoted}/<name>/model_candidate.json` |
 | Configs | `configs/real_cases/model_factor/*.yaml` |
 | Web UI fixtures | `src/alpha_lab/dev_fixtures/model_lab_overview/*.json` |
 | Workflow docs | `docs/backend_draft_model_workflow.md`, `docs/model_factor_performance_roadmap.md`, `docs/model_factor_metric_inventory.md`, `docs/templates/model_lab_stage3_backend_draft_prompt.md`, `docs/templates/codex_gui_model_stage3_execution_envelope.md` |

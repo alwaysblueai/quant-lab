@@ -229,7 +229,7 @@ def validate_draft_model_file(
 
     if candidate_name and not allow_non_research_path:
         expected_tail = (
-            "model_candidates",
+            "custom_models",
             "research",
             candidate_name,
             "model_candidate.json",
@@ -239,7 +239,7 @@ def validate_draft_model_file(
                 _error(
                     "path_scope",
                     "draft model must live at "
-                    f"model_candidates/research/{candidate_name}/model_candidate.json",
+                    f"custom_models/research/{candidate_name}/model_candidate.json",
                 )
             )
 

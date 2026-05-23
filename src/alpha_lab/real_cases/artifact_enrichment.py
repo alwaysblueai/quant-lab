@@ -5,6 +5,13 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+from alpha_lab.reporting._shared import (
+    annualized_from_series as _annualized_from_series,
+)
+from alpha_lab.reporting._shared import (
+    periods_per_year as _periods_per_year,
+)
+
 _BACKTEST_DERIVED_FIELDS: tuple[str, ...] = (
     "annualized_return",
     "annualized_volatility",
@@ -415,24 +422,6 @@ def _nav_points(series: pd.Series) -> list[list[object]]:
     return [[idx.strftime("%Y-%m-%d"), float(value)] for idx, value in nav.items()]
 
 
-def _annualized_from_series(series: pd.Series, periods_per_year: int) -> float | None:
-    clean = pd.to_numeric(series, errors="coerce").dropna()
-    if clean.empty:
-        return None
-    nav = (1.0 + clean).cumprod()
-    total_return = float(nav.iloc[-1] - 1.0)
-    return float((1.0 + total_return) ** (periods_per_year / len(clean)) - 1.0)
-
-
-def _periods_per_year(rebalance_frequency: str) -> int:
-    freq = (rebalance_frequency or "").strip().upper()
-    if freq.startswith("D"):
-        return 252
-    if freq.startswith("W"):
-        return 52
-    if freq.startswith("M"):
-        return 12
-    return 252
 
 
 def _rebalance_step(rebalance_frequency: str) -> int:

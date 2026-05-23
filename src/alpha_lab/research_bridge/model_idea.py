@@ -25,6 +25,7 @@ from alpha_lab.factor_recipe import factor_registry
 from alpha_lab.model_factor import list_model_contracts
 from alpha_lab.real_cases.model_factor.spec import load_model_factor_case_spec
 from alpha_lab.real_cases.single_factor.spec import load_single_factor_case_spec
+from alpha_lab.research_bridge._text_utils import idea_keywords
 from alpha_lab.research_bridge.embeddings import SearchResult, VaultEmbeddings
 from alpha_lab.research_bridge.scoring import (
     MECHANISM_DISCOVERY,
@@ -59,7 +60,6 @@ from .llm_rerank import (
 )
 from .output_lint import (
     MODEL_SIGNAL_RISK_CONTROLS,
-    MODEL_VALIDATION_ALIAS_TARGETS,
     LintReport,
     describe_model_lint_contract,
     extract_model_stage_sections,
@@ -1628,7 +1628,7 @@ def _rank_inventory_rows(
     fields: tuple[str, ...],
     top_k: int,
 ) -> list[dict[str, object]]:
-    keywords = _idea_keywords(idea)
+    keywords = idea_keywords(idea)
     ranked: list[dict[str, object]] = []
     for row in rows:
         haystack_parts: list[str] = []
@@ -1734,28 +1734,6 @@ def read_model_idea_session(
     if payload is None:
         raise ValueError(f"invalid model-idea session payload: {normalized_session_id}")
     return payload
-
-
-def delete_model_idea_session(
-    *,
-    session_id: str,
-    workspace_root: str | Path = PROJECT_ROOT,
-) -> dict[str, object]:
-    normalized_session_id = _normalize_session_id(session_id)
-    session_root = model_idea_sessions_root(workspace_root=workspace_root)
-    session_path = (session_root / f"{normalized_session_id}.json").resolve()
-    if not session_path.exists() or not session_path.is_file():
-        raise FileNotFoundError(f"model-idea session not found: {normalized_session_id}")
-    payload = _read_model_idea_session_file(session_path)
-    if payload is None:
-        raise ValueError(f"invalid model-idea session payload: {normalized_session_id}")
-    payload["archived"] = True
-    payload["archived_at_utc"] = dt.datetime.now(dt.UTC).isoformat()
-    session_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return {"ok": True, "session_id": normalized_session_id, "archived": True}
 
 
 def record_model_idea_response(
@@ -2203,7 +2181,7 @@ def _rank_run_rows(
 ) -> list[dict[str, object]]:
     """Rank experiment rows with explicit priority: contracts > failures > validated > others."""
 
-    keywords = _idea_keywords(idea)
+    keywords = idea_keywords(idea)
     current_model_family = str(current_spec.get("model_family") or "").strip().lower()
     current_factor_name = str(current_spec.get("factor_name") or "").strip().lower()
     ranked: list[dict[str, object]] = []
@@ -2519,21 +2497,6 @@ def _build_model_idea_validation_kill_tests_prompt(
         "use mechanism_discovery/signal_mapping here and run Stage 3 data "
         "validation separately."
     )
-    lines = _build_model_idea_common_prompt_lines(
-        idea=idea,
-        mode=mode,
-        stage=stage,
-        report=report,
-        spec_patch_hint=spec_patch_hint,
-        drift_header=drift_header,
-        upstream_header=upstream_header,
-    )
-    lines.extend(["", "## Task"])
-    _append_model_validation_kill_tests_task(
-        lines, mode="constrained" if strict else mode
-    )
-    _append_model_lint_self_check(lines, stage=stage, mode=mode)
-    return "\n".join(lines)
 
 
 def _build_model_idea_common_prompt_lines(
@@ -3089,83 +3052,6 @@ def _append_model_signal_mapping_task(lines: list[str], *, mode: str) -> None:
     )
 
 
-def _append_model_validation_kill_tests_task(lines: list[str], *, mode: str) -> None:
-    lines.extend(
-        [
-            "## 阶段声明",
-            "你处于 model-lab 的 validation_kill_tests 阶段。",
-            "目标不是证明模型有效，而是尽快判断它是否只是伪改进、泄漏、过拟合或成本假象。",
-            "请用强审计口吻；回避性结论无效。",
-            "",
-            "## Alias / 问题归因靶子",
-        ]
-    )
-    for label, detail in MODEL_VALIDATION_ALIAS_TARGETS:
-        lines.append(f"- `{label}`: {detail}")
-    lines.extend(
-        [
-            "",
-            "## Kill Test 要求",
-            "1. 数据与时间完整性：known_at / safety_lag / target horizon / 重叠窗口 / as-of 对齐。",
-            "2. 训练与验证稳健性：walk-forward、purged split、年份/市场状态切分、窗口和 retrain 频率扰动。",
-            "3. 特征与解释稳定性：top feature 稳定性、特征数量依赖、feature importance 漂移、冗余特征删除。",
-            "4. 成本与组合影响：turnover、交易成本后 IR、行业/市值/流动性桶、组合约束敏感性。",
-            "5. 如果 strict/constrained 模式下无法排除 hard kill 条件，只能输出 KILL。",
-        ]
-    )
-    if mode == "constrained":
-        lines.extend(
-            [
-                "6. constrained 模式必须给出 KILL 或 HOLD-FOR-AUDIT 二值判定。",
-                "7. 每个 alias verdict 必须引用 [Kx] / [Ex] / [Fx] 或当前 spec/run 字段作为锚点。",
-            ]
-        )
-    else:
-        lines.append("6. 非 constrained 模式最终判定可为 KILL / HOLD / ITERATE / HOLD-FOR-AUDIT。")
-    lines.extend(
-        [
-            "",
-            "## 输出格式（严格遵守）",
-            "[Alias / 问题归因审计]",
-        ]
-    )
-    for label, detail in MODEL_VALIDATION_ALIAS_TARGETS:
-        lines.append(f"- `{label}`: 显著风险 / 部分风险 / 不构成风险 - {detail} - anchor:")
-    lines.extend(
-        [
-            "",
-            "[数据与时间完整性]",
-            "- PIT / known_at:",
-            "- target leakage / overlapping label:",
-            "- safety lag / as-of:",
-            "- missing / survivorship / sample filter:",
-            "",
-            "[训练与验证稳健性]",
-            "- split design:",
-            "- window / retrain perturbation:",
-            "- hyperparameter freedom:",
-            "- regime and year stability:",
-            "",
-            "[特征与解释稳定性]",
-            "- feature count dependence:",
-            "- top feature stability:",
-            "- redundancy / remove-and-test:",
-            "- feature importance drift:",
-            "",
-            "[成本与组合影响]",
-            "- turnover and transaction cost:",
-            "- industry/size/liquidity bucket:",
-            "- portfolio construction sensitivity:",
-            "- capacity or implementation caveat:",
-            "",
-            "[最终判定]",
-            "- verdict: KILL / HOLD / ITERATE / HOLD-FOR-AUDIT",
-            "- hard kill trigger, if any:",
-            "- next experiments if not killed:",
-        ]
-    )
-
-
 def _append_model_lint_self_check(
     lines: list[str], *, stage: str, mode: str
 ) -> None:
@@ -3334,19 +3220,6 @@ def _infer_target_family(idea_l: str, supported_families: list[str]) -> str:
         if token in idea_l and family in supported:
             return family
     return ""
-
-
-def _idea_keywords(text: str) -> set[str]:
-    keywords: set[str] = set()
-    for token in re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text):
-        normalized = token.lower().strip()
-        if len(normalized) <= 1:
-            continue
-        keywords.add(normalized)
-        if re.fullmatch(r"[\u4e00-\u9fff]+", normalized) and len(normalized) >= 4:
-            for idx in range(len(normalized) - 1):
-                keywords.add(normalized[idx : idx + 2])
-    return keywords
 
 
 def _first_non_empty(values: list[str]) -> str:

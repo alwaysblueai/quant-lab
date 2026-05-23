@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
-from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabExperimentError
+from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.real_cases.common_spec import (
     NeutralizationSpec,
     OutputSpec,
@@ -100,6 +100,7 @@ class SingleFactorCaseSpec:
     n_quantiles: int
     transaction_cost: TransactionCostSpec
     output: OutputSpec
+    archive_identity: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -136,6 +137,7 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
 
     name = required_str(data, "name")
     factor_name = required_str(data, "factor_name")
+    archive_identity = _optional_text(data.get("archive_identity"))
     factor_path = required_str(data, "factor_path")
     prices_path = required_str(data, "prices_path")
     rebalance_frequency = required_str(data, "rebalance_frequency")
@@ -162,6 +164,7 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
     return SingleFactorCaseSpec(
         name=name,
         factor_name=factor_name,
+        archive_identity=archive_identity,
         factor_path=factor_path,
         prices_path=prices_path,
         factor_input=factor_input,
@@ -213,24 +216,15 @@ def resolve_spec_paths(spec: SingleFactorCaseSpec, *, base_dir: Path) -> SingleF
 def spec_to_dict(spec: SingleFactorCaseSpec) -> dict[str, object]:
     """Convert typed spec to JSON/YAML-serializable dict."""
 
-    return cast(dict[str, object], asdict(spec))
+    payload = cast(dict[str, object], asdict(spec))
+    if payload.get("archive_identity") is None:
+        payload.pop("archive_identity", None)
+    return payload
 
 
-def dump_spec_yaml(spec: SingleFactorCaseSpec) -> str:
-    """Serialize spec as YAML text."""
-
-    try:
-        import yaml  # type: ignore[import-untyped]
-    except ImportError as exc:  # pragma: no cover - import guard
-        raise AlphaLabExperimentError("PyYAML is required to serialize YAML specs") from exc
-
-    return str(
-        yaml.safe_dump(
-            spec_to_dict(spec),
-            sort_keys=False,
-            allow_unicode=False,
-        )
-    )
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _parse_factor_input_spec(value: object) -> FactorInputSpec | None:

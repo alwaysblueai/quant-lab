@@ -6,7 +6,6 @@ from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.regime import classify_market_regimes
 
 DEFAULT_TIER1_TRAILING_RETURN_HORIZON = 20
-DEFAULT_TRAILING_RETURN_HORIZONS: tuple[int, ...] = (1, 5, 10, 20, 60)
 
 SIZE_SOURCE_COLUMNS: tuple[str, ...] = (
     "market_cap_log",

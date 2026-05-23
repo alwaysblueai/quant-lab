@@ -661,15 +661,6 @@ class TushareIngestor:
             chunk_count=1,
         )
 
-    def ingest_daily_core(self, **kwargs) -> TushareCoreIngestResult:  # type: ignore[no-untyped-def]
-        return self.ingest_core(mode="daily", **kwargs)
-
-    def ingest_fundamental_core(self, **kwargs) -> TushareCoreIngestResult:  # type: ignore[no-untyped-def]
-        return self.ingest_core(mode="fundamental", **kwargs)
-
-    def ingest_core_full(self, **kwargs) -> TushareCoreIngestResult:  # type: ignore[no-untyped-def]
-        return self.ingest_core(mode="full", **kwargs)
-
     def ingest_core_chunked(
         self,
         *,

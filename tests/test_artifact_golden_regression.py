@@ -12,8 +12,6 @@ import pytest
 import yaml
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
-
-pytestmark = [pytest.mark.slow, pytest.mark.golden]
 from alpha_lab.examples.profile_aware_campaign_level12 import (
     run_profile_aware_campaign_level12_example,
 )
@@ -25,6 +23,8 @@ from alpha_lab.reporting.research_validation_package import (
 )
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
+
+pytestmark = [pytest.mark.slow, pytest.mark.golden]
 
 GOLDEN_ROOT = Path(__file__).resolve().parent / "goldens" / "artifact_regression"
 UPDATE_GOLDENS_ENV = "ALPHA_LAB_UPDATE_GOLDENS"

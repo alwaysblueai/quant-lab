@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from alpha_lab.research_bridge._llm_usage import read_attr, usage_int
+
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_CANDIDATES = 30
 ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL"
@@ -84,12 +86,12 @@ def anthropic_client_kwargs(api_key: str) -> dict[str, Any]:
 
 def extract_json_object_from_response(response: object) -> dict[str, Any]:
     """Extract a JSON object from a text response for proxy compatibility."""
-    content = _read_attr(response, "content", [])
+    content = read_attr(response, "content", [])
     text_parts: list[str] = []
     if isinstance(content, list):
         for block in content:
-            if _read_attr(block, "type", "") == "text":
-                text_parts.append(str(_read_attr(block, "text", "") or ""))
+            if read_attr(block, "type", "") == "text":
+                text_parts.append(str(read_attr(block, "text", "") or ""))
     elif isinstance(content, str):
         text_parts.append(content)
     text = "\n".join(part for part in text_parts if part).strip()
@@ -172,11 +174,11 @@ def rerank_candidates(
             )
             tool_input = extract_json_object_from_response(response)
         scores, reasons, dropped = _parse_scores(tool_input, candidates)
-        usage = _read_attr(response, "usage", {})
-        input_tokens = _usage_int(usage, "input_tokens")
-        cache_creation = _usage_int(usage, "cache_creation_input_tokens")
-        cache_read = _usage_int(usage, "cache_read_input_tokens")
-        output_tokens = _usage_int(usage, "output_tokens")
+        usage = read_attr(response, "usage", {})
+        input_tokens = usage_int(usage, "input_tokens")
+        cache_creation = usage_int(usage, "cache_creation_input_tokens")
+        cache_read = usage_int(usage, "cache_read_input_tokens")
+        output_tokens = usage_int(usage, "output_tokens")
         return RerankOutcome(
             enabled=True,
             model=model_name,
@@ -278,11 +280,11 @@ def categorize_and_compress(
             )
             tool_input = extract_json_object_from_response(response)
         categorized, dropped = _parse_categorized(tool_input, limited_candidates)
-        usage = _read_attr(response, "usage", {})
-        input_tokens = _usage_int(usage, "input_tokens")
-        cache_creation = _usage_int(usage, "cache_creation_input_tokens")
-        cache_read = _usage_int(usage, "cache_read_input_tokens")
-        output_tokens = _usage_int(usage, "output_tokens")
+        usage = read_attr(response, "usage", {})
+        input_tokens = usage_int(usage, "input_tokens")
+        cache_creation = usage_int(usage, "cache_creation_input_tokens")
+        cache_read = usage_int(usage, "cache_read_input_tokens")
+        output_tokens = usage_int(usage, "output_tokens")
         return CategorizeOutcome(
             enabled=True,
             model=model_name,
@@ -522,14 +524,14 @@ def _extract_tool_input(response: object) -> dict[str, Any]:
 
 
 def _extract_named_tool_input(response: object, *, tool_name: str) -> dict[str, Any]:
-    content = _read_attr(response, "content", [])
+    content = read_attr(response, "content", [])
     if not isinstance(content, list):
         raise ValueError("response content is not a list")
     for block in content:
-        block_type = _read_attr(block, "type", "")
-        block_name = _read_attr(block, "name", "")
+        block_type = read_attr(block, "type", "")
+        block_name = read_attr(block, "name", "")
         if block_type == "tool_use" and block_name == tool_name:
-            raw_input = _read_attr(block, "input", {})
+            raw_input = read_attr(block, "input", {})
             if isinstance(raw_input, dict):
                 return raw_input
             raise ValueError("tool input is not a dict")
@@ -673,17 +675,3 @@ def _clamp_float(value: object) -> float:
     return numeric
 
 
-def _read_attr(obj: object, name: str, default: object) -> object:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
-def _usage_int(usage: object, name: str) -> int:
-    value = _read_attr(usage, name, 0)
-    if not isinstance(value, int | float | str):
-        return 0
-    try:
-        return int(value)
-    except ValueError:
-        return 0

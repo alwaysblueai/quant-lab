@@ -17,15 +17,15 @@ estimator code。
 `case_spec_payload` 冲突：
 
 1. 以 `case_spec_payload` 为准。
-2. 在 `model_candidates/research/<candidate_name>/research_log.md` 记录冲突。
+2. 在 `custom_models/research/<candidate_name>/research_log.md` 记录冲突。
 3. 不要根据自由文本自行改写 case spec。
 
 ## 允许写入
 
 只能写入或更新：
 
-- `model_candidates/research/<candidate_name>/model_candidate.json`
-- `model_candidates/research/<candidate_name>/research_log.md`
+- `custom_models/research/<candidate_name>/model_candidate.json`
+- `custom_models/research/<candidate_name>/research_log.md`
 - `configs/real_cases/model_factor/<candidate_name>_vN.yaml`
 
 禁止写入：
@@ -33,7 +33,7 @@ estimator code。
 - 临时 Python 脚本
 - notebook
 - 散落的 `.py` 文件
-- `model_candidates/promoted`
+- `custom_models/promoted`
 - `src/alpha_lab/model_factor/`、`src/alpha_lab/factors/`、其他 core 模块
 - 前端正式注册文件
 - execution / replay / fill simulation / portfolio construction 相关目录
@@ -47,7 +47,7 @@ v1 不接受任何自定义 feature builder code 或自定义 estimator code；�
 `model_candidate_payload` 必须可以直接写入：
 
 ```text
-model_candidates/research/<candidate_name>/model_candidate.json
+custom_models/research/<candidate_name>/model_candidate.json
 ```
 
 最小结构（严格遵循）：
@@ -118,13 +118,13 @@ stage3_validation_focus: []
 ## 标准执行步骤
 
 1. 从 Stage2 输出中提取唯一的 `model_candidate_payload`。
-2. 写入 `model_candidates/research/<candidate_name>/model_candidate.json`。
+2. 写入 `custom_models/research/<candidate_name>/model_candidate.json`。
 3. 创建或更新 `configs/real_cases/model_factor/<candidate_name>_vN.yaml`。
    YAML 内容必须与 `case_spec_payload` 完全一致；不要根据 `human_summary` 调参。
 4. 先运行 validator：
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-model model_candidates/research/<candidate_name>/model_candidate.json
+UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-model custom_models/research/<candidate_name>/model_candidate.json
 ```
 
 5. validator 通过后，按照 `run_controls` 设定的 profile 跑标准 pipeline。
@@ -138,7 +138,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   --screening-retrain-every-n-dates 40 \
   --render-report \
   --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json
+  --draft-model-candidate custom_models/research/<candidate_name>/model_candidate.json
 ```
 
 更完整验证（候选成熟后，可在前端 Draft Candidates 触发完整报告）：
@@ -149,7 +149,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   --evaluation-profile default_research \
   --render-report \
   --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json
+  --draft-model-candidate custom_models/research/<candidate_name>/model_candidate.json
 ```
 
 ## Preflight 必查
@@ -157,7 +157,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
 - `model_candidate.json` 是合法 JSON。
 - `contract_version=stage2_model_candidate_v1`、`implementation_status=draft_for_stage3`、`implementation_type=spec_variant`。
 - `candidate_name` 是英文 snake_case，长度 3-64。
-- 文件位于 `model_candidates/research/<candidate_name>/model_candidate.json`。
+- 文件位于 `custom_models/research/<candidate_name>/model_candidate.json`。
 - `case_spec_payload` 通过 `model_factor_case_spec_from_mapping` 解析无错。
 - `feature_columns` 全部出现在 features 文件表头中。
 - `feature_availability` 满足 PIT 合同；疑似基本面特征不允许 `mode='required_timestamp'` 且 `column=null`。

@@ -4,8 +4,9 @@ Why a precompute step exists
 ----------------------------
 The single-factor pipeline's `mode: recipe` path loads the full prices frame
 into memory and lets `factor_recipe` build the signal inline. With the joined
-prices+intraday dataset (~7.21M rows × 32 cols slim, ~101 cols full; intraday-cutoff 2025-12-31), peak RSS
-exceeds the WSL2 user-cgroup memory budget (~12GB) and OOM-kills the run.
+prices+intraday dataset (~7.21M rows × 32 cols slim, ~101 cols full;
+intraday-cutoff 2025-12-31), peak RSS exceeds the WSL2 user-cgroup memory budget
+(~12GB) and OOM-kills the run.
 
 Switching the case to `mode: file` lets the pipeline ship a slim 3-column
 factor file (~50MB) and use a minimal prices slice for label/cost computation.

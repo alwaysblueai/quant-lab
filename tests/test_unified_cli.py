@@ -670,7 +670,7 @@ def test_unified_cli_top_level_help_is_router(
     captured = capsys.readouterr()
     expected = (
         "{run,fast-screen,validate-draft-factor,validate-draft-model,real-case,"
-        "campaign,profiles,web,bridge,idea,vault,data,model-idea}"
+        "campaign,profiles,web,bridge,idea,archive,vault,data,model-idea}"
     )
     assert expected in captured.out
 
@@ -698,3 +698,27 @@ def test_unified_cli_campaign_compare_profiles_help_is_discoverable(
     assert "--output-root-dir" in captured.out
     assert "--artifact-hint-path-mode" in captured.out
     assert "--show-case-evidence" in captured.out
+
+
+def test_unified_cli_archive_migrate_rejects_dry_run_with_apply(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    # Destructive command: argparse must refuse --dry-run and --apply
+    # together so --apply cannot silently override the caller's --dry-run
+    # intent.
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "archive",
+                "migrate-auto-exports",
+                "--vault-root",
+                str(tmp_path),
+                "--dry-run",
+                "--apply",
+            ]
+        )
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "not allowed with argument" in err
+    assert "--apply" in err or "--dry-run" in err

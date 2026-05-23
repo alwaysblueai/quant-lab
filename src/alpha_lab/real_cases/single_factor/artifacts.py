@@ -551,6 +551,7 @@ def export_artifact_bundle(
             "universe_name": spec.universe.name,
             "target_kind": spec.target.kind,
             "target_horizon": spec.target.horizon,
+            "target_execution_price_mode": spec.target.execution_price_mode,
             "split_contract": split_contract_payload,
         },
     )
@@ -631,12 +632,18 @@ def _build_factor_definition_payload(
     output_paths: SingleFactorArtifactPaths,
     custom_factor_source: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    archive_identity = (
+        _text_or_none((custom_factor_source or {}).get("archive_identity"))
+        or _text_or_none(spec.archive_identity)
+        or spec.factor_name
+    )
     payload: dict[str, object] = {
         "schema_version": "1.0.0",
         "artifact_type": "alpha_lab_factor_definition",
         "case_name": spec.name,
         "package_type": "single_factor",
         "factor_name": spec.factor_name,
+        "archive_identity": archive_identity,
         "spec": _compact_spec_payload(spec),
         "source_artifacts": {
             "factor_definition_yaml_path": str(output_paths["factor_definition"]),
@@ -1058,6 +1065,7 @@ def _compact_spec_payload(spec: SingleFactorCaseSpec) -> dict[str, object]:
         "target": {
             "kind": spec.target.kind,
             "horizon": spec.target.horizon,
+            "execution_price_mode": spec.target.execution_price_mode,
         },
         "universe": {
             "name": spec.universe.name,
@@ -1083,6 +1091,8 @@ def _compact_spec_payload(spec: SingleFactorCaseSpec) -> dict[str, object]:
     factor_input = _compact_factor_input_payload(spec.factor_input)
     if factor_input is not None:
         payload["factor_input"] = factor_input
+    if spec.archive_identity:
+        payload["archive_identity"] = spec.archive_identity
     return payload
 
 

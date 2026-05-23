@@ -1,4 +1,5 @@
 {
+  "archive_identity": "bp",
   "artifact_type": "alpha_lab_factor_definition",
   "case_name": "demo_bp_single_factor",
   "factor_name": "bp",
@@ -29,6 +30,7 @@
     },
     "rebalance_frequency": "W",
     "target": {
+      "execution_price_mode": "close",
       "horizon": 5,
       "kind": "forward_return"
     },

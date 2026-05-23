@@ -191,9 +191,18 @@ def test_ic_decay_dense_panel_with_missing_factor_uses_public_path(
     expected = _ic_decay_reference(factor_df, complete_prices, horizons)
     called_horizons: list[int] = []
 
-    def wrapped_forward_return(prices_df: pd.DataFrame, *, horizon: int) -> pd.DataFrame:
+    def wrapped_forward_return(
+        prices_df: pd.DataFrame,
+        *,
+        horizon: int,
+        execution_price_mode: str = "close",
+    ) -> pd.DataFrame:
         called_horizons.append(int(horizon))
-        return forward_return(prices_df, horizon=horizon)
+        return forward_return(
+            prices_df,
+            horizon=horizon,
+            execution_price_mode=execution_price_mode,
+        )
 
     monkeypatch.setattr(decay, "forward_return", wrapped_forward_return)
 

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -49,14 +48,6 @@ _TEMP_FILES_GLOB: tuple[str, ...] = (
 )
 
 _KEEP_FILES: frozenset[str] = frozenset({"manifest.json", "experiment_card.md"})
-
-
-@dataclass(frozen=True)
-class ScaffoldedCard:
-    """Result of ``scaffold_experiment_card`` (returned for tests; CLI prints path)."""
-
-    card_path: Path
-    cleaned: tuple[Path, ...]
 
 
 def scaffold_experiment_card(
@@ -129,13 +120,13 @@ def _collect_research_log_excerpt(
     1. ``custom_factors/research/<name>/research_log.md`` where <name> matches
        any factor mentioned in the manifest's codebase_snapshot.factors.research
        (best-effort heuristic).
-    2. ``model_candidates/research/<name>/research_log.md`` likewise.
+    2. ``custom_models/research/<name>/research_log.md`` likewise.
 
     Returns an empty string if no log can be located; the user will fill it in.
     """
 
     factor_root = workspace_root / "custom_factors" / "research"
-    model_root = workspace_root / "model_candidates" / "research"
+    model_root = workspace_root / "custom_models" / "research"
 
     candidates: list[Path] = []
     for root_dir in (factor_root, model_root):
@@ -192,7 +183,7 @@ def _render_card(
             f"idea_distributed_at: {created}",
             f"experiment_card_written_at: {now}",
             f"engines: [{engines_text}]",
-            "final_artifact_path: <fill in: custom_factors/... or model_candidates/... or "
+            "final_artifact_path: <fill in: custom_factors/... or custom_models/... or "
             "promoted/...>",
             "final_metrics_sha256: <fill in: run_manifest 中的关键 hash 摘要>",
             "---",

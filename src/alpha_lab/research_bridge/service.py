@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
+from alpha_lab.custom_factors import find_custom_factor_workspace_root
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLabExperimentError
 from alpha_lab.research_bridge.categories import (
     CATEGORY_REGISTRY,
@@ -38,12 +39,6 @@ from alpha_lab.research_bridge.scoring import (
     MECHANISM_DISCOVERY,
     SIGNAL_MAPPING,
     SIGNAL_MAPPING_CONFOUND_CONTROLS,
-    VALIDATION_ALIAS_TARGETS,
-    VALIDATION_DATA_SANITY_CHECKS,
-    VALIDATION_IMPL_ROBUSTNESS_CHECKS,
-    VALIDATION_KILL_TESTS,
-    VALIDATION_KILL_VERDICT_RULES,
-    VALIDATION_SUBSAMPLE_STABILITY_CHECKS,
     CardMetadata,
     QueryAnchor,
     ScoreComponents,
@@ -73,6 +68,7 @@ from .engine_prompts import (
     Engine,
     Lab,
     PromptContext,
+    _render_move_lines,
     normalize_engines,
 )
 from .engine_prompts import (
@@ -83,9 +79,6 @@ from .engine_prompts import (
 )
 from .engine_prompts import (
     prompt_filename_for as _engine_prompt_filename,
-)
-from .engine_prompts import (
-    _render_move_lines,
 )
 from .llm_rerank import (
     DEFAULT_MAX_CANDIDATES,
@@ -1033,6 +1026,26 @@ class IdeaDistributeResult:
         }
 
 
+def _resolve_distribute_workspace_root(workspace_root: str | Path) -> Path:
+    """Resolve workspace_root, walking up to a real ``custom_factors/`` anchor.
+
+    Default callers (web frontend, CLI ``--workspace-root .``) often launch
+    from a directory outside the repo (e.g. ``/mnt/c/Users/...``); the literal
+    ``"."`` resolves to that home dir which has no ``custom_factors/``, so the
+    codebase snapshot comes back empty and Stage 1 reviewer can't see existing
+    research factors. Walk up to find the nearest ancestor with ``custom_factors/``
+    so the snapshot actually reflects the repo state.
+    """
+
+    raw_path = Path(workspace_root).expanduser().resolve()
+    if (raw_path / "custom_factors").exists():
+        return raw_path
+    resolved = find_custom_factor_workspace_root(raw_path)
+    if (resolved / "custom_factors").exists():
+        return resolved
+    return raw_path
+
+
 def distribute_idea(
     *,
     vault_root: str | Path | None,
@@ -1065,7 +1078,7 @@ def distribute_idea(
     else:
         selected_engines = normalize_engines(engines)
     target_lab = Lab(lab) if isinstance(lab, str) else lab
-    resolved_workspace = Path(workspace_root).expanduser().resolve()
+    resolved_workspace = _resolve_distribute_workspace_root(workspace_root)
     resolved_vault = _resolve_bridge_vault_root(vault_root)
     explore_result = explore_idea(
         vault_root=resolved_vault,
@@ -1248,8 +1261,8 @@ def _render_retrieval_pack(
             "## Codebase snapshot",
             f"- single-factor promoted: {len(ctx.codebase.factors_promoted)}",
             f"- single-factor research: {len(ctx.codebase.factors_research)}",
-            f"- model candidates promoted: {len(ctx.codebase.model_candidates_promoted)}",
-            f"- model candidates research: {len(ctx.codebase.model_candidates_research)}",
+            f"- custom models promoted: {len(ctx.codebase.custom_models_promoted)}",
+            f"- custom models research: {len(ctx.codebase.custom_models_research)}",
             f"- single-factor cases registered: {len(ctx.codebase.single_factor_cases)}",
             f"- model-factor cases registered: {len(ctx.codebase.model_factor_cases)}",
             "",
@@ -3284,30 +3297,6 @@ def _categorize_diagnostics(outcome: CategorizeOutcome) -> dict[str, object]:
     }
 
 
-def _typed_rank_candidates(
-    *,
-    semantic_matches: list[SearchResult],
-    graph: VaultGraph | None,
-    anchor: QueryAnchor,
-    weights: ScoreWeights,
-    available_data: frozenset[str] | None,
-    failure_keywords: frozenset[str],
-) -> tuple[list[_RankedCandidate], list[dict[str, str]]]:
-    """Score and re-rank semantic candidates, with hard-filter dropouts.
-
-    Returns ``(ranked_kept, dropped)``. Each dropped record carries the
-    candidate name and a human-readable ``reason`` for observability.
-    """
-    scored, dropped = _score_candidates(
-        semantic_matches=semantic_matches,
-        graph=graph,
-        anchor=anchor,
-        available_data=available_data,
-        failure_keywords=failure_keywords,
-    )
-    return _finalize_ranking(scored, weights), dropped
-
-
 def _score_candidates(
     *,
     semantic_matches: list[SearchResult],
@@ -4814,167 +4803,6 @@ def _build_factor_recipe_validation_kill_tests_prompt(
         "use mechanism_discovery/signal_mapping here and run Stage 3 data "
         "validation separately."
     )
-    strict = mode == "constrained"
-    mode_label = (
-        "Validation & Kill Tests · Strict"
-        if strict
-        else "Validation & Kill Tests · Open"
-    )
-    lines = _build_factor_recipe_prompt_header(
-        title="# AlphaLab Validation & Kill Tests Prompt",
-        mode_label=mode_label,
-        project=project,
-    )
-    lines.extend(
-        [
-            "",
-            "## 阶段声明",
-            "你不是在生成假设、不是在拆机制、不是在写公式。",
-            "你的任务是 **try to KILL this factor**：找出最有可能让它失效或解释它的现象，",
-            "对每一项做出明确判定。任何"
-            "“看起来不错”、“值得进一步研究”这类回避结论都视为无效审计。",
-            "",
-            "## 被审计对象",
-            idea,
-        ]
-    )
-    _append_factor_recipe_context(
-        lines, context=context, include_soft_graph=False, mode=mode
-    )
-    lines.extend(
-        [
-            "",
-            "## Alias / 换壳审计（必填）",
-            "对以下每个已建立标签，必须明确回答：",
-            "“**这个因子能否仅用 X 来解释？**” 并给出"
-            "{显著重叠 / 部分重叠 / 不重叠} 中的一个判定，附简短论据。",
-            "",
-        ]
-    )
-    for label, detail in VALIDATION_ALIAS_TARGETS:
-        lines.append(f"- `{label}`（{detail}）：")
-    if strict:
-        lines.extend(
-            [
-                "",
-                "（strict 模式硬要求：每条 alias 判定必须 cite 至少一张知识库卡片 [Kx] "
-                "或一个标准 baseline——例如 Jegadeesh-Titman / Amihud / Ang et al.——"
-                "禁止仅凭直觉打"
-                "“不重叠”。）",
-            ]
-        )
-
-    lines.extend(
-        [
-            "",
-            "## 暴露分解（Exposure Decomposition）",
-            "若依次对其做下列中性化，残差 IC 是否仍显著？",
-            "- 行业中性化（industry-neutral）",
-            "- 市值中性化（size-neutral）",
-            "- 流动性中性化（liquidity / turnover-neutral）",
-            "- 波动率中性化（idio-vol-neutral）",
-            "- 上述四项联合中性化",
-            "请用三档判定：{残差仍显著 / 仅在部分中性化下保留 / 中性化后失效}。",
-            "若任何一项中性化让残差 IC 降至 < 0.5 × 原始 IC，说明被审 alias 在伪装；",
-            "明确写出："
-            "残差 IC 上限 ≈ ?，作为净 alpha 的最乐观估计（不是真实估计）。",
-        ]
-    )
-
-    for title, body in (
-        VALIDATION_DATA_SANITY_CHECKS,
-        VALIDATION_IMPL_ROBUSTNESS_CHECKS,
-        VALIDATION_SUBSAMPLE_STABILITY_CHECKS,
-    ):
-        lines.extend(["", f"## {title}", body])
-
-    lines.extend(
-        [
-            "",
-            "## 死亡条件（Kill Verdict Rules）",
-            VALIDATION_KILL_VERDICT_RULES,
-        ]
-    )
-
-    if strict:
-        lines.extend(
-            [
-                "",
-                "## 强制结论",
-                "1. 必须输出 **二值最终判定**："
-                "{KILL / HOLD-FOR-AUDIT}，不允许"
-                "“看情况”、“需要更多数据”这类回避表达。",
-                "2. 若判 HOLD-FOR-AUDIT，必须列出"
-                "**3-5 个 follow-up 实证检查**，每条具体到实验设计。",
-                "3. 若判 KILL，必须明确指出"
-                "**哪条死亡条件被触发**，并写明触发证据。",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "",
-                "## 结论",
-                "请输出三类之一：HOLD / ITERATE / KILL，并给出主要理由。"
-                "不要简单写"
-                "“需要更多数据”——若需要数据，请列出"
-                "**具体下一步实验**而不是停在结论模糊。",
-            ]
-        )
-
-    lines.extend(
-        [
-            "",
-            "## 输出格式（严格遵守）",
-            "[Alias / 换壳审计]",
-        ]
-    )
-    for label, _ in VALIDATION_ALIAS_TARGETS:
-        lines.append(f"- {label}: <显著重叠 / 部分重叠 / 不重叠> | 论据：…")
-
-    lines.extend(
-        [
-            "",
-            "[暴露分解]",
-            "- 行业中性化后：…",
-            "- 市值中性化后：…",
-            "- 流动性中性化后：…",
-            "- 波动率中性化后：…",
-            "- 联合中性化后：…",
-            "- 残差 IC 上限估计：…",
-            "",
-            "[数据健全性]",
-            "- 极端日期：…",
-            "- 涨跌停：…",
-            "- 停牌 / 复牌：…",
-            "- ST：…",
-            "- 复权：…",
-            "- IPO / 退市窗：…",
-            "",
-            "[实现稳健性]",
-            "- skip_recent 扫描：…",
-            "- 窗口长度 ±50%：…",
-            "- horizon 扫描：…",
-            "- 横截面预处理：…",
-            "",
-            "[子样本稳定性]",
-            "- 分年份：…",
-            "- regime（牛/熊/震荡）：…",
-            "- 行业桶：…",
-            "- 市值桶：…",
-            "",
-            "[最终判定]",
-            "- 触发的死亡条件（若有）：…",
-            (
-                "- 判定：<KILL / HOLD-FOR-AUDIT>"
-                if strict
-                else "- 判定：<KILL / HOLD / ITERATE>"
-            ),
-            "- 下一步实证步骤：…",
-        ]
-    )
-    _append_lint_self_check(lines, stage=VALIDATION_KILL_TESTS, mode=mode)
-    return "\n".join(lines)
 
 
 def _collect_explore_allowed_data_nodes(

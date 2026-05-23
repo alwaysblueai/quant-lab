@@ -56,9 +56,6 @@ from alpha_lab.web_unified._run_store import RunSuccessResult as RunSuccessResul
 from alpha_lab.web_unified._run_store import (
     _compact_metrics_summary as _compact_metrics_summary,
 )
-from alpha_lab.web_unified._run_store import (
-    _InputBundleCacheEntry as _InputBundleCacheEntry,
-)
 from alpha_lab.web_unified._run_store import _RunRecord as _RunRecord
 from alpha_lab.web_unified._run_store import _RunStore as _RunStore
 
@@ -549,6 +546,7 @@ def _project_paths(vault_root: Path, slug: str) -> dict[str, Path]:
         "current_case": current_case_file,
         "latest_run": project_dir / "runs" / "latest.md",
         "rounds_dir": project_dir / "30_rounds",
+        "specs_dir": project_dir / "40_specs",
         "decision_log": project_dir / "decision_log.md",
         "runs_dir": project_dir / "runs",
         "drafts_dir": project_dir / "50_writeback_drafts",
@@ -570,9 +568,11 @@ def _iter_project_contracts(root: Path) -> list[Path]:
 
 def _list_cases(paths: dict[str, Path]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    seen_names: set[str] = set()
     current_case_path = paths["current_case"]
     if current_case_path.exists():
         case_name = _yaml_case_name(current_case_path) or current_case_path.stem
+        seen_names.add(case_name)
         rows.append(
             {
                 "case_name": case_name,
@@ -583,6 +583,29 @@ def _list_cases(paths: dict[str, Path]) -> list[dict[str, object]]:
                 "is_current": True,
             }
         )
+    specs_dir = paths.get("specs_dir")
+    if specs_dir is not None and specs_dir.exists():
+        spec_paths = [
+            *sorted(specs_dir.glob("*.yaml")),
+            *sorted(specs_dir.glob("*.yml")),
+            *sorted(specs_dir.glob("*.md")),
+        ]
+        for spec_path in spec_paths:
+            case_name = _yaml_case_name(spec_path) or spec_path.stem
+            if not case_name or case_name in seen_names:
+                continue
+            seen_names.add(case_name)
+            handoff_path = spec_path.with_name(f"{spec_path.stem}__knowledge_handoff.md")
+            rows.append(
+                {
+                    "case_name": case_name,
+                    "spec_path": str(spec_path),
+                    "handoff_path": str(handoff_path),
+                    "spec_exists": True,
+                    "handoff_exists": handoff_path.exists(),
+                    "is_current": False,
+                }
+            )
     return rows
 
 
@@ -614,10 +637,25 @@ def _list_rounds(rounds_dir: Path) -> list[dict[str, object]]:
 
 def _resolve_case_spec_path(paths: dict[str, Path], case_name: str) -> Path:
     current_case = paths["current_case"]
+    normalized_case_name = case_name.strip()
     if current_case.exists():
         current_name = _yaml_case_name(current_case)
-        if current_name == case_name or current_case.stem == case_name:
+        if current_name == normalized_case_name or current_case.stem == normalized_case_name:
             return current_case
+    specs_dir = paths.get("specs_dir")
+    if specs_dir is not None and specs_dir.exists():
+        for suffix in (".yaml", ".yml", ".md"):
+            direct = specs_dir / f"{normalized_case_name}{suffix}"
+            if direct.exists():
+                return direct
+        spec_paths = [
+            *sorted(specs_dir.glob("*.yaml")),
+            *sorted(specs_dir.glob("*.yml")),
+            *sorted(specs_dir.glob("*.md")),
+        ]
+        for spec_path in spec_paths:
+            if _yaml_case_name(spec_path) == normalized_case_name:
+                return spec_path
     return current_case
 
 
@@ -629,12 +667,6 @@ def _yaml_case_name(path: Path) -> str:
     except Exception:
         return ""
     return str(payload.get("name") or "").strip()
-
-
-def _read_text(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8")
 
 
 def _read_text_with_limit(path: Path, *, limit_bytes: int) -> str:
@@ -656,7 +688,11 @@ def _list_draft_summaries(drafts_dir: Path) -> list[dict[str, object]]:
     if not drafts_dir.exists():
         return []
     rows = []
-    for draft_path in sorted(drafts_dir.glob("*__writeback_draft.md"), reverse=True):
+    draft_paths = [
+        *drafts_dir.glob("*__writeback_draft.md"),
+        *drafts_dir.glob("*__archive_draft.md"),
+    ]
+    for draft_path in sorted(draft_paths, reverse=True):
         rows.append(_draft_summary(draft_path))
     return rows
 
@@ -677,6 +713,11 @@ def _draft_summary(draft_path: Path) -> dict[str, object]:
         "reviewed_by": str(frontmatter.get("reviewed_by") or ""),
         "reviewed_at": str(frontmatter.get("reviewed_at") or ""),
         "vault_export_mode": str(frontmatter.get("vault_export_mode") or ""),
+        "workflow": str(frontmatter.get("workflow") or ""),
+        "archive_identity": str(frontmatter.get("archive_identity") or ""),
+        "archive_identity_inferred": bool(frontmatter.get("archive_identity_inferred")),
+        "origin": str(frontmatter.get("origin") or ""),
+        "audit_level": str(frontmatter.get("audit_level") or ""),
     }
 
 
@@ -2504,31 +2545,6 @@ def _require_yaml() -> Any:
     except ImportError as exc:  # pragma: no cover
         raise AlphaLabExperimentError("PyYAML is required for draft editing") from exc
     return yaml
-
-
-def _compile_custom_factor(name: str, code: str) -> Any:
-    """Compile user-provided Python code into a callable factor builder.
-
-    The code must define a function named ``builder`` that accepts
-    ``(prices, *, window=20, skip_recent=0, min_periods=None, **kwargs)``
-    and returns a DataFrame with columns ``[date, asset, factor, value]``.
-    """
-    import numpy as np  # noqa: F401
-    import pandas as pd  # noqa: F401
-
-    namespace: dict[str, Any] = {"np": np, "pd": pd}
-    try:
-        compiled = compile(code, f"<custom_factor:{name}>", "exec")
-    except SyntaxError as exc:
-        raise ValueError(f"syntax error in custom factor code: {exc}") from exc
-    exec(compiled, namespace)  # noqa: S102
-    fn = namespace.get("builder")
-    if fn is None or not callable(fn):
-        raise ValueError(
-            "custom factor code must define a callable named 'builder'; "
-            "e.g. def builder(prices, *, window=20, **kwargs): ..."
-        )
-    return fn
 
 
 # ---------------------------------------------------------------------------

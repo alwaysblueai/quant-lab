@@ -10,7 +10,7 @@ from alpha_lab.evaluation import (
     compute_ic,
     compute_ic_summary,
 )
-from alpha_lab.labels import forward_return
+from alpha_lab.labels import ExecutionPriceMode, forward_return
 from alpha_lab.quantile import long_short_return, quantile_returns
 
 _DUAL_SCOPE_ROW_METRIC_KEYS: tuple[str, ...] = (
@@ -149,12 +149,17 @@ def _resolve_variant_label_df(
     horizon: int,
     label_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
     label_df: pd.DataFrame | None = None,
+    execution_price_mode: ExecutionPriceMode = "close",
 ) -> pd.DataFrame:
     if label_df is not None:
         return label_df
     if label_fn is not None:
         return label_fn(prices)
-    return forward_return(prices, horizon=horizon)
+    return forward_return(
+        prices,
+        horizon=horizon,
+        execution_price_mode=execution_price_mode,
+    )
 
 
 def _evaluate_variant_lightweight(

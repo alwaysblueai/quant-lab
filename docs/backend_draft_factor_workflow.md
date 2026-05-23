@@ -87,10 +87,12 @@ def build_factor(frame):
 2. 提取 Stage2 输出中的 `factor_json_payload`。
 3. 写入 `custom_factors/research/<factor>/factor.json`。
 4. 更新或创建 `configs/real_cases/single_factor/<factor>_vN.yaml`，使用 recipe base method 指向该 factor。
-5. 运行 `alpha-lab validate-draft-factor ...`。
-6. validator 通过后运行 `alpha-lab real-case single-factor run ...`。
-7. 读取 artifact 并确认 hash 审计字段。
-8. 用中文总结初筛结果和下一轮改进方向。
+5. 在 case YAML 根字段写入 `project_slug`、`archive_identity`、`evaluation_profile`；`project_slug` 只能来自明确项目上下文，不能从 factor 名、路径或文件名猜测。
+6. 覆盖已有 case YAML 前先读取旧 YAML，并保留已有 `project_slug` / `archive_identity` / `evaluation_profile`，除非用户明确要求修改。
+7. 运行 `alpha-lab validate-draft-factor ...`。
+8. validator 通过后运行 `alpha-lab real-case single-factor run ...`。
+9. 读取 artifact 并确认 hash 审计字段。
+10. 用中文总结初筛结果和下一轮改进方向。
 
 ## Validator 门禁
 

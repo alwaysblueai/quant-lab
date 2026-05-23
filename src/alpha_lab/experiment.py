@@ -22,7 +22,7 @@ from alpha_lab.evaluation import (
 )
 from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.interfaces import validate_factor_output
-from alpha_lab.labels import forward_return
+from alpha_lab.labels import ExecutionPriceMode, forward_return
 from alpha_lab.quantile import long_short_return, quantile_assignments, quantile_returns
 from alpha_lab.regime import (
     RegimeConditionalSummary,
@@ -474,6 +474,7 @@ def run_factor_experiment(
     label_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
     precomputed_forward_labels: Mapping[int, pd.DataFrame] | None = None,
     split_contract: TimeSeriesSplitContract | None = None,
+    execution_price_mode: ExecutionPriceMode = "close",
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -673,11 +674,13 @@ def run_factor_experiment(
         )
 
     # --- Step 2: forward-return labels (full sample) ------------------------
-    # Labels at date t: close[t+horizon]/close[t] - 1 (strictly future prices).
-    # Stored at t so they merge with factor on (date, asset) without lookahead.
-    # A custom ``label_fn`` lets callers substitute an alternate label schema
-    # (e.g. next-open execution prices, tradability-masked labels) for
-    # sensitivity analysis.  The result must be canonical long-form
+    # Labels at date t depend on prices strictly after t (default close mode:
+    # close[t+horizon]/close[t] - 1; "next_open" mode: close[t+horizon]/open[t+1]
+    # - 1).  Stored at t so they merge with factor on (date, asset) without
+    # lookahead.  A custom ``label_fn`` lets callers substitute an alternate
+    # label schema (e.g. tradability-masked labels) for sensitivity analysis;
+    # ``execution_price_mode`` controls the fallback when label_fn / cache are
+    # absent.  The result must be canonical long-form
     # ``[date, asset, factor, value]``.
     with _stage("label"):
         if label_fn is not None:
@@ -688,7 +691,11 @@ def run_factor_experiment(
                 precomputed_forward_labels,
                 horizon=horizon,
             )
-            label_df = cached if cached is not None else forward_return(prices, horizon=horizon)
+            label_df = cached if cached is not None else forward_return(
+                prices,
+                horizon=horizon,
+                execution_price_mode=execution_price_mode,
+            )
         _record_integrity(
             pit_check(label_df, max_allowed_date=max_price_date, object_name="label_df")
         )

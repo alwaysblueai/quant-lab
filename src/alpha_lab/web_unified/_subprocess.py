@@ -51,6 +51,7 @@ _ARTIFACT_FALLBACK_FILENAMES: dict[str, str] = {
     "research_tearsheet_pdf": "research_tearsheet.pdf",
     "metrics": "metrics.json",
     "summary": "summary.md",
+    "case_report": "case_report.md",
 }
 
 
@@ -143,6 +144,33 @@ def _build_model_lab_subprocess_command(
     return cmd
 
 
+def _build_single_factor_subprocess_command(
+    *,
+    task: _RunTask,
+    spec_path: Path,
+) -> list[str]:
+    output_root_dir = _resolve_single_factor_web_output_root_dir(
+        task,
+        spec_path=spec_path,
+    )
+    cmd = [
+        sys.executable,
+        "-m",
+        "alpha_lab.real_cases.single_factor.cli",
+        "run",
+        str(spec_path),
+        "--evaluation-profile",
+        task.evaluation_profile,
+        "--vault-export-mode",
+        "skip",
+        "--output-root-dir",
+        str(output_root_dir),
+    ]
+    if task.render_report:
+        cmd.extend(["--render-report", "--render-overwrite"])
+    return cmd
+
+
 def _build_model_lab_subprocess_env() -> dict[str, str]:
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -165,6 +193,12 @@ def _build_model_lab_subprocess_env() -> dict[str, str]:
         "BLIS_NUM_THREADS",
     ):
         env[key] = thread_count
+    return env
+
+
+def _build_single_factor_subprocess_env() -> dict[str, str]:
+    env = _build_model_lab_subprocess_env()
+    env["ALPHA_LAB_SINGLE_FACTOR_CHILD"] = "1"
     return env
 
 
@@ -319,6 +353,10 @@ def _load_model_factor_artifact_paths_from_manifest(output_dir: Path) -> dict[st
         if candidate.exists():
             paths.setdefault(key, candidate.resolve())
     return paths
+
+
+def _load_single_factor_artifact_paths_from_manifest(output_dir: Path) -> dict[str, Path]:
+    return _load_model_factor_artifact_paths_from_manifest(output_dir)
 
 
 def _annotate_exception_with_model_lab_subprocess_artifacts(

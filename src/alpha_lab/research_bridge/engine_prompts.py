@@ -199,8 +199,8 @@ def build_prompt(*, engine: Engine, ctx: PromptContext) -> str:
             f"- research: {_format_inline_list(ctx.codebase.factors_research)}",
             "",
             "**已有 model-factor candidate**：",
-            f"- promoted: {_format_inline_list(ctx.codebase.model_candidates_promoted)}",
-            f"- research: {_format_inline_list(ctx.codebase.model_candidates_research)}",
+            f"- promoted: {_format_inline_list(ctx.codebase.custom_models_promoted)}",
+            f"- research: {_format_inline_list(ctx.codebase.custom_models_research)}",
             "",
             "**已注册 case yaml**：",
             f"- single_factor: {_format_inline_list(ctx.codebase.single_factor_cases)}",
@@ -239,7 +239,10 @@ def build_prompt(*, engine: Engine, ctx: PromptContext) -> str:
             "",
             "## 8. 输出格式",
             f"写入 `{ctx.draft_dir / output_filename_for(engine)}`，单一 markdown。",
-            "首行起 **必须** 是下面四行 header（Stage 2 reconcile 用来追溯来源），缺一行视为契约违规：",
+            (
+                "首行起 **必须** 是下面四行 header（Stage 2 reconcile 用来追溯来源），"
+                "缺一行视为契约违规："
+            ),
             "",
             "```markdown",
             f"idea_id: `{ctx.idea_id}`",

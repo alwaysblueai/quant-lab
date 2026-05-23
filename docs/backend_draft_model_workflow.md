@@ -9,7 +9,7 @@
 本流程接的是 `ideas/<idea_id>/stage2_payload.json`（或同等内容）。完整链路：
 
 1. **Stage 0** — `alpha-lab model-idea distribute --idea ... --output-dir ideas/<id>/`
-   产出 retrieval pack（vault 卡 + 代码库 model_candidates 索引 +
+   产出 retrieval pack（vault 卡 + 代码库 custom_models 索引 +
    ModelFactorCaseSpec schema 摘录 + validator 硬约束清单）+
    两份对称 engine prompts：`prompt_claude.md` 和 `prompt_codex.md`。
 2. **Stage 1** — Claude Code 与 Codex GUI 各自输出
@@ -46,8 +46,8 @@ v1 只支持**spec 变体型草稿模型**：通过现有 `ModelFactorCaseSpec` 
 
 后端草稿模型不是正式模型，只能存在于：
 
-- `model_candidates/research/<candidate>/model_candidate.json`
-- `model_candidates/research/<candidate>/research_log.md`
+- `custom_models/research/<candidate>/model_candidate.json`
+- `custom_models/research/<candidate>/research_log.md`
 - `configs/real_cases/model_factor/<candidate>_vN.yaml`
 - 标准 pipeline 输出目录
 
@@ -60,7 +60,7 @@ alpha-lab real-case model-factor run <case.yaml>
 运行 case 之前必须先通过草稿模型门禁：
 
 ```bash
-alpha-lab validate-draft-model model_candidates/research/<candidate>/model_candidate.json
+alpha-lab validate-draft-model custom_models/research/<candidate>/model_candidate.json
 ```
 
 ## 输入契约
@@ -101,7 +101,7 @@ validator 会做形态校验，artifact 审计块会把 `provenance.idea_id` 复
 
 1. 使用 `docs/templates/codex_gui_model_stage3_execution_envelope.md` 作为任务入口。
 2. 提取 Stage2 输出中的 `model_candidate_payload`。
-3. 写入 `model_candidates/research/<candidate>/model_candidate.json`。
+3. 写入 `custom_models/research/<candidate>/model_candidate.json`。
 4. 创建或更新 `configs/real_cases/model_factor/<candidate>_vN.yaml`，字段必须与 `case_spec_payload` 完全一致。
 5. 运行 `alpha-lab validate-draft-model ...`。
 6. validator 通过后运行 `alpha-lab real-case model-factor run ... --draft-model-candidate ...`。
@@ -122,19 +122,13 @@ validator、case parser 或 model-factor pipeline。
 标准操作顺序：
 
 1. 在 `model_candidate_payload` 文本框粘贴 Stage2 输出。
-2. 点击 `保存 Candidate`，写入
-   `model_candidates/research/<candidate>/model_candidate.json`，并追加
-   `research_log.md`。
-3. 点击 `Validate`，后端调用 `validate_draft_model_file(...)`；失败时停在
-   validator 面板，不生成 case，也不提交 run。
-4. 点击 `生成 Case YAML`，把完整 `case_spec_payload` materialize 到
-   `configs/real_cases/model_factor/<candidate>_vN.yaml`；重复生成会自动递增
-   `_v2`、`_v3`。
-5. 点击主按钮 `Validate + Run Full Report`，UI 固定执行
+2. 点击主按钮 `导入并运行完整报告`，UI 固定执行
    save -> validate -> materialize -> run；run 默认使用 `default_research`、
    `vault_export_mode=skip`，并把 `--draft-model-candidate` 传入标准 CLI。
    快速初筛仍应在 Codex GUI 后端显式使用 `exploratory_screening` 命令完成。
-6. Run 队列中会显示 `draft:<candidate>` badge；artifact viewer 会从
+3. `保存 Candidate`、`Validate`、`生成 Case YAML` 保留在
+   `Advanced Candidate Actions` 中，仅用于调试或分步排错。
+4. Run 队列中会显示 `draft:<candidate>` badge；artifact viewer 会从
    `run_manifest.json`、`model_definition.json`、`feature_manifest.json` 中展示
    `candidate_json_sha256`、`case_spec_sha256`、`feature_contract_sha256` 的短 hash。
 
@@ -150,7 +144,7 @@ Stage3 仍视为流程失败。
 - `contract_version=stage2_model_candidate_v1`、
   `implementation_status=draft_for_stage3`、`implementation_type=spec_variant`。
 - `candidate_name` 是英文 snake_case（3-64）。
-- 文件位于 `model_candidates/research/<candidate>/model_candidate.json`。
+- 文件位于 `custom_models/research/<candidate>/model_candidate.json`。
 - `case_spec_payload` 通过 `model_factor_case_spec_from_mapping` 解析无错（覆盖 `model.family`、`feature_columns` 不重名/不覆盖保留列、`feature_availability` PIT 合同、`training` 与 `model_selection` 字段一致性等）。
 - features 文件可读，且 `feature_columns` 全部出现在文件表头中。
 - 疑似基本面特征不允许 `feature_availability.mode='required_timestamp'` 且
@@ -168,14 +162,14 @@ validator 不写 case YAML，不跑训练，不修改 features/prices 文件，�
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-model \
-  model_candidates/research/<candidate>/model_candidate.json
+  custom_models/research/<candidate>/model_candidate.json
 UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-factor run \
   configs/real_cases/model_factor/<candidate>_v1.yaml \
   --evaluation-profile exploratory_screening \
   --screening-retrain-every-n-dates 40 \
   --render-report \
   --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<candidate>/model_candidate.json
+  --draft-model-candidate custom_models/research/<candidate>/model_candidate.json
 ```
 
 更完整验证（在初筛通过后才跑）：
@@ -186,7 +180,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   --evaluation-profile default_research \
   --render-report \
   --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<candidate>/model_candidate.json
+  --draft-model-candidate custom_models/research/<candidate>/model_candidate.json
 ```
 
 ## Artifact 审计
@@ -204,7 +198,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   "draft_model_source": {
     "name": "<candidate>",
     "scope": "research",
-    "path": "model_candidates/research/<candidate>/model_candidate.json",
+    "path": "custom_models/research/<candidate>/model_candidate.json",
     "candidate_json_sha256": "...",
     "case_spec_sha256": "...",
     "feature_contract_sha256": "...",
@@ -255,7 +249,7 @@ candidate），但所有走 `alpha-lab model-idea distribute` 流的候选必须
 草稿模型通过 `default_research` 后仍然不自动晋升。晋升必须另走流程：
 
 1. 满足 promotion thresholds（与 single-factor 等价的标准评价）。
-2. 复制到 `model_candidates/promoted/<candidate>/`。
+2. 复制到 `custom_models/promoted/<candidate>/`。
 3. 写 promotion 卡片。
 4. 更新 promotion 日志。
 5. 再通过前端跑完整图文报告归档。

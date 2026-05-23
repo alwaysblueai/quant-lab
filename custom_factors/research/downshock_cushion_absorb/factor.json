@@ -1,0 +1,24 @@
+{
+  "name": "downshock_cushion_absorb",
+  "description": "Daily OHLC downshock-cushion absorption factor. It activates when an asset has an unusually large open-to-low downside probe versus its own trailing history, then rewards stocks that close materially above the intraday low. The final value is a same-date cross-sectional centered rank of the gated cushion strength.",
+  "required_columns": [
+    "open",
+    "high",
+    "low",
+    "close"
+  ],
+  "optional_columns": [],
+  "frequency": "daily",
+  "unavailable_data_policy": "return_nan",
+  "pit_assumption": "The factor is formed after the close of date t and uses only date t or earlier data. The downside shock threshold is an asset-grouped trailing 60-trading-day rolling 70th percentile with min_periods=20, evaluated through date t. The off-low cushion uses same-day OHLC from date t. Cross-sectional ranking uses only securities on the same date t.",
+  "code": "def build_factor(frame):\n    import numpy as np\n    import pandas as pd\n\n    factor_name = \"downshock_cushion_absorb\"\n    required = [\"date\", \"asset\", \"open\", \"high\", \"low\", \"close\"]\n    missing = [c for c in required if c not in frame.columns]\n    if missing:\n        return pd.Series(np.nan, index=frame.index, name=factor_name)\n\n    work = frame[required].copy()\n    work[\"_orig_pos\"] = np.arange(len(work))\n    work[\"date\"] = pd.to_datetime(work[\"date\"], errors=\"coerce\")\n\n    for col in [\"open\", \"high\", \"low\", \"close\"]:\n        work[col] = pd.to_numeric(work[col], errors=\"coerce\")\n\n    work = work.sort_values([\"asset\", \"date\", \"_orig_pos\"]).reset_index(drop=True)\n\n    opn = work[\"open\"]\n    high = work[\"high\"]\n    low = work[\"low\"]\n    close = work[\"close\"]\n\n    valid_ohlc = (\n        opn.gt(0)\n        & high.notna()\n        & low.notna()\n        & close.notna()\n        & high.ge(low)\n        & close.ge(low)\n        & close.le(high)\n    )\n\n    price_range = high - low\n    down = pd.Series(np.nan, index=work.index, dtype=\"float64\")\n    off_low = pd.Series(np.nan, index=work.index, dtype=\"float64\")\n\n    valid_range = valid_ohlc & price_range.gt(0)\n    down.loc[valid_range] = ((opn.loc[valid_range] - low.loc[valid_range]) / opn.loc[valid_range]).clip(lower=0.0)\n    off_low.loc[valid_range] = ((close.loc[valid_range] - low.loc[valid_range]) / price_range.loc[valid_range]).clip(0.0, 1.0)\n\n    down_q = (\n        down.groupby(work[\"asset\"], sort=False)\n        .rolling(window=60, min_periods=20)\n        .quantile(0.70)\n        .reset_index(level=0, drop=True)\n    )\n\n    ready = valid_range & down.notna() & off_low.notna() & down_q.notna()\n    raw = pd.Series(np.nan, index=work.index, dtype=\"float64\")\n    raw.loc[ready] = 0.0\n    shock = ready & down.ge(down_q)\n    raw.loc[shock] = down.loc[shock] * off_low.loc[shock]\n\n    ranked = raw.groupby(work[\"date\"], sort=False).rank(pct=True, method=\"average\")\n    value = ranked - ranked.groupby(work[\"date\"], sort=False).transform(\"mean\")\n    value = value.replace([np.inf, -np.inf], np.nan)\n\n    out = pd.Series(np.nan, index=frame.index, name=factor_name, dtype=\"float64\")\n    out.iloc[work[\"_orig_pos\"].to_numpy()] = value.to_numpy()\n    return out\n",
+  "provenance": {
+    "idea_id": "20260511T164925Z__idea-f92b851b",
+    "stage2_payload_sha256": "2c612c23cf11472776b360e19ec0bf4b04bca63b7c205f0b13f8ef8a48ffd648",
+    "audience_chain": [
+      "claude",
+      "codex",
+      "web_gpt_stage2"
+    ]
+  }
+}

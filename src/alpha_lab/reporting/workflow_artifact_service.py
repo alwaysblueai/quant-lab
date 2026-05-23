@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
-from alpha_lab.reporting.display_helpers import as_object_dict, safe_text
+from alpha_lab.reporting._shared import resolve_artifact_path
+from alpha_lab.reporting.display_helpers import as_object_dict
 from alpha_lab.reporting.renderers.research_dashboard_schema import (
     CandidateRecipeGenerationResult,
     FactorSetConstructionResult,
@@ -473,7 +474,7 @@ def resolve_workflow_closure_artifact_paths_from_comparison_payload(
     artifact_payload = as_object_dict(payload.get("workflow_closure_artifacts"))
     paths: dict[str, Path] = {}
     for key, filename in WORKFLOW_CLOSURE_ARTIFACT_FILENAMES.items():
-        pointer_path = _resolve_artifact_path(
+        pointer_path = resolve_artifact_path(
             artifact_payload.get(key) if artifact_payload else None,
             base_dir=base_dir,
         )
@@ -484,16 +485,6 @@ def resolve_workflow_closure_artifact_paths_from_comparison_payload(
         if fallback_path.exists():
             paths[key] = fallback_path
     return paths
-
-
-def _resolve_artifact_path(value: object, *, base_dir: Path) -> Path | None:
-    text = safe_text(value)
-    if not text:
-        return None
-    candidate = Path(text)
-    if not candidate.is_absolute():
-        candidate = base_dir / candidate
-    return candidate.resolve()
 
 
 def _load_json(path: Path) -> dict[str, object]:

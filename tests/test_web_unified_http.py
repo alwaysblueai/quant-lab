@@ -362,7 +362,8 @@ def test_model_lab_page_returns_html(live_server: tuple[str, _UnifiedService]) -
     assert "candidatePayloadInput" in body
     assert "/api/model-lab/candidates" in body
     assert "btnCandidateRun" in body
-    assert "Validate + Run Full Report" in body
+    assert "导入并运行完整报告" in body
+    assert "Advanced Candidate Actions" in body
 
 
 # ---------------------------------------------------------------------------
@@ -1807,7 +1808,7 @@ def test_model_lab_candidate_routes(
     assert saved["name"] == "http_model_candidate"
     candidate_path = (
         svc.workspace_root
-        / "model_candidates"
+        / "custom_models"
         / "research"
         / "http_model_candidate"
         / "model_candidate.json"
@@ -2260,6 +2261,47 @@ def test_create_case_missing_fields(seeded_server: tuple[str, _UnifiedService, s
     assert status in (400, 422, 500)
     assert isinstance(data, dict)
     assert data.get("ok") is False
+
+
+def test_claim_backend_case_route(seeded_server: tuple[str, _UnifiedService, str]) -> None:
+    base_url, svc, slug = seeded_server
+    specs_root = svc.workspace_root / "configs" / "real_cases" / "single_factor"
+    specs_root.mkdir(parents=True, exist_ok=True)
+    spec_path = specs_root / "http_claim_case.yaml"
+    spec_path.write_text(
+        "\n".join(
+            [
+                "name: http_claim_case",
+                "factor_name: http_claim_factor",
+                "factor_path: ./factor.csv",
+                "prices_path: ./prices.csv",
+                "rebalance_frequency: W",
+                "n_quantiles: 5",
+                "direction: long",
+                "universe: {name: demo, path: ./universe.csv, in_universe_column: in_universe}",
+                "target: {kind: forward_return, horizon: 5}",
+                "transaction_cost: {one_way_rate: 0.001}",
+                "output: {root_dir: ./outputs}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    status, data = _post(
+        base_url,
+        f"/api/projects/{slug}/cases/claim",
+        {"spec_path": str(spec_path)},
+    )
+    assert status == 200
+    assert data["status"] == "claimed"
+
+    status, listed = _get(base_url, f"/api/projects/{slug}/cases")
+    assert status == 200
+    row = next(item for item in listed["cases"] if item["case_name"] == "http_claim_case")
+    assert row["claim_status"] == "claimed_by_current_project"
+    assert row["requires_explicit_selection"] is False
+    assert row["is_recommended"] is True
 
 
 # ---------------------------------------------------------------------------

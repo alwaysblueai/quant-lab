@@ -102,13 +102,6 @@ class NeutralizationComparisonPayload(TypedDict, total=False):
     interpretation_reasons: list[str]
 
 
-class PromotionDecisionPayload(TypedDict):
-    verdict: object
-    reasons: object
-    blockers: object
-    source: str
-
-
 class ResearchValidationResultsPayload(TypedDict):
     key_metrics: dict[str, object]
     evaluation_standard: ResearchValidationEvaluationStandardPayload

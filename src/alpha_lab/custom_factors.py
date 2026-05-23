@@ -29,6 +29,7 @@ class CustomFactorSource:
     created_at: str = ""
     required_columns: tuple[str, ...] = ()
     optional_columns: tuple[str, ...] = ()
+    archive_identity: str = ""
     frequency: str | None = None
     unavailable_data_policy: str | None = None
     pit_assumption: str | None = None
@@ -50,6 +51,8 @@ class CustomFactorSource:
             payload["required_columns"] = list(self.required_columns)
         if self.optional_columns:
             payload["optional_columns"] = list(self.optional_columns)
+        if self.archive_identity:
+            payload["archive_identity"] = self.archive_identity
         if self.frequency:
             payload["frequency"] = self.frequency
         if self.unavailable_data_policy:
@@ -216,6 +219,7 @@ def read_custom_factor_source(path: str | Path) -> CustomFactorSource:
         created_at=str(payload.get("created_at") or "").strip(),
         required_columns=_string_tuple(payload.get("required_columns")),
         optional_columns=_string_tuple(payload.get("optional_columns")),
+        archive_identity=str(payload.get("archive_identity") or "").strip(),
         frequency=_optional_text(payload.get("frequency")),
         unavailable_data_policy=_optional_text(payload.get("unavailable_data_policy")),
         pit_assumption=_optional_text(payload.get("pit_assumption")),

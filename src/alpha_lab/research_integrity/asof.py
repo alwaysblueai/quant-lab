@@ -24,12 +24,6 @@ class TimeSemanticsMetadata:
         if not self.dataset_name.strip():
             raise AlphaLabConfigError("dataset_name must be non-empty")
 
-    @property
-    def resolved_known_at_col(self) -> str | None:
-        if self.known_at_col is not None:
-            return self.known_at_col
-        return self.available_at_col
-
     def to_dict(self) -> dict[str, object]:
         return {
             "dataset_name": self.dataset_name,

@@ -12,6 +12,13 @@ from typing import Literal, cast
 import pandas as pd
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+from alpha_lab.reporting._shared import (
+    annualized_from_series as _annualized_from_series,
+)
+from alpha_lab.reporting._shared import (
+    periods_per_year as _periods_per_year,
+)
+from alpha_lab.reporting._shared import resolve_artifact_path
 from alpha_lab.reporting.display_helpers import (
     as_object_dict,
     as_object_list,
@@ -3449,27 +3456,6 @@ def _factor_correlation_matrix(
     return tuple(rows)
 
 
-def _shortlist_recommendations(
-    *,
-    summaries: list[FactorSummary] | tuple[FactorSummary, ...],
-    correlation_matrix: tuple[tuple[str, tuple[tuple[str, float | None], ...]], ...],
-) -> tuple[str, ...]:
-    rows = [
-        FactorComparisonRow(
-            factor_id=item.factor_id,
-            factor_name=item.factor_name,
-            factor_family=item.factor_family,
-        )
-        for item in summaries
-    ]
-    shortlist = _build_factor_shortlist_result(
-        comparison_rows=rows,
-        correlation_matrix=correlation_matrix,
-        config=_DEFAULT_SHORTLIST_CONFIG,
-    )
-    return shortlist.recommendation_summary
-
-
 def _build_factor_shortlist_result(
     *,
     comparison_rows: list[FactorComparisonRow] | tuple[FactorComparisonRow, ...],
@@ -5291,15 +5277,6 @@ def _return_stats(series: pd.Series, periods_per_year: int) -> dict[str, object]
     }
 
 
-def _annualized_from_series(series: pd.Series, periods_per_year: int) -> float | None:
-    clean = pd.to_numeric(series, errors="coerce").dropna()
-    if clean.empty:
-        return None
-    nav = (1.0 + clean).cumprod()
-    total_return = float(nav.iloc[-1] - 1.0)
-    return float((1.0 + total_return) ** (periods_per_year / len(clean)) - 1.0)
-
-
 def _baseline_scenario(portfolio_metrics: dict[str, object]) -> dict[str, object]:
     scenarios = as_object_list(portfolio_metrics.get("scenario_metrics"))
     if not scenarios:
@@ -5312,15 +5289,6 @@ def _baseline_scenario(portfolio_metrics: dict[str, object]) -> dict[str, object
     return by_rank[0]
 
 
-def _periods_per_year(rebalance_frequency: str) -> int:
-    freq = (rebalance_frequency or "").strip().upper()
-    if freq.startswith("D"):
-        return 252
-    if freq.startswith("W"):
-        return 52
-    if freq.startswith("M"):
-        return 12
-    return 252
 
 
 def _distribution_snapshots(factor_series: pd.Series | None) -> tuple[str, ...]:
@@ -5673,7 +5641,7 @@ def _workflow_closure_artifact_paths_from_payload(
     paths: dict[str, Path] = {}
     for object_label, filename, key in _WORKFLOW_CLOSURE_ARTIFACT_REQUIREMENTS:
         raw_pointer = artifact_payload.get(key) if artifact_payload else None
-        candidate = _resolve_artifact_path(
+        candidate = resolve_artifact_path(
             raw_pointer,
             base_dir=base_dir,
         )
@@ -5756,16 +5724,6 @@ def _workflow_closure_artifact_paths_from_payload(
             remediation_hint=(f"Persist {filename} near comparison output before strict loading."),
         )
     return paths
-
-
-def _resolve_artifact_path(value: object, *, base_dir: Path) -> Path | None:
-    text = safe_text(value)
-    if not text:
-        return None
-    candidate = Path(text)
-    if not candidate.is_absolute():
-        candidate = base_dir / candidate
-    return candidate.resolve()
 
 
 def _load_workflow_artifact_payload(

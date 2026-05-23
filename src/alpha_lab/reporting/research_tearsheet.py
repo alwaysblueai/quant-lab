@@ -1070,15 +1070,6 @@ def _parse_axis_date(value: object) -> dt.date | None:
         return None
 
 
-def _parse_axis_label(value: str) -> dt.date:
-    parts = value.split(".")
-    if len(parts) >= 3:
-        return dt.date(int(parts[0]), int(parts[1]), int(parts[2]))
-    if len(parts) >= 2:
-        return dt.date(int(parts[0]), int(parts[1]), 1)
-    return dt.date(int(parts[0]), 1, 1)
-
-
 def _axis_tick_interval(*, start: dt.date, end: dt.date) -> tuple[int, int, bool, int]:
     span_days = max(0, (end - start).days)
     if span_days <= 45:

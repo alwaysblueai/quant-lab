@@ -37,10 +37,11 @@ __all__ = (
     "apply_walk_forward_overlay",
     "build_walk_forward_verdict_overlay",
     "collect_run_factor_correlation_summary",
+    "export_experiment_card",
+    "export_summary_csv",
     "inspect_run_factor_correlation",
     "summarise_experiment_result",
     "to_obsidian_markdown",
-    "write_obsidian_summary_note",
 )
 
 # Ordered column names for summary DataFrames produced by this module.
@@ -591,6 +592,8 @@ def _render_experiment_card(
         "type: experiment",
         f"name: {card_name}",
         'source: "alpha-lab / Self-developed"',
+        "generated_by: alpha_lab",
+        "export_kind: pipeline_auto",
         f"tags: {tag_str}",
         "status: draft",
         f"factor: {factor_name}",

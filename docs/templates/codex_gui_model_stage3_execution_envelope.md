@@ -13,7 +13,7 @@
 
 只读取下面 Stage2 输出中的 model_candidate_payload 作为机器事实。
 如果 human_summary、risk_controls、stage3_notes 或正文与 case_spec_payload 冲突，
-以 case_spec_payload 为准，并写入 model_candidates/research/<candidate_name>/research_log.md。
+以 case_spec_payload 为准，并写入 custom_models/research/<candidate_name>/research_log.md。
 
 禁止：
 - 创建临时脚本
@@ -22,14 +22,14 @@
 - 修改 src/alpha_lab/model_factor、src/alpha_lab/factors 等 core 模块
 - 引入自定义 feature builder code 或自定义 estimator code
 - 绕过 alpha-lab 标准 model-factor pipeline
-- 修改 model_candidates/promoted
+- 修改 custom_models/promoted
 - 修改前端正式注册
 - 引入 portfolio construction 结论
 - 引入 Level 3 execution / fill simulation / replay 语义
 
 允许写入：
-- model_candidates/research/<candidate_name>/model_candidate.json
-- model_candidates/research/<candidate_name>/research_log.md
+- custom_models/research/<candidate_name>/model_candidate.json
+- custom_models/research/<candidate_name>/research_log.md
 - configs/real_cases/model_factor/<candidate_name>_vN.yaml
 
 必须完成：
@@ -47,7 +47,7 @@ forbidden_actions（Stage 3 执行者硬约束，违反任一即视为本轮失�
 - 跳过 validate-draft-model 或 silently 接受 warnings
 - 删除或重写 provenance 块
 - 引入自定义 feature builder code / 自定义 estimator code / sample_weight hook
-- 修改 src/alpha_lab/model_factor / src/alpha_lab/factors / model_candidates/promoted / 前端正式注册
+- 修改 src/alpha_lab/model_factor / src/alpha_lab/factors / custom_models/promoted / 前端正式注册
 
 escalation_triggers（出现以下任一情况，停下并以中文报告，不继续自动修复）：
 - validate-draft-model 报错
@@ -58,8 +58,8 @@ escalation_triggers（出现以下任一情况，停下并以中文报告，不�
 
 默认在 Codex GUI 后端完成初筛实验和迭代点评。只有当候选已经比较成熟、需要
 完整可视化报告时，才使用 `/model-lab` 的 `Draft Candidates` 面板执行前端
-完整报告流程：粘贴 payload -> 保存 Candidate -> Validate -> 生成 Case YAML ->
-Validate + Run Full Report。无论走 CLI 还是 Web UI，最终判断都以 validator 和
+完整报告流程：粘贴 payload -> 导入并运行完整报告（内部执行 save -> validate ->
+materialize -> run）。无论走 CLI 还是 Web UI，最终判断都以 validator 和
 artifact 中的 `draft_model_source` hash 审计字段为准。
 
 如果 validator、case_spec_payload schema、feature 字段可用性、PIT 检查或
@@ -72,7 +72,7 @@ artifact hash 审计失败，停止并报告失败，不要自行改写为另一
 ## 最小执行命令
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-model model_candidates/research/<candidate_name>/model_candidate.json
+UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-model custom_models/research/<candidate_name>/model_candidate.json
 ```
 
 ```bash
@@ -82,5 +82,5 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   --screening-retrain-every-n-dates 40 \
   --render-report \
   --vault-export-mode skip \
-  --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json
+  --draft-model-candidate custom_models/research/<candidate_name>/model_candidate.json
 ```

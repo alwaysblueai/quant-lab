@@ -41,6 +41,7 @@ from ._utils import (
     _finite_or_none,
     _split_contract_payload,
     _sync_exported_manifest_copies,
+    _text_or_none,
     _to_jsonable,
     _write_json,
     logger,
@@ -554,6 +555,12 @@ def export_artifact_bundle(
     _write_json(paths["purged_kfold_summary"], purged_kfold.summary)
     _write_csv(paths["purged_kfold_folds"], purged_kfold.folds)
     _write_csv(paths["purged_kfold_fold_daily"], purged_kfold.fold_daily)
+    archive_identity = (
+        _text_or_none((draft_model_source or {}).get("archive_identity"))
+        or _text_or_none(spec.archive_identity)
+        or _text_or_none((draft_model_source or {}).get("name"))
+        or spec.factor_name
+    )
     _write_json(
         paths["model_selection_json"],
         _build_model_selection_payload(
@@ -568,6 +575,7 @@ def export_artifact_bundle(
             "artifact_type": "alpha_lab_model_definition",
             "case_name": spec.name,
             "factor_name": spec.factor_name,
+            "archive_identity": archive_identity,
             "model_family": spec.model.family,
             "model_params": _to_jsonable(spec.model.params),
             "resolved_model_params": _build_resolved_model_params_payload(spec=spec),
@@ -612,6 +620,7 @@ def export_artifact_bundle(
         "prices_path": spec.prices_path,
         "features_path": spec.features_path,
         "factor_name": spec.factor_name,
+        "archive_identity": archive_identity,
         "feature_columns": list(spec.feature_columns),
         "model_family": spec.model.family,
         "feature_availability_mode": spec.feature_availability.mode,
