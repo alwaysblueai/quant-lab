@@ -103,6 +103,7 @@ def _build_label_temporal_contract_payload(
         "target_kind": spec.target.kind,
         "target_horizon": int(spec.target.horizon),
         "target_price_column": spec.target.price_column,
+        "target_execution_price_mode": spec.target.execution_price_mode,
         "max_abs_forward_return": _finite_if_number(spec.target.max_abs_forward_return),
         "purged_train_gap_dates": purge_gap,
         "walk_forward_purged_training": True,

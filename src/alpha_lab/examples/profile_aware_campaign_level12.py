@@ -399,12 +399,15 @@ def _write_case_stable_promoted(case_root: Path) -> CampaignExampleCaseSpec:
         asset_latent = latent[asset]
         eps = rng.normal(0.0, 0.006, size=n_days)
         for t, date in enumerate(dates):
+            open_price = price
             pred = (1.0 * asset_latent[t - 1] if t > 0 else 0.0) + (
                 0.35 * macro[t - 1] if t > 0 else 0.0
             )
             ret = 0.0046 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
 
     prices = pd.DataFrame(rows_price)
     universe = pd.DataFrame(
@@ -502,12 +505,15 @@ def _write_case_short_window_sensitive(case_root: Path) -> CampaignExampleCaseSp
         eps = rng.normal(0.0, 0.006, size=n_days)
         factor_noise = rng.normal(0.0, 0.1, size=n_days)
         for t, date in enumerate(dates):
+            open_price = price
             pred = (1.0 * asset_latent[t - 1] if t > 0 else 0.0) + (
                 0.3 * macro[t - 1] if t > 0 else 0.0
             )
             ret = 0.0042 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
             rows_factor.append(
                 {
                     "date": date,
@@ -579,12 +585,15 @@ def _write_case_triage_sensitive(case_root: Path) -> CampaignExampleCaseSpec:
         asset_latent = latent[asset]
         eps = rng.normal(0.0, 0.009, size=n_days)
         for t, date in enumerate(dates):
+            open_price = price
             pred = (0.8 * asset_latent[t - 1] if t > 0 else 0.0) + (
                 0.2 * macro[t - 1] if t > 0 else 0.0
             )
             ret = 0.0024 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
 
     for asset in assets:
         asset_latent = latent[asset]

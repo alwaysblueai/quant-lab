@@ -187,7 +187,10 @@ def build_level2_promotion(
     reasons: tuple[str, ...] = ()
     supports: list[str] = []
     concerns: list[str] = []
+    data_quality_status = str(metrics.get("data_quality_status") or "").strip().lower()
 
+    if data_quality_status == "fail":
+        blockers.append("blocked by failing data-quality checks")
     if has_weak_verdict:
         blockers.append("blocked by weak single-case verdict")
     if coverage_block:

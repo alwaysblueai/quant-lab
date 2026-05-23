@@ -212,7 +212,10 @@ def build_model_factor(
 
     with diagnostics.stage(
         "target_build",
-        payload={"target_horizon": int(config.target_horizon)},
+        payload={
+            "target_horizon": int(config.target_horizon),
+            "target_execution_price_mode": config.target_execution_price_mode,
+        },
     ) as target_stage:
         price_universe_counts = prices.groupby("date", sort=True)["asset"].nunique()
         if prepared_cache is not None:
@@ -227,9 +230,18 @@ def build_model_factor(
             label_prices = _prices_for_target_labels(
                 prices,
                 price_column=config.target_price_column,
+                execution_price_mode=config.target_execution_price_mode,
             )
-            label_df = forward_return(label_prices, horizon=config.target_horizon)
-            label_name = f"forward_return_{config.target_horizon}"
+            label_df = forward_return(
+                label_prices,
+                horizon=config.target_horizon,
+                execution_price_mode=config.target_execution_price_mode,
+            )
+            label_name = (
+                f"forward_return_{config.target_horizon}"
+                if config.target_execution_price_mode == "close"
+                else f"forward_return_{config.target_horizon}_{config.target_execution_price_mode}"
+            )
             forward_label_df = (
                 label_df[label_df["factor"] == label_name][["date", "asset", "factor", "value"]]
                 .copy()
@@ -241,6 +253,7 @@ def build_model_factor(
                 labels,
                 label_prices=label_prices,
                 target_price_column=config.target_price_column,
+                target_execution_price_mode=config.target_execution_price_mode,
                 horizon=int(config.target_horizon),
                 max_abs_forward_return=config.max_abs_forward_return,
             )
@@ -305,6 +318,7 @@ def build_model_factor(
             n_label_rows=int(len(labels)),
             n_forward_label_cache_rows=int(len(forward_label_df)),
             target_price_column=config.target_price_column,
+            target_execution_price_mode=config.target_execution_price_mode,
             max_abs_forward_return=config.max_abs_forward_return,
             label_extreme_filtered_rows=target_diagnostics.get("label_extreme_filtered_rows"),
             label_extreme_max_abs_raw_return=target_diagnostics.get(
@@ -337,6 +351,7 @@ def build_model_factor(
                 message="extreme forward-return labels filtered",
                 payload={
                     "target_price_column": config.target_price_column,
+                    "target_execution_price_mode": config.target_execution_price_mode,
                     "max_abs_forward_return": config.max_abs_forward_return,
                     "filtered_rows": target_diagnostics.get("label_extreme_filtered_rows"),
                     "max_abs_raw_return": target_diagnostics.get(

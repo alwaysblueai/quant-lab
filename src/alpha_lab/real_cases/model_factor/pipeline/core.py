@@ -275,6 +275,7 @@ def run_model_factor_case(
             price_columns, optional_price_columns = _model_factor_price_read_columns(
                 evaluation_config,
                 target_price_column=spec.target.price_column,
+                execution_price_mode=spec.target.execution_price_mode,
             )
             feature_storage = ensure_parquet_tabular_frame(
                 spec.features_path,
@@ -508,6 +509,7 @@ def run_model_factor_case(
                 training=spec.training,
                 known_at_col=known_at_col,
                 target_price_column=spec.target.price_column,
+                target_execution_price_mode=spec.target.execution_price_mode,
                 max_abs_forward_return=spec.target.max_abs_forward_return,
                 label_winsorize_zscore=spec.target.winsorize_zscore,
                 preparation_cache_dir=(
@@ -563,6 +565,7 @@ def run_model_factor_case(
             target_horizon=int(spec.target.horizon),
             target_label_df=build_result.forward_label_df,
             target_price_column=spec.target.price_column,
+            execution_price_mode=spec.target.execution_price_mode,
             max_abs_forward_return=spec.target.max_abs_forward_return,
             evaluation_config=evaluation_config,
         )
@@ -641,6 +644,7 @@ def run_model_factor_case(
                 evaluation_profile=evaluation_profile,
                 evaluation_stage_timings=dict(evaluation_result.stage_timings),
                 neutralization_enabled=bool(spec.neutralization.enabled),
+                target_execution_price_mode=spec.target.execution_price_mode,
                 forward_label_cache_horizons=sorted(forward_label_cache),
                 forward_label_cache_rows={
                     int(horizon): int(len(labels))

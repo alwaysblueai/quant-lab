@@ -6,6 +6,7 @@ from typing import cast, get_args
 
 import pandas as pd
 
+from alpha_lab.labels import ExecutionPriceMode
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult
 
 # Cross-module imports (auto-added)
@@ -311,6 +312,7 @@ class ModelFactorBuildConfig:
     feature_importance: FeatureImportanceConfig = FeatureImportanceConfig()
     known_at_col: str | None = None
     target_price_column: str = "close"
+    target_execution_price_mode: ExecutionPriceMode = "next_open"
     max_abs_forward_return: float | None = None
     label_winsorize_zscore: float | None = None
     preparation_cache_dir: str | None = None
@@ -337,6 +339,17 @@ class ModelFactorBuildConfig:
             raise ValueError("known_at_col must be non-empty when provided")
         if not self.target_price_column.strip():
             raise ValueError("target_price_column must be non-empty")
+        if not isinstance(self.target_execution_price_mode, str):
+            raise ValueError("target_execution_price_mode must be a string")
+        normalized_mode = self.target_execution_price_mode.strip().lower()
+        if normalized_mode not in {"close", "next_open"}:
+            raise ValueError("target_execution_price_mode must be one of ['close', 'next_open']")
+        if normalized_mode != self.target_execution_price_mode:
+            object.__setattr__(
+                self,
+                "target_execution_price_mode",
+                cast(ExecutionPriceMode, normalized_mode),
+            )
         if self.max_abs_forward_return is not None and self.max_abs_forward_return <= 0:
             raise ValueError("max_abs_forward_return must be > 0 when provided")
         if self.label_winsorize_zscore is not None and self.label_winsorize_zscore <= 0:

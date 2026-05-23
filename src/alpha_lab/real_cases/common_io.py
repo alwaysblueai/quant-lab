@@ -257,10 +257,10 @@ def _apply_optional_dividend_adjustment(prices: pd.DataFrame) -> pd.DataFrame:
     """Apply default dividend back-adjustment when event column is present.
 
     The daily price panel may include an optional ``dividend_per_share`` column
-    where non-zero entries mark ex-dividend dates. When present, the single-
-    factor pipeline should use adjusted close prices by default so all downstream
-    labels (including cached horizon=1 labels) are aligned to the same adjusted
-    close path.
+    where non-zero entries mark ex-dividend dates. When present, the real-case
+    pipeline should use consistently adjusted price columns so downstream labels
+    (including next-open cached labels) keep entry and exit prices on the same
+    adjusted basis.
     """
 
     if "dividend_per_share" not in prices.columns:

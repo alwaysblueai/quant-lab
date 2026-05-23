@@ -225,17 +225,34 @@ def _winsorize_labels_per_date(labels: pd.DataFrame, *, z: float) -> tuple[pd.Da
     return frame, n_clipped
 
 
-def _prices_for_target_labels(prices: pd.DataFrame, *, price_column: str) -> pd.DataFrame:
+def _prices_for_target_labels(
+    prices: pd.DataFrame,
+    *,
+    price_column: str,
+    execution_price_mode: str = "close",
+) -> pd.DataFrame:
     column = str(price_column or "").strip()
     if not column:
         raise ValueError("target_price_column must be non-empty")
     if column not in prices.columns:
         raise ValueError(f"target price column {column!r} is missing from prices")
+    mode = str(execution_price_mode or "close").strip().lower()
+    if mode not in {"close", "next_open"}:
+        raise ValueError("target_execution_price_mode must be one of ['close', 'next_open']")
     required = ["date", "asset", column]
+    if mode == "next_open":
+        if "open" not in prices.columns:
+            raise ValueError(
+                "target_execution_price_mode='next_open' requires an 'open' column in prices"
+            )
+        required.append("open")
     frame = prices.loc[:, required].copy()
     if column != "close":
         frame = frame.rename(columns={column: "close"})
-    return frame.loc[:, ["date", "asset", "close"]]
+    out_columns = ["date", "asset", "close"]
+    if mode == "next_open":
+        out_columns.append("open")
+    return frame.loc[:, out_columns]
 
 
 def _apply_forward_return_extreme_filter(
@@ -244,6 +261,7 @@ def _apply_forward_return_extreme_filter(
     *,
     label_prices: pd.DataFrame,
     target_price_column: str,
+    target_execution_price_mode: str,
     horizon: int,
     max_abs_forward_return: float | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
@@ -256,6 +274,7 @@ def _apply_forward_return_extreme_filter(
     )
     diagnostics: dict[str, object] = {
         "target_price_column": str(target_price_column),
+        "target_execution_price_mode": str(target_execution_price_mode),
         "label_extreme_max_abs_raw_return": max_abs_raw,
         "label_extreme_filter_threshold": (
             float(max_abs_forward_return) if max_abs_forward_return is not None else None
@@ -276,6 +295,7 @@ def _apply_forward_return_extreme_filter(
     samples = _forward_return_extreme_samples(
         forward_label_df.loc[mask, ["date", "asset", "value"]],
         label_prices=label_prices,
+        execution_price_mode=target_execution_price_mode,
         horizon=int(horizon),
         limit=20,
     )
@@ -291,16 +311,25 @@ def _forward_return_extreme_samples(
     outlier_rows: pd.DataFrame,
     *,
     label_prices: pd.DataFrame,
+    execution_price_mode: str,
     horizon: int,
     limit: int,
 ) -> list[dict[str, object]]:
     if outlier_rows.empty:
         return []
     price_frame = label_prices.loc[:, ["date", "asset", "close"]].copy()
+    mode = str(execution_price_mode or "close").strip().lower()
+    if mode == "next_open" and "open" in label_prices.columns:
+        price_frame["open"] = label_prices["open"]
     price_frame["date"] = pd.to_datetime(price_frame["date"])
     price_frame = price_frame.sort_values(["asset", "date"], kind="mergesort")
-    price_frame["entry_price"] = pd.to_numeric(price_frame["close"], errors="coerce")
-    price_frame["exit_price"] = price_frame.groupby("asset", sort=False)["entry_price"].shift(
+    close_price = pd.to_numeric(price_frame["close"], errors="coerce")
+    if mode == "next_open" and "open" in price_frame.columns:
+        open_price = pd.to_numeric(price_frame["open"], errors="coerce")
+        price_frame["entry_price"] = open_price.groupby(price_frame["asset"], sort=False).shift(-1)
+    else:
+        price_frame["entry_price"] = close_price
+    price_frame["exit_price"] = close_price.groupby(price_frame["asset"], sort=False).shift(
         -int(horizon)
     )
     sidecar = price_frame.loc[:, ["date", "asset", "entry_price", "exit_price"]]
@@ -327,6 +356,7 @@ def _forward_return_extreme_samples(
 def _target_diagnostics_from_data_health(data_health: dict[str, object]) -> dict[str, object]:
     keys = (
         "target_price_column",
+        "target_execution_price_mode",
         "label_extreme_max_abs_raw_return",
         "label_extreme_filter_threshold",
         "label_extreme_filtered_rows",

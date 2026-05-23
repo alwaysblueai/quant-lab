@@ -735,7 +735,7 @@
       "source": "single_factor_pipeline",
       "target_horizon": 5
     },
-    "target_execution_price_mode": "close",
+    "target_execution_price_mode": "next_open",
     "target_horizon": 5,
     "target_kind": "forward_return",
     "universe_name": "demo_universe"

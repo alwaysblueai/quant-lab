@@ -33,9 +33,10 @@ When the input is Parquet, the model-factor pipeline reads only the required
 identity, availability, preprocessing, and selected feature columns instead of
 materializing the full wide feature table.
 Model-factor price panels follow the same rule: the runner always reads
-`date`, `asset`, and `close`, then adds optional price columns only when the
-active evaluation profile can use them, such as `open/high/low/volume` for
-tradability and next-open sensitivity, `amount` or market-cap columns for
+`date`, `asset`, and `close`. Because the default target execution convention
+is `next_open`, default model-factor runs also require `open`; additional
+price columns are loaded only when the active evaluation profile can use them,
+such as `high/low/volume` for tradability, `amount` or market-cap columns for
 capacity diagnostics, and cached return columns for baseline comparisons.
 
 Model-factor feature-importance diagnostics are deliberately throttled. By

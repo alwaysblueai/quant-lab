@@ -1011,6 +1011,7 @@ def _compact_backtest_summary(summary: Mapping[str, object]) -> dict[str, object
             "statistics_series_policy": summary.get("statistics_series_policy"),
             "statistics_rebalance_step": summary.get("statistics_rebalance_step"),
             "statistics_periods_per_year": summary.get("statistics_periods_per_year"),
+            "contribution_diagnostics": summary.get("contribution_diagnostics", {}),
             "max_drawdown_oos": summary.get("max_drawdown_oos"),
             "pre_cost_return_oos": summary.get("pre_cost_return_oos"),
             "post_cost_return_oos": summary.get("post_cost_return_oos"),

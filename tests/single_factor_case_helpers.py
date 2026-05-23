@@ -101,6 +101,7 @@ def _synthetic_case_tables(
         industry = ["IND_A", "IND_B", "IND_C"][i % 3]
 
         for t, date in enumerate(dates):
+            open_price = price
             pred = latent[t - 1] if t > 0 else 0.0
             ret = 0.0018 * pred + rng.normal(0.0, 0.01)
             price = max(price * (1.0 + ret), 1.0)
@@ -113,6 +114,7 @@ def _synthetic_case_tables(
                 {
                     "date": date,
                     "asset": asset,
+                    "open": float(open_price),
                     "close": float(price),
                     "amount": float(amount),
                     "total_mv": float(total_mv),

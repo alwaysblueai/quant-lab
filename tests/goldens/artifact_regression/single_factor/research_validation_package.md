@@ -171,8 +171,8 @@
 - `instability_flags`: `[]`
 - `is_end`: `2024-05-03`
 - `is_start`: `2024-01-01`
-- `label_entry_assumption`: `factor-date close (instant execution)`
-- `label_mode`: `close`
+- `label_entry_assumption`: `next open after factor date`
+- `label_mode`: `next_open`
 - `lag_sensitivity_ic_decay_lag_1`: `0.0987376642163248`
 - `lag_sensitivity_lags`: `[0, 1, 2, 3]`
 - `lag_sensitivity_long_short_ir_lag_0`: `0.19637844148848294`
@@ -339,12 +339,12 @@
 - `neutralization_rolling_worst_mean_min_delta`: `None`
 - `neutralization_uncertainty_overlap_zero_count_delta`: `None`
 - `neutralization_valid_ratio_min_delta`: `None`
-- `next_open_execution_available`: `False`
-- `next_open_long_short_ir`: `None`
-- `next_open_mean_ic`: `None`
-- `next_open_mean_ic_delta`: `None`
-- `next_open_mean_long_short_return`: `None`
-- `next_open_mean_long_short_return_delta`: `None`
+- `next_open_execution_available`: `True`
+- `next_open_long_short_ir`: `0.19637844148848294`
+- `next_open_mean_ic`: `0.07683985112133151`
+- `next_open_mean_ic_delta`: `0.0`
+- `next_open_mean_long_short_return`: `0.004855674205640039`
+- `next_open_mean_long_short_return_delta`: `0.0`
 - `oos_end`: `2024-08-09`
 - `oos_start`: `2024-05-13`
 - `overall_sample_coverage`: `0.9687010954616588`
@@ -475,7 +475,7 @@
 - `subperiod_long_short_positive_share_full`: `1.0`
 - `subperiod_long_short_positive_share_is`: `0.6666666666666666`
 - `subperiod_long_short_positive_share_oos`: `1.0`
-- `target_execution_price_mode`: `close`
+- `target_execution_price_mode`: `next_open`
 - `target_horizon`: `5`
 - `target_kind`: `forward_return`
 - `tradability_filter_applied`: `False`

@@ -76,6 +76,7 @@
     "skip_reason_counts": {
       "insufficient_train_dates": 24
     },
+    "target_execution_price_mode": "next_open",
     "target_horizon": 5,
     "target_price_column": "close",
     "top_features": [
@@ -116,6 +117,7 @@
     "label_winsorize_zscore": null,
     "max_abs_forward_return": null,
     "purged_train_gap_dates": 4,
+    "target_execution_price_mode": "next_open",
     "target_horizon": 5,
     "target_kind": "forward_return",
     "target_price_column": "close",
@@ -176,6 +178,14 @@
     "model_selection_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/model_selection.json",
     "training_log_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/training_log.csv",
     "training_metrics_path": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/training_metrics.csv"
+  },
+  "target": {
+    "execution_price_mode": "next_open",
+    "horizon": 5,
+    "kind": "forward_return",
+    "max_abs_forward_return": null,
+    "price_column": "close",
+    "winsorize_zscore": null
   },
   "training": {
     "min_score_assets": 5,

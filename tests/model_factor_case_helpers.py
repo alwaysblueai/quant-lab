@@ -106,11 +106,19 @@ def _synthetic_case_tables(
         industry = ["IND_A", "IND_B", "IND_C"][i % 3]
 
         for t, date in enumerate(dates):
+            open_price = price
             pred = 0.8 * momentum_latent[t - 1] + 0.4 * quality_latent[t - 1] if t > 0 else 0.0
             ret = 0.0025 * pred + rng.normal(0.0, 0.01)
             price = max(price * (1.0 + ret), 1.0)
 
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {
+                    "date": date,
+                    "asset": asset,
+                    "open": float(open_price),
+                    "close": float(price),
+                }
+            )
             rows_feature.append(
                 {
                     "date": date,

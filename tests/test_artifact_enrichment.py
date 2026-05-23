@@ -254,6 +254,45 @@ def test_group_nav_handles_weekly_rebalance_with_1d_label() -> None:
     assert float(nav_table["nav"].iloc[-1]) == pytest.approx(1.02 ** 3)
 
 
+def test_backtest_summary_adds_group_contribution_diagnostics_with_oos_reset() -> None:
+    dates = pd.to_datetime(["2023-12-28", "2023-12-29", "2024-01-02", "2024-01-03"])
+    top_returns = [0.10, 0.20, -0.05, 0.04]
+    group_returns = pd.DataFrame(
+        [
+            {"date": date.strftime("%Y-%m-%d"), "group": group, "group_return": value}
+            for date, top_return in zip(dates, top_returns, strict=True)
+            for group, value in ((1, 0.0), (5, top_return))
+        ]
+    )
+
+    summary, _ = build_backtest_summary_payload(
+        group_returns_df=group_returns,
+        rebalance_frequency="D",
+        metrics_for_payload={"split_contract": {"oos_start": "2024-01-02"}},
+        label_horizon=1,
+    )
+
+    diagnostics = summary["contribution_diagnostics"]
+    assert diagnostics["source"] == "group_returns_non_overlapping"
+    assert diagnostics["sample_step"] == 1
+    top_summary = next(row for row in diagnostics["series"] if row["name"] == "top_absolute")
+    assert top_summary["full_total_return"] == pytest.approx(
+        (1.10 * 1.20 * 0.95 * 1.04) - 1.0
+    )
+    assert top_summary["is_total_return"] == pytest.approx((1.10 * 1.20) - 1.0)
+    assert top_summary["oos_reset_total_return"] == pytest.approx((0.95 * 1.04) - 1.0)
+
+    annual_top = [
+        row
+        for row in diagnostics["annual_contribution"]
+        if row["series"] == "top_absolute"
+    ]
+    assert annual_top[0]["year"] == "2023"
+    assert annual_top[0]["total_return"] == pytest.approx((1.10 * 1.20) - 1.0)
+    assert diagnostics["top_positive_dates"][0]["date"] == "2023-12-29"
+    assert diagnostics["top_negative_dates"][0]["date"] == "2024-01-02"
+
+
 def test_group_nav_returns_empty_frame_with_canonical_schema_when_no_input() -> None:
     empty = build_group_nav_table(
         pd.DataFrame(columns=["date", "group", "group_return"]),

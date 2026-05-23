@@ -80,7 +80,9 @@ def test_build_model_factor_uses_past_only_training_windows(tmp_path) -> None:
     }.issubset(set(result.coverage_base_df.columns))
     assert not result.coverage_base_df.empty
     assert set(result.forward_label_df.columns) == {"date", "asset", "factor", "value"}
-    assert result.forward_label_df["factor"].eq(f"forward_return_{spec.target.horizon}").all()
+    assert result.forward_label_df["factor"].eq(
+        f"forward_return_{spec.target.horizon}_next_open"
+    ).all()
     assert any("训练模型生成因子：第 " in message for message, _ in progress_events)
     assert progress_events[-1][1] == 100
 
@@ -155,6 +157,7 @@ def test_build_model_factor_uses_configured_target_price_column(tmp_path) -> Non
             feature_columns=spec.feature_columns,
             target_horizon=spec.target.horizon,
             target_price_column="close_qfq",
+            target_execution_price_mode="close",
             feature_preprocess=spec.feature_preprocess,
             model=spec.model,
             training=spec.training,
@@ -193,6 +196,7 @@ def test_build_model_factor_filters_extreme_forward_returns(tmp_path) -> None:
             factor_name=spec.factor_name,
             feature_columns=spec.feature_columns,
             target_horizon=spec.target.horizon,
+            target_execution_price_mode="close",
             max_abs_forward_return=1.0,
             feature_preprocess=spec.feature_preprocess,
             model=spec.model,

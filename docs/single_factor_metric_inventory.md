@@ -2,16 +2,16 @@
 
 本文档是单因子 Level 1/2 评估指标的对账清单。后续新增、删除或改口径时，先更新这里，再更新测试和 golden snapshot。
 
-边界声明：本文只覆盖因子发现和组合构建验证。`next_open`、tradability、cost、capacity 等字段只作为研究诊断和敏感性分析登记，不改变默认工作流的研究边界。
+边界声明：本文只覆盖因子发现和组合构建验证。`next_open` 是单因子与模型合成信号回测的默认标签执行口径；tradability、cost、capacity 等字段仍只作为研究诊断和敏感性分析登记，不改变 Level 1/2 研究边界。
 
 ## 总口径
 
 | 项目 | 当前口径 |
 | --- | --- |
 | 因子输入 | canonical long-form: `date`, `asset`, `factor`, `value`。单次评估要求单一 `factor` 名称。 |
-| 标签输入 | canonical long-form: `date`, `asset`, `factor`, `value`。默认由 `forward_return(prices, horizon=h)` 产生。 |
-| 默认标签对齐 | 因子 `value(t)` 与标签 `forward_return_h(t)` 按 `(date, asset)` 内连接；标签值为 `close[t+h] / close[t] - 1`，存放在 `t`。 |
-| 非默认执行价标签 | `next_open`: `close[t+h] / open[t+1] - 1`；`vwap`: `close[t+h] / vwap[t+1] - 1`。用于敏感性诊断。 |
+| 标签输入 | canonical long-form: `date`, `asset`, `factor`, `value`。默认由 `forward_return(prices, horizon=h, execution_price_mode="next_open")` 产生。 |
+| 默认标签对齐 | 因子 `value(t)` 与标签 `forward_return_h_next_open(t)` 按 `(date, asset)` 内连接；标签值为 `close[t+h] / open[t+1] - 1`，存放在 `t`。 |
+| 其他执行价标签 | `close`: `close[t+h] / close[t] - 1`；`vwap`: `close[t+h] / vwap[t+1] - 1`。`close` 仅用于显式 legacy close-to-close 复核。 |
 | 单因子预处理 | `single_factor/pipeline.py` 的 `_prepare_factor` 默认先按日 winsorize，再按日 z-score；可选 rank 或 none；`min_coverage` 可将低覆盖日期置为 NaN。 |
 | Split 口径 | 有 `TimeSeriesSplitContract` 时，核心评估用 OOS；报告曲线可附 `split_phase`。IC、rolling、group returns、turnover 打包时 drop EMBARGO；coverage 保留 EMBARGO 用于审计。 |
 | 截面权重 | IC、RankIC、MI、分组收益均按日期截面计算；汇总时每个有效日期等权。 |
