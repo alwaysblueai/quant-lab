@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 from alpha_lab.regime import classify_market_regimes
 
 DEFAULT_TIER1_TRAILING_RETURN_HORIZON = 20
@@ -42,7 +43,7 @@ def build_numeric_quantile_bucket(
     if len(labels) != int(n_buckets):
         raise ValueError("bucket_labels length must equal n_buckets")
 
-    _require_columns(frame, ("date", "asset", value_col), "frame")
+    require_columns(frame, ("date", "asset", value_col), "frame")
     out = frame.loc[:, ["date", "asset", value_col]].copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out[value_col] = pd.to_numeric(out[value_col], errors="coerce")
@@ -65,7 +66,7 @@ def build_factor_magnitude_bucket(
     bucket_col: str = "bucket",
 ) -> pd.DataFrame:
     """Build per-date buckets by absolute factor value."""
-    _require_columns(factor_df, ("date", "asset", "value"), "factor_df")
+    require_columns(factor_df, ("date", "asset", "value"), "factor_df")
     values = factor_df.loc[:, ["date", "asset", "value"]].copy()
     values["factor_abs"] = pd.to_numeric(values["value"], errors="coerce").abs()
     return build_numeric_quantile_bucket(
@@ -133,7 +134,7 @@ def build_trailing_return_bucket(
 
     resolved_col = source_col or f"ret_{int(horizon)}d"
     if resolved_col not in prices.columns:
-        _require_columns(prices, ("date", "asset", "close"), "prices")
+        require_columns(prices, ("date", "asset", "close"), "prices")
         values = prices.loc[:, ["date", "asset", "close"]].copy()
         values["date"] = pd.to_datetime(values["date"], errors="coerce")
         values = values.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
@@ -171,7 +172,7 @@ def build_regime_bucket(
     )
     if regime_df.empty:
         return pd.DataFrame(columns=["date", bucket_col])
-    _require_columns(regime_df, ("date", regime_col), "regime_df")
+    require_columns(regime_df, ("date", regime_col), "regime_df")
     out = regime_df.loc[:, ["date", regime_col]].rename(columns={regime_col: bucket_col})
     return out.dropna(subset=["date", bucket_col]).reset_index(drop=True)
 
@@ -203,7 +204,3 @@ def _resolve_source_column(
     )
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

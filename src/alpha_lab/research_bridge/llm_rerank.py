@@ -7,12 +7,34 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from alpha_lab.exceptions import AlphaLabConfigError
 from alpha_lab.research_bridge._llm_usage import read_attr, usage_int
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_CANDIDATES = 30
 ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL"
+# When ``ALPHA_LAB_REQUIRE_LLM_RERANK`` is truthy (1/true/yes, case-insensitive),
+# ``rerank_candidates`` and ``categorize_and_compress`` raise
+# ``AlphaLabConfigError`` instead of returning the deterministic fallback
+# outcome when ``ANTHROPIC_API_KEY`` is missing. CLI flag
+# ``--require-llm-rerank`` (idea / model-idea distribution) sets this so users
+# can guarantee LLM rerank actually ran. Default behavior is unchanged.
+REQUIRE_LLM_RERANK_ENV = "ALPHA_LAB_REQUIRE_LLM_RERANK"
 LOG = logging.getLogger(__name__)
+
+
+def _strict_mode_enabled() -> bool:
+    """Return True when ``ALPHA_LAB_REQUIRE_LLM_RERANK`` is truthy."""
+    raw = os.environ.get(REQUIRE_LLM_RERANK_ENV, "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strict_no_api_key_error(api_key_env: str) -> AlphaLabConfigError:
+    return AlphaLabConfigError(
+        f"LLM rerank strict mode is enabled (via {REQUIRE_LLM_RERANK_ENV}=1 or "
+        f"--require-llm-rerank) but {api_key_env} is not set. Provide a valid "
+        "API key or unset the strict flag to allow deterministic fallback."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +142,8 @@ def rerank_candidates(
 
     api_key = os.environ.get(api_key_env)
     if not api_key:
+        if _strict_mode_enabled():
+            raise _strict_no_api_key_error(api_key_env)
         return _fallback_outcome(model=model_name, reason="no_api_key")
 
     try:
@@ -214,6 +238,8 @@ def categorize_and_compress(
 
     api_key = os.environ.get(api_key_env)
     if not api_key:
+        if _strict_mode_enabled():
+            raise _strict_no_api_key_error(api_key_env)
         return _categorize_fallback_outcome(model=model_name, reason="no_api_key")
 
     try:

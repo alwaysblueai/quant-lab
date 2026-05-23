@@ -50,12 +50,16 @@ def evaluate_composite_case(
 ) -> CompositeEvaluationResult:
     """Evaluate the composite factor using the canonical experiment pipeline."""
 
+    # Composite evaluation currently runs full-sample; the OOS split is not
+    # yet plumbed through this path. Explicit opt-in silences OPT-P0-2
+    # warning while preserving documented behaviour.
     result = run_factor_experiment(
         prices,
         lambda _prices: composite_factor.copy(),
         horizon=spec.target.horizon,
         n_quantiles=spec.n_quantiles,
         rolling_stability_thresholds=evaluation_config.rolling_stability,
+        allow_full_sample_evaluation=True,
     )
 
     cost_rate = spec.transaction_cost.one_way_rate
@@ -74,6 +78,7 @@ def evaluate_composite_case(
             horizon=spec.target.horizon,
             n_quantiles=spec.n_quantiles,
             rolling_stability_thresholds=evaluation_config.rolling_stability,
+            allow_full_sample_evaluation=True,
         )
         raw_summary_df = summarise_experiment_result(
             raw_result,

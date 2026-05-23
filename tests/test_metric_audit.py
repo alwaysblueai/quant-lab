@@ -1022,7 +1022,9 @@ class TestAggregateMetrics:
                     )
             return pd.DataFrame(rows)
 
-        return run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=3)
+        return run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=3, allow_full_sample_evaluation=True
+        )
 
     def test_mean_ic_is_arithmetic_mean_of_finite(self):
         result = self._build_experiment_result()
@@ -1246,7 +1248,9 @@ class TestEvalCoverageRatio:
                     rows.append({"date": date, "asset": asset, "factor": "f", "value": val})
             return pd.DataFrame(rows)
 
-        result = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=2)
+        result = run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=2, allow_full_sample_evaluation=True
+        )
         s = result.summary
 
         # The coverage is computed from the merged factor+label valid pairs
@@ -1378,8 +1382,12 @@ class TestPipelineConsistency:
                     rows.append({"date": date, "asset": asset, "factor": "f", "value": val})
             return pd.DataFrame(rows)
 
-        r1 = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=3)
-        r2 = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=3)
+        r1 = run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=3, allow_full_sample_evaluation=True
+        )
+        r2 = run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=3, allow_full_sample_evaluation=True
+        )
 
         def _eq(a: float, b: float) -> bool:
             if math.isnan(a) and math.isnan(b):
@@ -1419,7 +1427,9 @@ class TestPipelineConsistency:
                     )
             return pd.DataFrame(rows)
 
-        result = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=2)
+        result = run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=2, allow_full_sample_evaluation=True
+        )
         summary_df = summarise_experiment_result(result)
 
         assert tuple(summary_df.columns) == SUMMARY_COLUMNS
@@ -1445,7 +1455,9 @@ class TestPipelineConsistency:
                     rows.append({"date": date, "asset": asset, "factor": "f", "value": val})
             return pd.DataFrame(rows)
 
-        result = run_factor_experiment(prices, factor_fn, horizon=1, n_quantiles=3)
+        result = run_factor_experiment(
+            prices, factor_fn, horizon=1, n_quantiles=3, allow_full_sample_evaluation=True
+        )
         summary_df = summarise_experiment_result(result)
         row = summary_df.iloc[0]
         s = result.summary

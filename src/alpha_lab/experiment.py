@@ -53,6 +53,20 @@ DEFAULT_ROLLING_STABILITY_THRESHOLDS = DEFAULT_RESEARCH_EVALUATION_CONFIG.rollin
 DEFAULT_REGIME_ANALYSIS_CONFIG = DEFAULT_RESEARCH_EVALUATION_CONFIG.regime_analysis
 
 
+class FullSampleEvaluationWithoutOptInWarning(DeprecationWarning):
+    """``run_factor_experiment`` was called without a split contract and
+    without ``allow_full_sample_evaluation=True``.
+
+    The implicit full-sample evaluation fallback is preserved for backward
+    compatibility but is being phased out. Callers that intentionally want
+    a full-sample evaluation (fast screen, composite eval, dual-scope
+    reporting paths) must pass ``allow_full_sample_evaluation=True`` to
+    silence this warning. In a future release the default will flip to
+    ``False`` and omitting the kwarg with no split will raise
+    ``AlphaLabConfigError`` (OPT-P0-2 second step).
+    """
+
+
 @dataclass(frozen=True)
 class ExperimentProvenance:
     """Minimal provenance record for one :func:`run_factor_experiment` call.
@@ -475,6 +489,7 @@ def run_factor_experiment(
     precomputed_forward_labels: Mapping[int, pd.DataFrame] | None = None,
     split_contract: TimeSeriesSplitContract | None = None,
     execution_price_mode: ExecutionPriceMode = "close",
+    allow_full_sample_evaluation: bool | None = None,
 ) -> ExperimentResult:
     """Run a factor experiment end-to-end.
 
@@ -554,6 +569,27 @@ def run_factor_experiment(
         Optional strict IS/OOS contract.  When provided, ``is_end`` and
         ``oos_start`` are used as the train/test boundary and cannot be
         combined with ad hoc ``train_end`` / ``test_start`` arguments.
+    allow_full_sample_evaluation:
+        Three-state opt-in flag controlling what happens when no split is
+        provided (``train_end is None and test_start is None and
+        split_contract is None``).  An explicit split makes this kwarg a
+        no-op.
+
+        - ``None`` (default, transitional): preserves the legacy
+          full-sample evaluation behaviour but emits a
+          :class:`FullSampleEvaluationWithoutOptInWarning`
+          (a ``DeprecationWarning`` subclass) so callers can find and
+          migrate sites that silently rely on the fallback.
+        - ``True``: full-sample evaluation runs without a warning.  This is
+          the explicit opt-in for callers that intentionally want
+          full-sample evaluation (e.g. Tier-1 fast screen, composite
+          evaluation, dual-scope reporting paths).
+        - ``False``: full-sample evaluation is rejected with
+          ``AlphaLabConfigError``.  Forward-compatible with the OPT-P0-2
+          second step, where the default will flip to ``False``.
+
+        When a split *is* provided the kwarg is ignored: ``None`` / ``True``
+        / ``False`` all behave identically — no warning, no raise.
 
     Returns
     -------
@@ -655,6 +691,34 @@ def run_factor_experiment(
         raise AlphaLabConfigError(
             "val_start requires both train_end and test_start to be specified."
         )
+
+    # --- Step 0c: opt-in gate for full-sample evaluation -------------------
+    # When no split has been provided by any path (ad hoc kwargs or split
+    # contract), apply the three-state ``allow_full_sample_evaluation`` gate.
+    # This makes the previously-implicit "no split = evaluate the whole sample"
+    # behaviour observable today (warning) and lets callers explicitly opt in
+    # (True) or opt out (False).  See OPT-P0-2.
+    if train_end is None and test_start is None:
+        if allow_full_sample_evaluation is False:
+            raise AlphaLabConfigError(
+                "run_factor_experiment was called without a split contract "
+                "and with allow_full_sample_evaluation=False. Provide "
+                "train_end/test_start or a split_contract for a split-aware "
+                "evaluation, or pass allow_full_sample_evaluation=True to "
+                "explicitly opt in to full-sample evaluation."
+            )
+        if allow_full_sample_evaluation is None:
+            warnings.warn(
+                "run_factor_experiment was called without a split contract "
+                "and without allow_full_sample_evaluation=True. The implicit "
+                "full-sample evaluation fallback will require an explicit "
+                "opt-in in a future release. Pass "
+                "allow_full_sample_evaluation=True to silence this warning, "
+                "or provide train_end/test_start (or a split_contract) for a "
+                "split-aware evaluation.",
+                FullSampleEvaluationWithoutOptInWarning,
+                stacklevel=2,
+            )
 
     # --- Step 1: factor values (full sample) --------------------------------
     with _stage("factor"):

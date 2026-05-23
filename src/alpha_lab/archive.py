@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +16,27 @@ from alpha_lab.custom_factors import read_custom_factor_source, sha256_text
 from alpha_lab.custom_models import read_draft_model_source
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 from alpha_lab.research_bridge.service import PROJECTS_DIRNAME
+
+
+class ArchiveSourceLoadWarning(UserWarning):
+    """Emitted when an archive sidecar source (factor.json / model_candidate.json)
+    cannot be loaded while assembling a record's audit identity.
+
+    The archive layer keeps its "fill what we can, skip what is broken" semantics:
+    a single missing or malformed sidecar must not block previewing the rest of
+    the run. The warning exists so the skip is observable rather than silent.
+    """
+
+
+def _warn_archive_source_load(path: str | Path, exc: BaseException) -> None:
+    warnings.warn(
+        (
+            f"skipping unreadable archive sidecar at {path}: "
+            f"{type(exc).__name__}: {exc}"
+        ),
+        ArchiveSourceLoadWarning,
+        stacklevel=3,
+    )
 
 ArchiveWorkflow = Literal["single_factor", "model_factor"]
 
@@ -704,8 +726,8 @@ def _source_audit(
         if path:
             try:
                 source.update(read_custom_factor_source(path).to_audit_dict())
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — see ArchiveSourceLoadWarning
+                _warn_archive_source_load(path, exc)
         if not source:
             for candidate in _custom_factor_candidates(workspace_root, record, factor_definition):
                 if candidate.exists():
@@ -728,8 +750,8 @@ def _source_audit(
         if path and Path(path).name == "model_candidate.json":
             try:
                 source.update(read_draft_model_source(path).to_audit_dict())
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — see ArchiveSourceLoadWarning
+                _warn_archive_source_load(path, exc)
     return source
 
 

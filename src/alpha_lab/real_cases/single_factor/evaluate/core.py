@@ -130,7 +130,24 @@ def evaluate_single_factor_case(
     progress_callback: Callable[[str, int], None] | None = None,
     split_contract: TimeSeriesSplitContract | None = None,
 ) -> SingleFactorEvaluationResult:
-    """Evaluate the single factor using the canonical experiment pipeline."""
+    """Evaluate the single factor using the canonical experiment pipeline.
+
+    Shared-contract notice
+    ----------------------
+    This function is consumed by *both* lines:
+
+    * ``real_cases.single_factor.pipeline.run_single_factor_cases`` (native).
+    * ``real_cases.model_factor.pipeline.core.run_model_factor_case`` (passes a
+      ``ModelFactorCaseSpec`` cast to ``Any``; the evaluator only reads a
+      duck-typed subset of ``spec`` — currently ``spec.target.horizon``,
+      ``spec.target.execution_price_mode``, ``spec.n_quantiles``,
+      ``spec.transaction_cost.one_way_rate`` and a few flag fields).
+
+    Modifications must keep the signature additive and must not introduce new
+    required ``spec`` attributes without first ensuring ``ModelFactorCaseSpec``
+    exposes them. AGENTS §8 lists this as a shared evaluator; do not move the
+    code without updating that registry.
+    """
     evaluate_started = time.perf_counter()
     diagnostics_cfg = evaluation_config.single_factor_diagnostics
 
@@ -233,6 +250,10 @@ def evaluate_single_factor_case(
             report_result = _run_with_stage_heartbeat(
                 stage_message="生成双口径报告路径",
                 stage_percent=22,
+                # Dual-scope report's "全样本视角" path: deliberately runs the
+                # backtest without a split so summary metrics describe the
+                # whole sample alongside the split-aware result. Explicit
+                # opt-in silences OPT-P0-2 warning.
                 fn=lambda: run_factor_experiment(
                     prices,
                     lambda _prices: core_factor_df,
@@ -243,6 +264,7 @@ def evaluate_single_factor_case(
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
                     execution_price_mode=spec.target.execution_price_mode,
+                    allow_full_sample_evaluation=True,
                 ),
             )
         with _stage("core_summary_full_report_path"):
@@ -260,6 +282,10 @@ def evaluate_single_factor_case(
             is_result = _run_with_stage_heartbeat(
                 stage_message="生成 IS 指标口径",
                 stage_percent=24,
+                # Dual-scope report's "IS 视角" path: factor is pre-filtered
+                # to ``is_end``, so a no-split experiment evaluates the
+                # in-sample window only. Explicit opt-in silences OPT-P0-2
+                # warning.
                 fn=lambda: run_factor_experiment(
                     prices,
                     lambda _prices: is_factor_df,
@@ -270,6 +296,7 @@ def evaluate_single_factor_case(
                     precomputed_forward_labels=precomputed_forward_labels,
                     split_contract=None,
                     execution_price_mode=spec.target.execution_price_mode,
+                    allow_full_sample_evaluation=True,
                 ),
             )
         with _stage("core_summary_is_report_path"):

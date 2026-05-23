@@ -9,6 +9,7 @@ from pathlib import Path
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.real_cases._cli_io import (
+    export_to_vault_after_contract,
     finalize_contract_if_research_draft,
     render_case_report,
     update_run_manifest,
@@ -100,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             evaluation_profile=args.evaluation_profile,
             vault_root=args.vault_root,
             vault_export_mode=args.vault_export_mode,
+            defer_vault_export=True,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
@@ -119,6 +121,15 @@ def main(argv: list[str] | None = None) -> int:
         case_spec_path=args.spec_path,
         evaluation_profile=args.evaluation_profile,
         command=tuple(sys.argv),
+    )
+    export_to_vault_after_contract(
+        case_name=result.spec.name,
+        vault_root=args.vault_root,
+        vault_export_mode=args.vault_export_mode,
+        experiment_card_path=result.artifact_paths["experiment_card"],
+        summary_path=result.artifact_paths["summary"],
+        manifest_path=result.artifact_paths["run_manifest"],
+        workflow_label="single-factor",
     )
 
     print("")

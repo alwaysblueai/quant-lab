@@ -9,6 +9,7 @@ import yaml
 
 from alpha_lab.archive import (
     ArchiveRunIndex,
+    ArchiveSourceLoadWarning,
     apply_archive_draft,
     build_archive_preview,
     migrate_auto_exports,
@@ -347,3 +348,102 @@ def test_archive_preview_does_not_use_recursive_walk(
     assert preview["ok"] is True
     assert preview["research_journey"]["llm_diagnostics"]["cache_key"]  # type: ignore[index]
     assert preview["research_journey"]["truncation"]["strategy"]  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# OPT-P1-1a: ArchiveSourceLoadWarning observability
+#
+# The archive layer keeps its skip-on-broken-sidecar semantics so an unreadable
+# factor.json / model_candidate.json cannot block previewing the rest of the
+# run. The warning makes the skip observable.
+# ---------------------------------------------------------------------------
+
+
+def test_archive_preview_warns_when_factor_source_path_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    vault = tmp_path / "vault"
+    run_id = "warn_factor_corrupt_run"
+    factor_name = "warn_factor_corrupt"
+
+    # Build a normal run, then corrupt the referenced factor.json on disk.
+    _single_run(
+        workspace,
+        run_id=run_id,
+        factor_name=factor_name,
+        archive_identity=factor_name,
+    )
+    factor_json = (
+        workspace / "custom_factors" / "research" / factor_name / "factor.json"
+    )
+    factor_json.write_text("this is { not valid json", encoding="utf-8")
+
+    index = ArchiveRunIndex.build(workspace_root=workspace)
+    with pytest.warns(ArchiveSourceLoadWarning, match=str(factor_json)):
+        preview = build_archive_preview(
+            index=index,
+            vault_root=vault,
+            workflow="single_factor",
+            run_id=run_id,
+        )
+
+    # The preview still produces a dict — the broken sidecar must not bring
+    # down the whole archive layer; it just degrades the audit identity.
+    assert isinstance(preview, dict)
+    assert "audit" in preview
+
+
+def test_archive_preview_warns_when_model_candidate_path_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    vault = tmp_path / "vault"
+    run_id = "warn_model_corrupt_run"
+    candidate_dir = workspace / "custom_models" / "research" / "warn_candidate"
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text("not json", encoding="utf-8")
+
+    run_dir = workspace / "outputs" / "real_cases" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(run_dir / "metrics.json", {"metrics": {}})
+    _write_json(
+        run_dir / "model_definition.json",
+        {
+            "artifact_type": "alpha_lab_model_definition",
+            "case_name": run_id,
+            "draft_model_source": {"path": str(candidate_json)},
+        },
+    )
+    _write_json(
+        run_dir / "feature_manifest.json",
+        {
+            "artifact_type": "alpha_lab_feature_manifest",
+            "case_name": run_id,
+        },
+    )
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "workflow": "real_case_model_factor",
+            "case_name": run_id,
+            "run_timestamp_utc": "2026-05-22T00:00:00Z",
+            "outputs": {
+                "metrics": str(run_dir / "metrics.json"),
+                "model_definition_json": str(run_dir / "model_definition.json"),
+                "feature_manifest_json": str(run_dir / "feature_manifest.json"),
+            },
+            "draft_model_source": {"path": str(candidate_json)},
+            "spec_path": str(candidate_json),
+        },
+    )
+
+    index = ArchiveRunIndex.build(workspace_root=workspace)
+    with pytest.warns(ArchiveSourceLoadWarning, match=str(candidate_json)):
+        build_archive_preview(
+            index=index,
+            vault_root=vault,
+            workflow="model_factor",
+            run_id=run_id,
+        )

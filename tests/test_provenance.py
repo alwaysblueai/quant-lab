@@ -47,27 +47,31 @@ def _momentum_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def test_provenance_is_attached_to_result() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result.provenance, ExperimentProvenance)
 
 
 def test_provenance_factor_name_matches_factor_df() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert result.provenance.factor_name == result.factor_df["factor"].iloc[0]
 
 
 def test_provenance_horizon_matches_argument() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn, horizon=3)
+    result = run_factor_experiment(
+        _PRICES, _momentum_fn, horizon=3, allow_full_sample_evaluation=True
+    )
     assert result.provenance.horizon == 3
 
 
 def test_provenance_n_quantiles_matches_argument() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn, n_quantiles=7)
+    result = run_factor_experiment(
+        _PRICES, _momentum_fn, n_quantiles=7, allow_full_sample_evaluation=True
+    )
     assert result.provenance.n_quantiles == 7
 
 
 def test_provenance_run_timestamp_utc_is_iso_string() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     ts = result.provenance.run_timestamp_utc
     # Should be an ISO-8601 string ending in +00:00 (UTC offset)
     assert isinstance(ts, str)
@@ -75,7 +79,7 @@ def test_provenance_run_timestamp_utc_is_iso_string() -> None:
 
 
 def test_provenance_git_commit_is_string_or_none() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     gc = result.provenance.git_commit
     assert gc is None or isinstance(gc, str)
 
@@ -104,8 +108,8 @@ def test_git_provenance_subprocesses_are_cached(
 
     monkeypatch.setattr("alpha_lab.experiment.subprocess.run", _fake_run)
 
-    first = run_factor_experiment(_PRICES, _momentum_fn)
-    second = run_factor_experiment(_PRICES, _momentum_fn)
+    first = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
+    second = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
 
     assert first.provenance.git_commit == "abc123"
     assert second.provenance.git_commit == "abc123"
@@ -119,30 +123,37 @@ def test_git_provenance_subprocesses_are_cached(
 
 
 def test_provenance_portfolio_cost_rate_none_when_not_supplied() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert result.provenance.portfolio_cost_rate is None
 
 
 def test_provenance_portfolio_cost_rate_captured() -> None:
     result = run_factor_experiment(
-        _PRICES, _momentum_fn, holding_period=1, rebalance_frequency=1, portfolio_cost_rate=0.001
+        _PRICES,
+        _momentum_fn,
+        holding_period=1,
+        rebalance_frequency=1,
+        portfolio_cost_rate=0.001,
+        allow_full_sample_evaluation=True,
     )
     assert result.provenance.portfolio_cost_rate == 0.001
 
 
 def test_provenance_strategy_repr_none_without_strategy() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert result.provenance.strategy_repr is None
 
 
 def test_provenance_strategy_repr_populated_with_strategy() -> None:
     spec = StrategySpec(holding_period=1, rebalance_frequency=1)
-    result = run_factor_experiment(_PRICES, _momentum_fn, strategy=spec)
+    result = run_factor_experiment(
+        _PRICES, _momentum_fn, strategy=spec, allow_full_sample_evaluation=True
+    )
     assert result.provenance.strategy_repr == repr(spec)
 
 
 def test_provenance_is_frozen() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     with pytest.raises(AttributeError):
         result.provenance.horizon = 99  # type: ignore[misc]
 
@@ -153,7 +164,7 @@ def test_provenance_is_frozen() -> None:
 
 
 def test_n_eval_dates_full_sample() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     n_unique = int(result.factor_df["date"].nunique())
     # eval_factor = factor_df for full-sample run
     assert result.n_eval_dates == n_unique
@@ -167,17 +178,19 @@ def test_n_eval_dates_test_period() -> None:
         test_start="2024-01-22",
     )
     # n_eval_dates must be less than the full sample count
-    full_result = run_factor_experiment(_PRICES, _momentum_fn)
+    full_result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert result.n_eval_dates < full_result.n_eval_dates
 
 
 def test_n_eval_assets_matches_universe() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert result.n_eval_assets == 6  # _make_prices has 6 assets
 
 
 def test_n_label_nan_dates_is_nonnegative() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn, horizon=1)
+    result = run_factor_experiment(
+        _PRICES, _momentum_fn, horizon=1, allow_full_sample_evaluation=True
+    )
     assert result.n_label_nan_dates >= 0
 
 
@@ -185,13 +198,15 @@ def test_n_label_nan_dates_matches_horizon() -> None:
     """For a full-sample run, n_label_nan_dates should equal the horizon
     (the last `horizon` dates have no forward return)."""
     horizon = 3
-    result = run_factor_experiment(_PRICES, _momentum_fn, horizon=horizon)
+    result = run_factor_experiment(
+        _PRICES, _momentum_fn, horizon=horizon, allow_full_sample_evaluation=True
+    )
     # The number of terminal dates without labels should equal the horizon.
     assert result.n_label_nan_dates == horizon
 
 
 def test_diagnostics_are_integers() -> None:
-    result = run_factor_experiment(_PRICES, _momentum_fn)
+    result = run_factor_experiment(_PRICES, _momentum_fn, allow_full_sample_evaluation=True)
     assert isinstance(result.n_eval_dates, int)
     assert isinstance(result.n_eval_assets, int)
     assert isinstance(result.n_label_nan_dates, int)
@@ -205,7 +220,9 @@ def test_diagnostics_are_integers() -> None:
 def test_cost_rate_without_portfolio_mode_warns_experiment() -> None:
     """UserWarning fired when portfolio_cost_rate is set but no portfolio mode."""
     with pytest.warns(UserWarning, match="portfolio_cost_rate is ignored"):
-        run_factor_experiment(_PRICES, _momentum_fn, portfolio_cost_rate=0.001)
+        run_factor_experiment(
+            _PRICES, _momentum_fn, portfolio_cost_rate=0.001, allow_full_sample_evaluation=True
+        )
 
 
 def test_cost_rate_with_portfolio_mode_no_warning() -> None:
@@ -220,6 +237,7 @@ def test_cost_rate_with_portfolio_mode_no_warning() -> None:
             holding_period=1,
             rebalance_frequency=1,
             portfolio_cost_rate=0.001,
+            allow_full_sample_evaluation=True,
         )
 
 
@@ -265,7 +283,7 @@ def test_experiment_rejects_bad_prices_nan_close() -> None:
     df = _make_prices()
     df.iloc[0, df.columns.get_loc("close")] = float("nan")
     with pytest.raises(ValueError, match="NaN"):
-        run_factor_experiment(df, _momentum_fn)
+        run_factor_experiment(df, _momentum_fn, allow_full_sample_evaluation=True)
 
 
 def test_experiment_rejects_bad_prices_duplicate_date_asset() -> None:
@@ -273,4 +291,4 @@ def test_experiment_rejects_bad_prices_duplicate_date_asset() -> None:
     dupe = df.iloc[[0]].copy()
     df = pd.concat([df, dupe], ignore_index=True)
     with pytest.raises(ValueError, match="duplicate"):
-        run_factor_experiment(df, _momentum_fn)
+        run_factor_experiment(df, _momentum_fn, allow_full_sample_evaluation=True)

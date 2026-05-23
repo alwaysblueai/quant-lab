@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 from alpha_lab.interfaces import validate_factor_output
 
 _STYLE_FACTORS: tuple[str, ...] = ("size", "value", "momentum", "volatility", "beta")
@@ -26,8 +27,8 @@ def build_barra_exposures(
     industry_col: str = "industry",
 ) -> BarraExposures:
     """Build a Barra-style exposure matrix from daily prices and fundamentals."""
-    _require_columns(prices_df, ("date", "asset", "close"), "prices_df")
-    _require_columns(
+    require_columns(prices_df, ("date", "asset", "close"), "prices_df")
+    require_columns(
         daily_basic_df,
         ("date", "asset", "circ_mv", "pb", industry_col),
         "daily_basic_df",
@@ -103,14 +104,14 @@ def estimate_factor_returns(
 ) -> pd.DataFrame:
     """Estimate per-date factor returns via weighted cross-sectional regression."""
     expo = exposures.exposures.copy()
-    _require_columns(expo, ("date", "asset"), "exposures.exposures")
+    require_columns(expo, ("date", "asset"), "exposures.exposures")
     factor_cols = list(exposures.style_factors) + list(exposures.industry_factors)
     if not factor_cols:
         raise AlphaLabDataError("Barra exposures must include at least one factor column")
-    _require_columns(expo, tuple(factor_cols), "exposures.exposures")
+    require_columns(expo, tuple(factor_cols), "exposures.exposures")
 
     return_col = "value" if "value" in returns_df.columns else "return"
-    _require_columns(returns_df, ("date", "asset", return_col), "returns_df")
+    require_columns(returns_df, ("date", "asset", return_col), "returns_df")
 
     rets = returns_df[["date", "asset", return_col]].copy()
     rets["date"] = pd.to_datetime(rets["date"], errors="coerce")
@@ -178,12 +179,12 @@ def extract_pure_alpha(
     """Remove Barra-factor exposure from raw alpha cross-sections."""
     validate_factor_output(alpha_df)
     expo = exposures.exposures.copy()
-    _require_columns(expo, ("date", "asset"), "exposures.exposures")
+    require_columns(expo, ("date", "asset"), "exposures.exposures")
 
     factor_cols = list(exposures.style_factors) + list(exposures.industry_factors)
     if not factor_cols:
         raise AlphaLabDataError("Barra exposures must include factor columns")
-    _require_columns(expo, tuple(factor_cols), "exposures.exposures")
+    require_columns(expo, tuple(factor_cols), "exposures.exposures")
 
     alpha = alpha_df[["date", "asset", "value"]].copy()
     alpha["date"] = pd.to_datetime(alpha["date"], errors="coerce")
@@ -279,7 +280,3 @@ def _cross_sectional_zscore(frame: pd.DataFrame, factor_cols: list[str]) -> pd.D
     return out
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

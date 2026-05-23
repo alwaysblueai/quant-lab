@@ -50,6 +50,10 @@ def test_cli_basic_run_returns_zero(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert rc == 0
@@ -70,6 +74,10 @@ def test_cli_basic_run_writes_summary_csv(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     csvs = list(out_dir.glob("*.csv"))
@@ -91,6 +99,10 @@ def test_cli_summary_csv_has_expected_columns(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -116,6 +128,10 @@ def test_cli_summary_csv_filename_uses_experiment_name(tmp_path: Path) -> None:
             str(out_dir),
             "--experiment-name",
             "my_test_run",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert (out_dir / "my_test_run_summary.csv").exists()
@@ -136,6 +152,10 @@ def test_cli_default_experiment_name_derived_from_args(tmp_path: Path) -> None:
             "4",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert (out_dir / "momentum_h3_q4_summary.csv").exists()
@@ -157,6 +177,10 @@ def test_cli_creates_output_dir_if_missing(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert out_dir.exists()
@@ -181,6 +205,10 @@ def test_cli_stdout_contains_factor_name(tmp_path: Path, capsys: pytest.CaptureF
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     captured = capsys.readouterr()
@@ -201,6 +229,10 @@ def test_cli_stdout_contains_mean_ic(tmp_path: Path, capsys: pytest.CaptureFixtu
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     captured = capsys.readouterr()
@@ -224,6 +256,10 @@ def test_cli_stdout_contains_summary_csv_path(
             "5",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     captured = capsys.readouterr()
@@ -249,6 +285,10 @@ def test_cli_missing_input_file_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -269,6 +309,10 @@ def test_cli_missing_required_columns_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -289,6 +333,10 @@ def test_cli_missing_close_column_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -312,6 +360,10 @@ def test_cli_unparseable_dates_exit(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -336,6 +388,10 @@ def test_cli_unknown_factor_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -356,6 +412,10 @@ def test_cli_reversal_run_succeeds(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert rc == 0
@@ -377,6 +437,10 @@ def test_cli_low_volatility_run_succeeds(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert rc == 0
@@ -402,6 +466,10 @@ def test_cli_label_horizon_zero_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -421,6 +489,10 @@ def test_cli_label_horizon_negative_exits(tmp_path: Path) -> None:
                 "5",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -440,6 +512,10 @@ def test_cli_quantiles_one_exits(tmp_path: Path) -> None:
                 "1",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -461,6 +537,10 @@ def test_cli_negative_cost_rate_exits(tmp_path: Path) -> None:
                 "-0.001",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -539,6 +619,10 @@ def test_cli_unsafe_experiment_name_exits(tmp_path: Path, unsafe_name: str) -> N
                 unsafe_name,
                 "--output-dir",
                 str(out_dir),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
     # Output directory must remain empty — no file was written
@@ -596,6 +680,10 @@ def test_cli_cost_rate_writes_adjusted_column(tmp_path: Path) -> None:
             "0.001",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -622,6 +710,10 @@ def test_cli_no_cost_rate_gives_nan_adjusted_return(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(out_dir),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     csv_path = next(out_dir.glob("*.csv"))
@@ -651,6 +743,10 @@ def test_cli_obsidian_markdown_written(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert md_path.exists()
@@ -675,6 +771,10 @@ def test_cli_obsidian_markdown_content(tmp_path: Path) -> None:
             "my_obsidian_test",
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     content = md_path.read_text(encoding="utf-8")
@@ -700,6 +800,10 @@ def test_cli_obsidian_creates_parent_dirs(tmp_path: Path) -> None:
             str(tmp_path / "out"),
             "--obsidian-markdown-path",
             str(md_path),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert md_path.exists()
@@ -719,6 +823,10 @@ def test_cli_no_obsidian_flag_does_not_write_md(tmp_path: Path) -> None:
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert not list(tmp_path.glob("**/*.md"))
@@ -752,6 +860,10 @@ def test_cli_append_registry_writes_entry(tmp_path: Path, monkeypatch: pytest.Mo
             "--experiment-name",
             "reg_test",
             "--append-registry",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df = load_registry(registry_path)
@@ -785,6 +897,10 @@ def test_cli_registry_stores_obsidian_path(tmp_path: Path, monkeypatch: pytest.M
             "--obsidian-markdown-path",
             str(md_path),
             "--append-registry",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df = load_registry(registry_path)
@@ -817,6 +933,10 @@ def test_cli_registry_obsidian_path_empty_when_no_markdown(
             "--experiment-name",
             "no_md_test",
             "--append-registry",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df = load_registry(registry_path)
@@ -844,6 +964,10 @@ def test_cli_no_append_registry_does_not_create_file(
             "5",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert not registry_path.exists()
@@ -870,6 +994,10 @@ def test_cli_custom_momentum_window_succeeds(tmp_path: Path) -> None:
             "10",
             "--output-dir",
             str(tmp_path / "out"),
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     assert rc == 0
@@ -892,6 +1020,10 @@ def test_cli_momentum_window_zero_exits(tmp_path: Path) -> None:
                 "0",
                 "--output-dir",
                 str(tmp_path / "out"),
+                "--train-end",
+                "2024-01-22",
+                "--test-start",
+                "2024-01-25",
             ]
         )
 
@@ -920,6 +1052,10 @@ def test_cli_deterministic_summary_csv(tmp_path: Path) -> None:
             str(out1),
             "--experiment-name",
             "det_test",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     main(
@@ -936,6 +1072,10 @@ def test_cli_deterministic_summary_csv(tmp_path: Path) -> None:
             str(out2),
             "--experiment-name",
             "det_test",
+            "--train-end",
+            "2024-01-22",
+            "--test-start",
+            "2024-01-25",
         ]
     )
     df1 = pd.read_csv(out1 / "det_test_summary.csv")

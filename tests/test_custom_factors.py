@@ -4,11 +4,14 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import yaml
 
 from alpha_lab.custom_factors import (
+    BrokenCustomFactorWarning,
     compile_custom_factor,
     custom_factor_meta_path,
+    get_custom_factor_source,
     load_persisted_custom_factors,
     sha256_text,
 )
@@ -169,3 +172,79 @@ def test_single_factor_pipeline_audits_custom_factor_source(tmp_path: Path) -> N
     ]
 
     factor_registry._builders.pop("custom_ret", None)
+
+
+# ---------------------------------------------------------------------------
+# Broken-metadata observability (OPT-P0-3)
+#
+# The loader intentionally skips broken factor.json files so an unrelated
+# draft cannot block a research run, but the skip must be observable.
+# ---------------------------------------------------------------------------
+
+
+def _write_factor_json(dir_path: Path, name: str, payload: object) -> Path:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    factor_json = dir_path / "factor.json"
+    if isinstance(payload, str):
+        factor_json.write_text(payload, encoding="utf-8")
+    else:
+        factor_json.write_text(json.dumps(payload), encoding="utf-8")
+    return factor_json
+
+
+def test_get_custom_factor_source_warns_on_broken_metadata(tmp_path: Path) -> None:
+    # One valid factor + one broken JSON file in the same workspace.
+    valid_dir = tmp_path / "custom_factors" / "research" / "good_one"
+    _write_factor_json(
+        valid_dir,
+        "good_one",
+        {"name": "good_one", "code": CUSTOM_FACTOR_CODE},
+    )
+    broken_dir = tmp_path / "custom_factors" / "research" / "broken_one"
+    _write_factor_json(broken_dir, "broken_one", "this is { not valid json")
+
+    with pytest.warns(BrokenCustomFactorWarning, match="broken_one"):
+        source = get_custom_factor_source("good_one", workspace_root=tmp_path)
+    assert source is not None
+    assert source.name == "good_one"
+
+
+def test_load_persisted_custom_factors_warns_and_skips_broken(tmp_path: Path) -> None:
+    valid_dir = tmp_path / "custom_factors" / "research" / "valid_factor_for_warning_test"
+    _write_factor_json(
+        valid_dir,
+        "valid_factor_for_warning_test",
+        {"name": "valid_factor_for_warning_test", "code": CUSTOM_FACTOR_CODE},
+    )
+    broken_dir = tmp_path / "custom_factors" / "research" / "broken_for_warning_test"
+    _write_factor_json(broken_dir, "broken_for_warning_test", "{ not json")
+
+    with pytest.warns(BrokenCustomFactorWarning, match="broken_for_warning_test"):
+        sources = load_persisted_custom_factors(tmp_path)
+
+    assert "valid_factor_for_warning_test" in sources
+    assert "broken_for_warning_test" not in sources
+
+    factor_registry._builders.pop("valid_factor_for_warning_test", None)
+
+
+def test_load_persisted_custom_factors_strict_mode_still_raises(tmp_path: Path) -> None:
+    broken_dir = tmp_path / "custom_factors" / "research" / "strict_broken"
+    _write_factor_json(broken_dir, "strict_broken", "not json")
+
+    with pytest.raises(json.JSONDecodeError):
+        load_persisted_custom_factors(tmp_path, ignore_errors=False)
+
+
+def test_custom_factor_meta_path_warns_on_broken_neighbor(tmp_path: Path) -> None:
+    broken_dir = tmp_path / "custom_factors" / "research" / "neighbor_broken"
+    _write_factor_json(broken_dir, "neighbor_broken", "not json")
+
+    # Asking for an unrelated name still scans every factor.json on disk;
+    # the broken neighbor must produce a warning before we fall back to the
+    # default write path.
+    with pytest.warns(BrokenCustomFactorWarning, match="neighbor_broken"):
+        path = custom_factor_meta_path(tmp_path, "unrelated_factor_name")
+
+    # The function still falls back to a normal write path on miss.
+    assert path.name == "factor.json"

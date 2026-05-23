@@ -99,11 +99,15 @@ def _build_purged_kfold(inputs: Tier1Inputs) -> dict[str, Any]:
     from alpha_lab.experiment import run_factor_experiment
     from alpha_lab.reporting.purged_kfold_diagnostics import build_purged_kfold_diagnostics
 
+    # Tier-2 purged k-fold is full-sample at the experiment level; the
+    # k-fold structure is applied downstream. Explicit opt-in silences
+    # OPT-P0-2 warning.
     experiment_result = run_factor_experiment(
         inputs.prices,
         lambda _p: inputs.factor_df.copy(),
         horizon=inputs.horizon,
         n_quantiles=inputs.n_quantiles,
+        allow_full_sample_evaluation=True,
     )
     diagnostics = build_purged_kfold_diagnostics(
         experiment_result=experiment_result,

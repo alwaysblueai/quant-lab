@@ -48,6 +48,7 @@ from alpha_lab.research_integrity.leakage_checks import (
 from alpha_lab.research_integrity.reporting import build_integrity_report
 from alpha_lab.splits import (
     TimeSeriesSplitContract,
+    build_strict_split_contract_check_result,
     infer_default_time_series_split_contract,
     rebalance_frequency_to_step,
 )
@@ -100,29 +101,6 @@ class ModelFactorCaseRunResult:
     draft_model_source: DraftModelSource | None = None
 
 
-def _strict_split_contract_check(
-    contract: TimeSeriesSplitContract,
-    *,
-    object_name: str,
-    module_name: str,
-) -> IntegrityCheckResult:
-    metadata = contract.to_metadata()
-    return IntegrityCheckResult(
-        check_name="strict_time_series_split_contract",
-        status="pass",
-        severity="info",
-        object_name=object_name,
-        module_name=module_name,
-        message=(
-            "Strict chronological IS/OOS split resolved before model training: "
-            f"IS {metadata['is_start']}..{metadata['is_end']}, "
-            f"OOS {metadata['oos_start']}..{metadata['oos_end']}, "
-            f"embargo={metadata['embargo_days']}."
-        ),
-        metrics=metadata,
-    )
-
-
 def run_model_factor_case(
     spec_or_path: ModelFactorCaseSpec | str | Path,
     *,
@@ -136,6 +114,7 @@ def run_model_factor_case(
     progress_callback: Callable[[str, int], None] | None = None,
     stage_lifecycle_callback: StageLifecycleCallback | None = None,
     draft_model_source: DraftModelSource | None = None,
+    defer_vault_export: bool = False,
 ) -> ModelFactorCaseRunResult:
     """Run one real-case model-factor study end-to-end and export artifacts."""
 
@@ -473,10 +452,11 @@ def run_model_factor_case(
                 source="model_factor_pipeline",
             )
             _record_integrity(
-                _strict_split_contract_check(
+                build_strict_split_contract_check_result(
                     split_contract,
                     object_name="model_factor_strict_split",
                     module_name="real_cases.model_factor.pipeline",
+                    usage_phrase="model training",
                 )
             )
             data_stage.attach(split_contract=split_contract.to_metadata())
@@ -590,6 +570,10 @@ def run_model_factor_case(
 
         _emit_progress("运行模型因子评估", 68)
         with diagnostics.stage("evaluate") as evaluate_stage:
+            # Shared-contract call: ``evaluate_single_factor_case`` is the
+            # canonical evaluator for the single-factor line and is reused here
+            # for the model-factor line. ``spec`` is duck-typed; see that
+            # function's docstring for the subset of attributes it reads.
             evaluation_result = evaluate_single_factor_case(
                 prices=prices,
                 factor_df=factor_df,
@@ -709,6 +693,7 @@ def run_model_factor_case(
                 draft_model_source=(
                     draft_model_source.to_audit_dict() if draft_model_source is not None else None
                 ),
+                defer_vault_export=defer_vault_export,
             )
             export_stage.attach(
                 n_artifacts=int(len(artifact_paths)),

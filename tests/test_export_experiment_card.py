@@ -48,7 +48,7 @@ def _momentum_fn(prices: pd.DataFrame) -> pd.DataFrame:
 
 @pytest.fixture()
 def result():
-    return run_factor_experiment(_make_prices(), _momentum_fn)
+    return run_factor_experiment(_make_prices(), _momentum_fn, allow_full_sample_evaluation=True)
 
 
 @pytest.fixture()

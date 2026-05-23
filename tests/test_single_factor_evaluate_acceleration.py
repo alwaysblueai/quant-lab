@@ -43,6 +43,7 @@ def _base_result(prices: pd.DataFrame):
         lambda _p: factor_df.copy(),
         horizon=5,
         n_quantiles=5,
+        allow_full_sample_evaluation=True,
     )
     return factor_df, result
 

@@ -13,6 +13,7 @@ import pandas as pd
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.key_metrics_contracts import project_level12_transition_summary
+from alpha_lab.real_cases._artifact_json import to_jsonable as _to_jsonable
 from alpha_lab.real_cases.artifact_enrichment import (
     build_backtest_summary_payload,
     build_portfolio_recipe_controls,
@@ -587,22 +588,6 @@ def _write_json(path: Path, payload: Mapping[str, object], *, pretty: bool = Tru
                 sort_keys=False,
             )
         f.write("\n")
-
-
-def _to_jsonable(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(k): _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, tuple):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, float):
-        return _finite_or_none(value)
-    return value
 
 
 def _finite_or_none(value: float) -> float | None:

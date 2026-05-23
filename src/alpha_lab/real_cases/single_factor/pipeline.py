@@ -47,7 +47,7 @@ from alpha_lab.signal_transforms import (
     zscore_cross_section,
 )
 from alpha_lab.splits import (
-    TimeSeriesSplitContract,
+    build_strict_split_contract_check_result,
     infer_default_time_series_split_contract,
     rebalance_frequency_to_step,
 )
@@ -174,29 +174,6 @@ def prepare_base_features(
         prices_enriched=panel,
         trailing_return_columns=tuple(trailing_cols),
         forward_labels_by_horizon=labels,
-    )
-
-
-def _strict_split_contract_check(
-    contract: TimeSeriesSplitContract,
-    *,
-    object_name: str,
-    module_name: str,
-) -> IntegrityCheckResult:
-    metadata = contract.to_metadata()
-    return IntegrityCheckResult(
-        check_name="strict_time_series_split_contract",
-        status="pass",
-        severity="info",
-        object_name=object_name,
-        module_name=module_name,
-        message=(
-            "Strict chronological IS/OOS split resolved before evaluation: "
-            f"IS {metadata['is_start']}..{metadata['is_end']}, "
-            f"OOS {metadata['oos_start']}..{metadata['oos_end']}, "
-            f"embargo={metadata['embargo_days']}."
-        ),
-        metrics=metadata,
     )
 
 
@@ -857,6 +834,7 @@ def run_single_factor_case(
     fast_screen_artifact_root: str | Path | None = None,
     fast_screen_run_id: str | None = None,
     input_bundle: SingleFactorInputBundle | None = None,
+    defer_vault_export: bool = False,
 ) -> SingleFactorCaseRunResult:
     """Run one real-case single-factor study end-to-end and export artifacts."""
     integrity_checks: list[IntegrityCheckResult] = []
@@ -928,10 +906,11 @@ def run_single_factor_case(
         source="single_factor_pipeline",
     )
     _record_integrity(
-        _strict_split_contract_check(
+        build_strict_split_contract_check_result(
             split_contract,
             object_name="single_factor_strict_split",
             module_name="real_cases.single_factor.pipeline",
+            usage_phrase="evaluation",
         )
     )
 
@@ -1043,6 +1022,7 @@ def run_single_factor_case(
         custom_factor_source=(
             custom_factor_source.to_audit_dict() if custom_factor_source is not None else None
         ),
+        defer_vault_export=defer_vault_export,
     )
     _emit_progress("实验产物导出完成", 90)
 

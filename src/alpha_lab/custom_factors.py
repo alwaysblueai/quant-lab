@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,27 @@ CUSTOM_FACTOR_SCOPES: tuple[str, ...] = ("promoted", "research")
 BUILTIN_FACTOR_NAMES: frozenset[str] = frozenset(
     {"momentum", "reversal", "low_volatility", "amplitude", "downside_volatility", "vcimom"}
 )
+
+
+class BrokenCustomFactorWarning(UserWarning):
+    """Emitted when a persisted custom factor metadata file cannot be loaded.
+
+    The loader keeps its long-standing "skip and continue" behavior so a single
+    broken draft does not block an otherwise valid research run. The warning
+    exists so that the skip is observable — Stage 3 ``validate-draft-factor``
+    is still the primary gate for draft authoring (AGENTS §6).
+    """
+
+
+def _warn_broken_custom_factor(path: Path, exc: BaseException) -> None:
+    warnings.warn(
+        (
+            f"skipping broken custom factor metadata at {path}: "
+            f"{type(exc).__name__}: {exc}"
+        ),
+        BrokenCustomFactorWarning,
+        stacklevel=3,
+    )
 
 
 @dataclass(frozen=True)
@@ -179,7 +201,8 @@ def custom_factor_meta_path(workspace_root: str | Path, name: str) -> Path:
     for path in iter_custom_factor_meta_paths(workspace_root):
         try:
             source = read_custom_factor_source(path)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — see BrokenCustomFactorWarning
+            _warn_broken_custom_factor(path, exc)
             continue
         if source.name == normalized:
             return path
@@ -239,7 +262,8 @@ def get_custom_factor_source(
     for path in iter_custom_factor_meta_paths(workspace_root, scopes=scopes):
         try:
             source = read_custom_factor_source(path)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — see BrokenCustomFactorWarning
+            _warn_broken_custom_factor(path, exc)
             continue
         if source.name == normalized:
             return source
@@ -272,9 +296,10 @@ def load_persisted_custom_factors(
             if overwrite_existing or not already_registered:
                 factor_registry.register(source.name, fn)
             sources[source.name] = source
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — see BrokenCustomFactorWarning
             if not ignore_errors:
                 raise
+            _warn_broken_custom_factor(meta_path, exc)
     return sources
 
 

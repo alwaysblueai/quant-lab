@@ -198,6 +198,7 @@ each layer owns its own contract; this table is what makes that layout legible.
 | Web UI server (alpha-lab + model-lab tabs) | `src/alpha_lab/web_unified.py` |
 | Frontend metrics dashboard | `frontend/metrics-dashboard/` |
 | Vault export / experiment cards | `src/alpha_lab/reporting/__init__.py` (`export_experiment_card`); cards land at `<vault>/50_experiments/` |
+| Shared evaluator (single + model factor) | `evaluate_single_factor_case` in `src/alpha_lab/real_cases/single_factor/evaluate/core.py` — consumed by both `real_cases/single_factor/pipeline.py` and `real_cases/model_factor/pipeline/core.py`. Spec is duck-typed; signature changes must stay additive. |
 
 ### Scripts layout (post-E7 reorganization)
 

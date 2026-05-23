@@ -14,6 +14,7 @@ import pandas as pd
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.key_metrics_contracts import project_level12_transition_summary
+from alpha_lab.real_cases._artifact_json import to_jsonable as _to_jsonable
 from alpha_lab.real_cases.artifact_enrichment import (
     build_backtest_summary_payload,
     build_group_nav_table,
@@ -243,6 +244,7 @@ def export_artifact_bundle(
     vault_root: str | Path | None = None,
     vault_export_mode: str = "versioned",
     custom_factor_source: Mapping[str, object] | None = None,
+    defer_vault_export: bool = False,
 ) -> SingleFactorArtifactPaths:
     """Write standardized artifact bundle for one single-factor case run."""
 
@@ -599,6 +601,12 @@ def export_artifact_bundle(
 
     _write_json(paths["run_manifest"], manifest)
 
+    if defer_vault_export:
+        # Caller (CLI) will run vault export after backend contract finalize so
+        # that backend_run_receipt.json / comparison_summary.json land in the
+        # same export pass and the vault manifest copy reflects the final
+        # backend_run_contract block.
+        return paths
     resolved_vault = resolve_vault_root(vault_root)
     enabled = resolved_vault is not None and vault_export_mode.strip().lower() != "skip"
     vault_result = export_to_vault(
@@ -810,22 +818,6 @@ def _write_json(path: Path, payload: Mapping[str, object], *, pretty: bool = Tru
                 sort_keys=False,
             )
         f.write("\n")
-
-
-def _to_jsonable(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(k): _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, tuple):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, float):
-        return _finite_or_none(value)
-    return value
 
 
 def _dump_yaml_payload(payload: Mapping[str, object]) -> str:

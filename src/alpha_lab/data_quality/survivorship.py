@@ -5,13 +5,13 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
-from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.frame_utils import require_columns
 from alpha_lab.research_integrity.contracts import IntegrityCheckResult
 
 
 def build_delisting_calendar(delisting_df: pd.DataFrame) -> pd.DataFrame:
     """Normalize delisting metadata to ``[asset, delist_date, last_trade_date]``."""
-    _require_columns(delisting_df, ("asset", "delist_date"), "delisting_df")
+    require_columns(delisting_df, ("asset", "delist_date"), "delisting_df")
 
     out = delisting_df.copy()
     out["asset"] = out["asset"].astype(str).str.strip()
@@ -47,8 +47,8 @@ def apply_delisting_return(
     penalty: float = -0.10,
 ) -> pd.DataFrame:
     """Inject a one-day delisting penalty after each asset's last trade date."""
-    _require_columns(prices_df, ("date", "asset", "close"), "prices_df")
-    _require_columns(
+    require_columns(prices_df, ("date", "asset", "close"), "prices_df")
+    require_columns(
         delisting_calendar,
         ("asset", "delist_date", "last_trade_date"),
         "delisting_calendar",
@@ -106,7 +106,7 @@ def validate_universe_survivorship(
     all_historical_assets: Iterable[str],
 ) -> IntegrityCheckResult:
     """Check whether the universe excludes historically listed assets."""
-    _require_columns(universe_df, ("asset",), "universe_df")
+    require_columns(universe_df, ("asset",), "universe_df")
 
     historical = {str(asset).strip() for asset in all_historical_assets if str(asset).strip()}
     present = {
@@ -142,7 +142,3 @@ def validate_universe_survivorship(
     )
 
 
-def _require_columns(frame: pd.DataFrame, cols: tuple[str, ...], name: str) -> None:
-    missing = set(cols) - set(frame.columns)
-    if missing:
-        raise AlphaLabDataError(f"{name} missing required columns: {sorted(missing)}")

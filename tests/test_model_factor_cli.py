@@ -691,10 +691,15 @@ def test_model_factor_cli_run_batch_expands_patterns(
 
     def _fake_run_model_factor_case(spec_path: Path, **_kwargs: object) -> SimpleNamespace:
         calls.append(spec_path)
+        stem = spec_path.stem
         return SimpleNamespace(
-            spec=SimpleNamespace(name=spec_path.stem),
-            output_dir=tmp_path / spec_path.stem,
-            artifact_paths={"run_manifest": tmp_path / f"{spec_path.stem}_manifest.json"},
+            spec=SimpleNamespace(name=stem),
+            output_dir=tmp_path / stem,
+            artifact_paths={
+                "run_manifest": tmp_path / f"{stem}_manifest.json",
+                "experiment_card": tmp_path / f"{stem}_experiment_card.md",
+                "summary": tmp_path / f"{stem}_summary.md",
+            },
         )
 
     monkeypatch.setattr(model_factor_cli, "run_model_factor_case", _fake_run_model_factor_case)

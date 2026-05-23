@@ -956,6 +956,8 @@ def test_model_lab_compare_runs_surfaces_backend_contract_when_present(
         "contract_version": "backend_run_contract_v1",
         "status": "passed",
         "issue_count": 0,
+        "artifact_issue_count": 0,
+        "validation_error_count": 0,
         "receipt_path": "backend_run_receipt.json",
         "comparison_summary_path": "comparison_summary.json",
         "audited_at_utc": "2026-05-21T00:00:00+00:00",
@@ -974,9 +976,13 @@ def test_model_lab_compare_runs_surfaces_backend_contract_when_present(
     assert contract_row["backend_contract_status"] == "passed"
     assert contract_row["backend_artifact_audit_ok"] is True
     assert contract_row["backend_contract_issue_count"] == 0
+    assert contract_row["backend_contract_artifact_issue_count"] == 0
+    assert contract_row["backend_contract_validation_error_count"] == 0
     assert "backend_contract_status" not in plain_row
     assert "backend_artifact_audit_ok" not in plain_row
     assert "backend_contract_issue_count" not in plain_row
+    assert "backend_contract_artifact_issue_count" not in plain_row
+    assert "backend_contract_validation_error_count" not in plain_row
 
 
 def test_model_lab_compare_runs_supports_eight_runs(tmp_path: Path) -> None:
