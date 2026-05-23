@@ -111,7 +111,9 @@ def adjust_for_dividends(
     Returns
     -------
     pd.DataFrame
-        Copy of ``prices_df`` with ``close`` adjusted for dividends.
+        Copy of ``prices_df`` with ``close`` adjusted for dividends. When
+        present, ``open``, ``high``, ``low``, and ``vwap`` are adjusted by the
+        same backward scale so entry and exit prices remain on the same basis.
     """
     if method != "back_adjust":
         raise ValueError(f"unsupported dividend adjustment method: {method!r}")
@@ -149,7 +151,12 @@ def adjust_for_dividends(
             i -= i & -i
         return total
 
-    close_values = pd.to_numeric(df["close"], errors="coerce").to_numpy(copy=True, dtype=float)
+    adjustable_columns = [col for col in ("close", "open", "high", "low", "vwap") if col in df]
+    price_values_by_column = {
+        col: pd.to_numeric(df[col], errors="coerce").to_numpy(copy=True, dtype=float)
+        for col in adjustable_columns
+    }
+    close_values = price_values_by_column["close"]
     date_values = pd.to_datetime(df["date"], errors="coerce").to_numpy(dtype="datetime64[ns]")
 
     asset_states: dict[object, _AssetState] = {}
@@ -208,7 +215,10 @@ def adjust_for_dividends(
 
     for state in asset_states.values():
         log_scale = np.cumsum(state.diff_log[:-1], dtype=float)
-        state.close_values[:] = state.close_values * np.exp(log_scale)
+        scale = np.exp(log_scale)
+        for values in price_values_by_column.values():
+            values[state.start : state.end] = values[state.start : state.end] * scale
 
-    df["close"] = close_values
+    for column, values in price_values_by_column.items():
+        df[column] = values
     return df

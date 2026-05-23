@@ -203,6 +203,7 @@ def test_load_standard_inputs_uses_dividend_adjusted_close_for_cached_labels(
     ratio = 1.0 - div_value / float(raw.loc[1, "close"])
     assert adjusted.loc[0, "close"] == pytest.approx(float(raw.loc[0, "close"]) * ratio)
     assert adjusted.loc[1, "close"] == pytest.approx(float(raw.loc[1, "close"]) * ratio)
+    assert adjusted.loc[1, "open"] == pytest.approx(float(raw.loc[1, "open"]) * ratio)
     assert adjusted.loc[2, "close"] == pytest.approx(float(raw.loc[2, "close"]))
 
     labels_1d = bundle.base_feature_cache.forward_labels_by_horizon[1]
@@ -211,7 +212,7 @@ def test_load_standard_inputs_uses_dividend_adjusted_close_for_cached_labels(
         (labels_1d["asset"] == first_asset) & (labels_1d["date"] == first_date)
     ]
     assert not first_label.empty
-    expected_ret = float(adjusted.loc[1, "close"] / adjusted.loc[0, "close"] - 1.0)
+    expected_ret = float(adjusted.loc[1, "close"] / adjusted.loc[1, "open"] - 1.0)
     assert float(first_label.iloc[0]["value"]) == pytest.approx(expected_ret)
 
 

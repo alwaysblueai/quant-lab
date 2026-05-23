@@ -93,6 +93,35 @@ def test_adjust_for_dividends_ex_date_boundary_behavior() -> None:
     assert day3 == pytest.approx(30.0)
 
 
+def test_adjust_for_dividends_keeps_ohlc_on_same_adjusted_basis() -> None:
+    prices = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "asset": ["A", "A", "A"],
+            "open": [9.5, 10.5, 11.5],
+            "high": [10.5, 11.5, 12.5],
+            "low": [9.0, 10.0, 11.0],
+            "close": [10.0, 11.0, 12.0],
+            "vwap": [10.1, 11.1, 12.1],
+        }
+    )
+    dividends = pd.DataFrame(
+        {
+            "asset": ["A"],
+            "date": pd.to_datetime(["2024-01-03"]),
+            "dividend_per_share": [1.1],
+        }
+    )
+
+    actual = adjust_for_dividends(prices, dividends)
+
+    ratio = 1.0 - 1.1 / 11.0
+    for column in ("open", "high", "low", "close", "vwap"):
+        assert actual.loc[0, column] == pytest.approx(float(prices.loc[0, column]) * ratio)
+        assert actual.loc[1, column] == pytest.approx(float(prices.loc[1, column]) * ratio)
+        assert actual.loc[2, column] == pytest.approx(float(prices.loc[2, column]))
+
+
 def test_adjust_for_dividends_skips_missing_event_rows() -> None:
     prices = pd.DataFrame(
         {
