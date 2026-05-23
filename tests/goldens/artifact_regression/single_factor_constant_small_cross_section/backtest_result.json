@@ -42,6 +42,7 @@
     "annualized_return": null,
     "annualized_volatility": null,
     "calmar": null,
+    "contribution_diagnostics": {},
     "drawdown_table": [],
     "excess_return_vs_benchmark": null,
     "information_ratio": null,

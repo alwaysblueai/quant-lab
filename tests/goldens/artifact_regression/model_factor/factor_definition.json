@@ -70,7 +70,7 @@
     "prices_path": "<TMP_ROOT>/inputs/prices.csv",
     "rebalance_frequency": "W",
     "target": {
-      "execution_price_mode": "close",
+      "execution_price_mode": "next_open",
       "horizon": 5,
       "kind": "forward_return",
       "max_abs_forward_return": null,

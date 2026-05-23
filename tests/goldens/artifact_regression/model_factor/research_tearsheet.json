@@ -1286,6 +1286,7 @@
     },
     "split_semantics": "model_training_prediction_holdout",
     "split_semantics_label": "Model-Lab: IS=训练样本，OOS=预测样本",
+    "target_execution_price_mode": "next_open",
     "target_horizon": 5,
     "target_kind": "forward_return",
     "universe_name": "demo_universe"
