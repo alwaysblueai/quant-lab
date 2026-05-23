@@ -104,6 +104,7 @@ def _synthetic_case_tables(
             pred = latent[t - 1] if t > 0 else 0.0
             ret = 0.0018 * pred + rng.normal(0.0, 0.01)
             price = max(price * (1.0 + ret), 1.0)
+            open_price = max(price * (0.998 + 0.0002 * ((i + t) % 7)), 1.0)
             amount = max((800_000.0 + i * 60_000.0 + t * 8_000.0) * price, 1.0)
             total_mv = max(price * (15_000_000.0 + i * 250_000.0), 1.0)
 
@@ -113,6 +114,7 @@ def _synthetic_case_tables(
                 {
                     "date": date,
                     "asset": asset,
+                    "open": float(open_price),
                     "close": float(price),
                     "amount": float(amount),
                     "total_mv": float(total_mv),

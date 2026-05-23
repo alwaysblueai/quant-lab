@@ -311,6 +311,7 @@ def export_artifact_bundle(
             "model_top_features": model_factor_result.model_diagnostics.get("top_features"),
             "mean_train_rows": model_factor_result.model_diagnostics.get("mean_train_rows"),
             "mean_score_assets": model_factor_result.model_diagnostics.get("mean_score_assets"),
+            "target_execution_price_mode": spec.target.execution_price_mode,
         }
     )
     retrain_every = int(spec.training.retrain_every_n_dates)
@@ -539,6 +540,7 @@ def export_artifact_bundle(
             "universe_name": spec.universe.name,
             "target_kind": spec.target.kind,
             "target_horizon": spec.target.horizon,
+            "target_execution_price_mode": spec.target.execution_price_mode,
             "split_contract": split_contract_payload,
             "split_semantics": metrics_for_payload["split_semantics"],
             "split_semantics_label": metrics_for_payload["split_semantics_label"],
@@ -583,6 +585,7 @@ def export_artifact_bundle(
             "feature_availability": _to_jsonable(
                 spec_to_dict(spec).get("feature_availability", {})
             ),
+            "target": _to_jsonable(spec_to_dict(spec).get("target", {})),
             "model_selection": _to_jsonable(spec_to_dict(spec).get("model_selection", {})),
             "feature_importance": _to_jsonable(spec_to_dict(spec).get("feature_importance", {})),
             "model_selection_outcome": _build_model_selection_outcome_payload(

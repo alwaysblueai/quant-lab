@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pandas as pd
 
-from alpha_lab.labels import LabelCache
+from alpha_lab.labels import ExecutionPriceMode, LabelCache
 from alpha_lab.research_evaluation_config import (
     ResearchEvaluationConfig,
 )
@@ -16,9 +18,13 @@ def _model_factor_price_read_columns(
     evaluation_config: ResearchEvaluationConfig,
     *,
     target_price_column: str = "close",
+    execution_price_mode: str = "close",
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     target_column = str(target_price_column or "close").strip() or "close"
     required = _unique_columns(["date", "asset", "close", target_column])
+    mode = str(execution_price_mode or "close").strip().lower()
+    if mode == "next_open":
+        required = _unique_columns([*required, "open"])
     diagnostics_cfg = evaluation_config.single_factor_diagnostics
     optional: list[str] = [
         # Preserve default dividend back-adjustment and data-quality summaries
@@ -43,6 +49,7 @@ def _build_forward_label_cache(
     target_horizon: int,
     target_label_df: pd.DataFrame,
     target_price_column: str = "close",
+    execution_price_mode: str = "close",
     max_abs_forward_return: float | None = None,
     evaluation_config: ResearchEvaluationConfig,
 ) -> dict[int, pd.DataFrame]:
@@ -50,8 +57,13 @@ def _build_forward_label_cache(
     if evaluation_config.single_factor_diagnostics.compute_ic_decay:
         horizons.update(_model_factor_decay_horizons(target_horizon))
 
-    label_prices = _prices_for_forward_labels(prices, price_column=target_price_column)
-    label_cache = LabelCache(label_prices)
+    mode = _normalize_execution_price_mode(execution_price_mode)
+    label_prices = _prices_for_forward_labels(
+        prices,
+        price_column=target_price_column,
+        execution_price_mode=mode,
+    )
+    label_cache = LabelCache(label_prices, execution_price_mode=mode)
     cache: dict[int, pd.DataFrame] = {}
     for horizon in sorted(horizons):
         if horizon == int(target_horizon):
@@ -65,14 +77,39 @@ def _build_forward_label_cache(
     return cache
 
 
-def _prices_for_forward_labels(prices: pd.DataFrame, *, price_column: str) -> pd.DataFrame:
+def _prices_for_forward_labels(
+    prices: pd.DataFrame,
+    *,
+    price_column: str,
+    execution_price_mode: str = "close",
+) -> pd.DataFrame:
     column = str(price_column or "close").strip() or "close"
     if column not in prices.columns:
         raise ValueError(f"target price column {column!r} is missing from prices")
-    frame = prices.loc[:, ["date", "asset", column]].copy()
+    mode = str(execution_price_mode or "close").strip().lower()
+    if mode not in {"close", "next_open"}:
+        raise ValueError("execution_price_mode must be one of ['close', 'next_open']")
+    columns = ["date", "asset", column]
+    if mode == "next_open":
+        if "open" not in prices.columns:
+            raise ValueError(
+                "execution_price_mode='next_open' requires an 'open' column in prices"
+            )
+        columns.append("open")
+    frame = prices.loc[:, columns].copy()
     if column != "close":
         frame = frame.rename(columns={column: "close"})
-    return frame.loc[:, ["date", "asset", "close"]]
+    out_columns = ["date", "asset", "close"]
+    if mode == "next_open":
+        out_columns.append("open")
+    return frame.loc[:, out_columns]
+
+
+def _normalize_execution_price_mode(value: str) -> ExecutionPriceMode:
+    mode = str(value or "close").strip().lower()
+    if mode not in {"close", "next_open"}:
+        raise ValueError("execution_price_mode must be one of ['close', 'next_open']")
+    return cast(ExecutionPriceMode, mode)
 
 
 def _filter_forward_label_frame(

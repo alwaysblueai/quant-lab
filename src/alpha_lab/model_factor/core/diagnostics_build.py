@@ -99,6 +99,7 @@ def _build_model_diagnostics(
         "feature_count": len(config.feature_columns),
         "target_horizon": config.target_horizon,
         "target_price_column": config.target_price_column,
+        "target_execution_price_mode": config.target_execution_price_mode,
         "max_abs_forward_return": (
             float(config.max_abs_forward_return)
             if config.max_abs_forward_return is not None

@@ -34,11 +34,11 @@ class TargetSpec:
     """Target/label definition.
 
     ``execution_price_mode`` selects the entry-price convention used to build
-    the forward-return label.  ``"close"`` (default, legacy behaviour) assumes
-    instantaneous execution at the signal-day close; ``"next_open"`` models a
+    the forward-return label.  ``"next_open"`` (default) models a
     trader who sees the signal at the close of day ``t`` and executes at the
-    next open, which is the realistic entry for after-close intraday-derived
-    factors (e.g. factors built from full-day intraday minute bars).  The
+    next open, which is the realistic entry for after-close or full-day
+    signals.  ``"close"`` remains available for explicit legacy close-to-close
+    studies.  The
     string is normalized to lowercase; values outside the allowed set fail
     fast.
     """
@@ -48,7 +48,7 @@ class TargetSpec:
     price_column: str = "close"
     max_abs_forward_return: float | None = None
     winsorize_zscore: float | None = None
-    execution_price_mode: ExecutionPriceMode = "close"
+    execution_price_mode: ExecutionPriceMode = "next_open"
 
     def __post_init__(self) -> None:
         if self.kind != "forward_return":

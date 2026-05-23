@@ -373,7 +373,7 @@ def test_run_model_factor_case_writes_bundle(tmp_path: Path) -> None:
         if str(item.get("name")) == "data_load"
     )
     data_load_result = data_load_stage["result"]
-    assert data_load_result["prices_requested_columns"] == ["date", "asset", "close"]
+    assert data_load_result["prices_requested_columns"] == ["date", "asset", "close", "open"]
     assert data_load_result["preparation_cache_enabled"] is True
     assert data_load_result["preparation_cache_hit"] is False
     assert data_load_result["split_contract"]["oos_start"] == manifest_split["oos_start"]
@@ -817,6 +817,19 @@ def test_model_factor_price_read_columns_include_target_price_column() -> None:
     assert required == ("date", "asset", "close", "close_qfq")
 
 
+def test_model_factor_price_read_columns_require_open_for_next_open_target() -> None:
+    evaluation_config = get_research_evaluation_config("default_research")
+
+    required, optional = _model_factor_price_read_columns(
+        evaluation_config,
+        target_price_column="close_qfq",
+        execution_price_mode="next_open",
+    )
+
+    assert required == ("date", "asset", "close", "close_qfq", "open")
+    assert "open" not in optional
+
+
 def test_model_factor_forward_label_cache_precomputes_decay_horizons(
     tmp_path: Path,
 ) -> None:
@@ -827,7 +840,7 @@ def test_model_factor_forward_label_cache_precomputes_decay_horizons(
         {
             "date": pd.to_datetime(prices["date"]),
             "asset": prices["asset"],
-            "factor": f"forward_return_{spec.target.horizon}",
+            "factor": f"forward_return_{spec.target.horizon}_next_open",
             "value": 0.0,
         }
     )
@@ -837,6 +850,7 @@ def test_model_factor_forward_label_cache_precomputes_decay_horizons(
         target_horizon=int(spec.target.horizon),
         target_label_df=target_labels,
         target_price_column=spec.target.price_column,
+        execution_price_mode=spec.target.execution_price_mode,
         max_abs_forward_return=spec.target.max_abs_forward_return,
         evaluation_config=get_research_evaluation_config("default_research"),
     )

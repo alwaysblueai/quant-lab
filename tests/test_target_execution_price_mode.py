@@ -85,14 +85,14 @@ def test_forward_return_next_open_semantics_pins_canonical_formula() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2. TargetSpec validation: default close, allowed values, fail-fast on bad.
+# 2. TargetSpec validation: default next_open, allowed values, fail-fast on bad.
 # ---------------------------------------------------------------------------
 
 
-def test_default_execution_price_mode_is_close() -> None:
-    """No-arg TargetSpec keeps legacy close-mode behaviour."""
+def test_default_execution_price_mode_is_next_open() -> None:
+    """No-arg TargetSpec uses implementable next-open behaviour."""
     spec = TargetSpec()
-    assert spec.execution_price_mode == "close"
+    assert spec.execution_price_mode == "next_open"
 
 
 def test_target_spec_accepts_next_open() -> None:
@@ -131,7 +131,7 @@ def test_case_spec_parses_execution_price_mode_from_mapping() -> None:
     assert spec.target.execution_price_mode == "next_open"
 
 
-def test_case_spec_default_is_close_when_field_absent() -> None:
+def test_case_spec_default_is_next_open_when_field_absent() -> None:
     payload = {
         "name": "default_case",
         "factor_name": "f",
@@ -144,7 +144,7 @@ def test_case_spec_default_is_close_when_field_absent() -> None:
         "output": {"root_dir": "outputs"},
     }
     spec = single_factor_case_spec_from_mapping(payload)
-    assert spec.target.execution_price_mode == "close"
+    assert spec.target.execution_price_mode == "next_open"
 
 
 def test_case_spec_rejects_invalid_execution_price_mode() -> None:
@@ -263,7 +263,7 @@ def test_single_factor_pipeline_passes_execution_price_mode(
     assert captured[0].get("execution_price_mode") == "next_open"
 
 
-def test_single_factor_pipeline_default_close_when_not_configured(
+def test_single_factor_pipeline_default_next_open_when_not_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = _build_spec_for_routing_test(None)
@@ -286,7 +286,7 @@ def test_single_factor_pipeline_default_close_when_not_configured(
             neutralization_summary=None,
         )
 
-    assert captured[0].get("execution_price_mode") == "close"
+    assert captured[0].get("execution_price_mode") == "next_open"
 
 
 # ---------------------------------------------------------------------------
@@ -456,8 +456,8 @@ def test_pipeline_smoke_next_open_metrics_record_label_mode(tmp_path: Path) -> N
     assert "next open" in str(metrics["label_entry_assumption"]).lower()
 
 
-def test_pipeline_smoke_default_close_metrics_record_label_mode(tmp_path: Path) -> None:
-    """End-to-end: default close mode keeps the legacy entry convention."""
+def test_pipeline_smoke_explicit_close_metrics_record_label_mode(tmp_path: Path) -> None:
+    """End-to-end: explicit close mode keeps the legacy entry convention."""
     from alpha_lab.real_cases.single_factor.pipeline import run_single_factor_case
 
     spec_path = _write_next_open_capable_case(tmp_path, execution_price_mode="close")
