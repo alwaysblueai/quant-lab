@@ -1,16 +1,34 @@
 # 后端草稿因子流程
 
-本文定义从网页版 GPT Stage2 输出到 alpha-lab 后端快速验证之间的标准流程。
+本文定义从网页版 GPT Stage 2 输出到 alpha-lab 后端快速验证之间的标准流程。
 目标是让研究态因子可以快速迭代，同时保持可审计、可复现、可对比，并且不污染前端注册与 core API。
+
+## 上游来源（Stage 0 + Stage 1 + Stage 2）
+
+本流程接的是 `ideas/<idea_id>/stage2_payload.json`（或同等内容），上游链路：
+
+1. **Stage 0** — `alpha-lab idea distribute --idea ... --output-dir ideas/<id>/`
+   产出 retrieval pack + 两份对称 engine prompts：`prompt_claude.md`
+   和 `prompt_codex.md`。
+2. **Stage 1** — Claude Code 与 Codex GUI 各自输出
+   `stage1_claude.md` / `stage1_codex.md`，两份都包含 generator + reviewer。
+3. **Stage 2** — 网页版 GPT 接 Stage 2 输入模板（`stage2_input.md`）、
+   reconcile 合同（`docs/templates/single_factor_stage1_reconcile_contract.md`）
+   + Stage 2 candidate 模板（`docs/templates/single_factor_stage2_candidate_contract.md`），
+   输出唯一 `factor_json_payload`，含 `provenance.idea_id` /
+   `provenance.stage2_payload_sha256` / `provenance.audience_chain`。
+
+详见 `docs/research_workflow.md`。
 
 ## 核心边界
 
 后端草稿因子不是正式因子，只能存在于：
 
-- `custom_factors/research/<factor>/factor.json`
+- `custom_factors/research/<factor>/factor.json`（含 `provenance` 块）
 - `custom_factors/research/<factor>/research_log.md`
 - `configs/real_cases/single_factor/<factor>_vN.yaml`
 - 标准 pipeline 输出目录
+- `ideas/<idea_id>/stage3_runs/`（可选：写入 artifact 软链或摘要，便于跨轮迭代追溯）
 
 不得为了某个因子新增一次性脚本。所有实验都必须通过：
 
@@ -38,9 +56,18 @@ Codex GUI 只把这个 JSON 作为落盘事实来源。
   "frequency": "daily",
   "unavailable_data_policy": "return_nan",
   "pit_assumption": "所有 rolling 特征只使用当前及过去 bar，不使用未来收益标签。",
-  "code": "def build_factor(frame): ..."
+  "code": "def build_factor(frame): ...",
+  "provenance": {
+    "idea_id": "20260511T143000Z__signed-jump-reversal",
+    "stage2_payload_sha256": "<sha256 of canonical-JSON Stage2 payload>",
+    "audience_chain": ["claude", "codex", "web_gpt_stage2"]
+  }
 }
 ```
+
+`provenance` 块由 Stage 2 网页 GPT 填写，Stage 3 不得改写或删除。
+validator 会做形态校验，artifact 审计块会把 `provenance.idea_id` 复制进
+`custom_factor_source.provenance`。
 
 推荐接口是：
 
@@ -118,12 +145,19 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case single-
     "optional_columns": ["..."],
     "frequency": "daily",
     "unavailable_data_policy": "...",
-    "pit_assumption": "..."
+    "pit_assumption": "...",
+    "provenance": {
+      "idea_id": "20260511T143000Z__signed-jump-reversal",
+      "stage2_payload_sha256": "...",
+      "audience_chain": ["claude", "codex", "web_gpt_stage2"]
+    }
   }
 }
 ```
 
 缺少 `code_sha256`、`factor_json_sha256` 或 source path 时，本轮 Stage3 视为失败。
+`provenance` 缺失时仅产生 warning（兼容旧的 pre-protocol 因子），但所有新走
+`alpha-lab idea distribute` 流的因子必须有 provenance。
 
 ## 结果分析
 

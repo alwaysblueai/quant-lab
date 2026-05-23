@@ -39,11 +39,18 @@ build-backend = "hatchling.build"
 packages = ["src/alpha_lab"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
 pythonpath = ["src"]
 testpaths = ["tests"]
 xfail_strict = true
-markers = []
+# slow:   integration tests >2s that run a full pipeline / build artifacts.
+#         Filter out for quick dev iteration: `pytest -m "not slow"`.
+# golden: tests that compare against tests/goldens/. Use
+#         `ALPHA_LAB_UPDATE_GOLDENS=1 pytest -m golden` to regenerate.
+markers = [
+    "slow: integration tests >2s — exercises full pipelines / artifacts",
+    "golden: compares output against tests/goldens/ — set ALPHA_LAB_UPDATE_GOLDENS=1 to refresh",
+]
 
 [tool.ruff]
 line-length = 100

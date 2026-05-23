@@ -8,9 +8,12 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import yaml
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+
+pytestmark = [pytest.mark.slow, pytest.mark.golden]
 from alpha_lab.examples.profile_aware_campaign_level12 import (
     run_profile_aware_campaign_level12_example,
 )

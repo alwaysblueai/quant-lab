@@ -249,7 +249,7 @@ def describe_lint_contract(stage: str, *, mode: str = "free") -> tuple[str, ...]
             "机制名称不得直接使用 reversal / momentum / value / quality / "
             "size / skewness / liquidity 等既有标签。",
             "不得出现做多 / 做空 / long the / short the / buy the / sell the 等预设收益方向语言。",
-            "每个机制候选应能落入 ledger_v1：包含 hypothesis / signal_sketch / data_needs，"
+            "每个机制候选应能落入 Stage 1 mechanism schema：包含 hypothesis / signal_sketch / data_needs，"
             "inspired_by / fusion_of / cross_domain_jump 只在有助于学习时填写；无来源不算缺口。",
         )
     if normalized_stage == SIGNAL_MAPPING:
@@ -302,7 +302,7 @@ def describe_model_lint_contract(
             "模型机制候选至少 2 个；每个候选必须写清 touched contract surfaces 与 concern。",
             "机制发现阶段不得输出最终 spec patch、不得推荐 single best model、不得把方向写成单纯调参。",
             "必须至少覆盖两类不同模型机制：loss/regularization、feature interaction、target construction、sample weighting、training window、model selection 中的两类。",
-            "每个机制候选应能落入 ledger_v1：包含 hypothesis / signal_sketch / data_needs，"
+            "每个机制候选应能落入 Stage 1 mechanism schema：包含 hypothesis / signal_sketch / data_needs，"
             "inspired_by / fusion_of / cross_domain_jump 可选；无来源不算缺口。",
         )
     if normalized_stage == SIGNAL_MAPPING:

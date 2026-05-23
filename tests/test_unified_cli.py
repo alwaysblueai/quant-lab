@@ -220,47 +220,6 @@ def test_unified_cli_routes_bridge_command(monkeypatch: pytest.MonkeyPatch) -> N
     ]
 
 
-def test_unified_cli_routes_idea_draft_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-
-    class _FakeDraftResult:
-        models = ("claude", "codex")
-        draft_dir = Path("/tmp/draft")
-        shared_prompt_path = Path("/tmp/draft/prompt.shared.md")
-        reconcile_path = Path("/tmp/draft/reconcile.md")
-
-        def to_payload(self) -> dict[str, object]:
-            return {"stage": "mechanism_discovery"}
-
-    def _fake_draft_idea(**kwargs: Any) -> _FakeDraftResult:
-        captured.update(kwargs)
-        return _FakeDraftResult()
-
-    monkeypatch.setattr("alpha_lab.research_bridge.service.draft_idea", _fake_draft_idea)
-
-    rc = main(
-        [
-            "idea",
-            "draft",
-            "--idea",
-            "跨领域成交额机制",
-            "--models",
-            "claude,codex",
-            "--mode",
-            "start",
-            "--vault-root",
-            "/tmp/vault",
-        ]
-    )
-
-    assert rc == 0
-    assert captured["idea"] == "跨领域成交额机制"
-    assert captured["models"] == "claude,codex"
-    assert captured["mode"] == "start"
-    assert captured["stage"] == "mechanism_discovery"
-    assert captured["vault_root"] == "/tmp/vault"
-
-
 def test_unified_cli_routes_vault_command(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -682,119 +641,21 @@ def test_unified_cli_profiles_lists_available_profiles(
     assert "candidate discovery" in captured.out
 
 
-def test_unified_cli_routes_web_ui(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_start_web_ui_server(
-        *,
-        host: str = "127.0.0.1",
-        port: int = 8765,
-        workspace_root: str = ".",
-        open_browser: bool = True,
-    ) -> None:
-        captured["host"] = host
-        captured["port"] = port
-        captured["workspace_root"] = workspace_root
-        captured["open_browser"] = open_browser
-
-    monkeypatch.setattr("alpha_lab.web_ui.start_web_ui_server", _fake_start_web_ui_server)
-
-    rc = main(
-        [
-            "web",
-            "ui",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8899",
-            "--workspace-root",
-            "/tmp/alpha-lab",
-            "--no-open-browser",
-        ]
-    )
-    assert rc == 0
-    captured_stdio = capsys.readouterr()
-    assert "deprecated" in captured_stdio.err.lower()
-    assert "web unified" in captured_stdio.err.lower()
-    assert captured == {
-        "host": "0.0.0.0",
-        "port": 8899,
-        "workspace_root": "/tmp/alpha-lab",
-        "open_browser": False,
-    }
-
-
-def test_unified_cli_routes_web_cockpit(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_start_unified_server(
-        *,
-        host: str = "127.0.0.1",
-        port: int = 8766,
-        workspace_root: str = ".",
-        vault_root: str | None = None,
-        open_browser: bool = True,
-    ) -> None:
-        captured["host"] = host
-        captured["port"] = port
-        captured["workspace_root"] = workspace_root
-        captured["vault_root"] = vault_root
-        captured["open_browser"] = open_browser
-
-    monkeypatch.setattr(
-        "alpha_lab.web_unified.start_unified_server",
-        _fake_start_unified_server,
-    )
-
-    rc = main(
-        [
-            "web",
-            "cockpit",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8999",
-            "--workspace-root",
-            "/tmp/alpha-lab",
-            "--vault-root",
-            "/tmp/vault",
-            "--no-open-browser",
-        ]
-    )
-    assert rc == 0
-    captured_stdio = capsys.readouterr()
-    assert "deprecated" in captured_stdio.err.lower()
-    assert "web unified" in captured_stdio.err.lower()
-    assert captured == {
-        "host": "0.0.0.0",
-        "port": 8999,
-        "workspace_root": "/tmp/alpha-lab",
-        "vault_root": "/tmp/vault",
-        "open_browser": False,
-    }
-
-
-def test_unified_cli_web_ui_invalid_port(capsys: pytest.CaptureFixture[str]) -> None:
+def test_unified_cli_web_unified_invalid_port(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
-        main(["web", "ui", "--port", "0"])
+        main(["web", "unified", "--port", "0"])
     captured = capsys.readouterr()
     assert "--port must be within 1..65535" in captured.err
 
 
-def test_unified_cli_run_routes_to_legacy_main(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unified_cli_run_routes_to_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_legacy_main(argv: list[str] | None = None) -> int:
+    def _fake_run_main(argv: list[str] | None = None) -> int:
         captured["argv"] = argv
         return 55
 
-    monkeypatch.setattr("alpha_lab.cli._legacy_main", _fake_legacy_main)
+    monkeypatch.setattr("alpha_lab.cli._run_main", _fake_run_main)
 
     rc = main(["run", "--input-path", "prices.csv"])
     assert rc == 55

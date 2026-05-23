@@ -67,3 +67,6 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+
+# One-shot data-fix scripts: kept locally for audit, not part of reusable code
+scripts/intraday/_oneshots/

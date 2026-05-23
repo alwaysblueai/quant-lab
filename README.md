@@ -335,6 +335,8 @@ Example:
 
 ## Documentation
 
+Full index: [docs/README.md](docs/README.md). Quick links:
+
 - [docs/architecture.md](docs/architecture.md) — layer contracts, data flow, path/config
 - [docs/system_manual.md](docs/system_manual.md) — API reference and usage patterns
 - [docs/developer_guide.md](docs/developer_guide.md) — how to extend the codebase

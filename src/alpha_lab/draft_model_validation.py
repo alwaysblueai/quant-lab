@@ -47,6 +47,10 @@ _FORBIDDEN_LEVEL3_TOKENS: tuple[str, ...] = (
     "live_trading",
     "portfolio_construction",
 )
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_KNOWN_AUDIENCES: frozenset[str] = frozenset(
+    {"claude", "codex", "web_gpt_stage2"}
+)
 
 
 @dataclass(frozen=True)
@@ -240,6 +244,9 @@ def validate_draft_model_file(
             )
 
     _check_no_level3_tokens(payload, errors)
+    _validate_provenance(
+        payload.get("provenance"), errors=errors, warnings=warnings
+    )
 
     case_spec_payload = payload.get("case_spec_payload")
     if not isinstance(case_spec_payload, Mapping):
@@ -292,6 +299,67 @@ def validate_draft_model_file(
         errors=errors,
         warnings=warnings,
     )
+
+
+def _validate_provenance(
+    raw: object,
+    *,
+    errors: list[DraftModelIssue],
+    warnings: list[DraftModelIssue],
+) -> None:
+    """Shape-check the optional ``provenance`` block on a model candidate.
+
+    Mirrors the single-factor validator: absent block → warning (back-compat);
+    present block requires non-empty ``idea_id`` and hex sha256 if
+    ``stage2_payload_sha256`` is given.
+    """
+
+    if raw is None:
+        warnings.append(
+            _warning(
+                "provenance_missing",
+                "provenance block missing; new candidates should record idea_id from "
+                "alpha-lab model-idea distribute output",
+            )
+        )
+        return
+    if not isinstance(raw, Mapping):
+        errors.append(_error("provenance_type", "provenance must be a JSON object"))
+        return
+    idea_id = _optional_text(raw.get("idea_id"))
+    if idea_id is None:
+        errors.append(
+            _error("provenance_idea_id_missing", "provenance.idea_id must be non-empty")
+        )
+    payload_sha = raw.get("stage2_payload_sha256")
+    if payload_sha is not None:
+        if not isinstance(payload_sha, str) or not _SHA256_RE.match(payload_sha):
+            errors.append(
+                _error(
+                    "provenance_payload_sha256",
+                    "provenance.stage2_payload_sha256 must be a 64-char hex sha256",
+                )
+            )
+    audience_chain = raw.get("audience_chain")
+    if audience_chain is not None:
+        if not isinstance(audience_chain, list) or not all(
+            isinstance(item, str) for item in audience_chain
+        ):
+            errors.append(
+                _error(
+                    "provenance_audience_chain_type",
+                    "provenance.audience_chain must be a string list",
+                )
+            )
+        else:
+            unknown = [item for item in audience_chain if item not in _KNOWN_AUDIENCES]
+            if unknown:
+                warnings.append(
+                    _warning(
+                        "provenance_audience_unknown",
+                        f"provenance.audience_chain contains unknown audiences: {unknown}",
+                    )
+                )
 
 
 def _check_no_level3_tokens(

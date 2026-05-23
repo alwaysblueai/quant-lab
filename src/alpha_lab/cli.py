@@ -8,8 +8,10 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from alpha_lab.config import PROCESSED_DATA_DIR
 from alpha_lab.exceptions import AlphaLabConfigError
@@ -265,6 +267,8 @@ def _safe_filename(name: str) -> str:
 
 def _load_prices(input_path: Path) -> pd.DataFrame:
     """Read and minimally validate the input price CSV."""
+    import pandas as pd
+
     try:
         df = pd.read_csv(input_path)
     except Exception as exc:
@@ -320,7 +324,7 @@ def _print_stdout_summary(
 # ---------------------------------------------------------------------------
 
 
-def _legacy_main(argv: list[str] | None = None) -> int:
+def _run_main(argv: list[str] | None = None) -> int:
     """Run a factor experiment from the command line.
 
     Parameters
@@ -471,13 +475,13 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     run = top.add_parser(
         "run",
-        help="Run the legacy single-experiment CLI (backward-compatible route).",
+        help="Run a single-factor experiment via the underlying argparse CLI.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     run.add_argument(
         "args",
         nargs=argparse.REMAINDER,
-        help="Arguments forwarded to the legacy run CLI (use 'alpha-lab run --help').",
+        help="Arguments forwarded to the single-experiment runner (use 'alpha-lab run --help').",
     )
 
     fast_screen = top.add_parser(
@@ -798,66 +802,6 @@ def build_unified_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     web_commands = web.add_subparsers(dest="web_action", required=True)
-    web_ui = web_commands.add_parser(
-        "ui",
-        help="[DEPRECATED] Run legacy web UI server; use `alpha-lab web unified`.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    web_ui.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind host for the local web server.",
-    )
-    web_ui.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Bind port for the local web server.",
-    )
-    web_ui.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root used for resolving dist/web_ui_* directories.",
-    )
-    web_ui.add_argument(
-        "--no-open-browser",
-        action="store_true",
-        help="Do not auto-open browser; print URL only.",
-    )
-    web_cockpit = web_commands.add_parser(
-        "cockpit",
-        help=(
-            "[DEPRECATED] Alias retained for compatibility; routes to "
-            "`alpha-lab web unified`."
-        ),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    web_cockpit.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind host for the local web server.",
-    )
-    web_cockpit.add_argument(
-        "--port",
-        type=int,
-        default=8766,
-        help="Bind port for the local web server.",
-    )
-    web_cockpit.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root used for resolving dist/cockpit_* directories.",
-    )
-    web_cockpit.add_argument(
-        "--vault-root",
-        default=None,
-        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
-    )
-    web_cockpit.add_argument(
-        "--no-open-browser",
-        action="store_true",
-        help="Do not auto-open browser; print URL only.",
-    )
     web_unified = web_commands.add_parser(
         "unified",
         help=(
@@ -903,70 +847,114 @@ def build_unified_parser() -> argparse.ArgumentParser:
 
     idea = top.add_parser(
         "idea",
-        help="Generate Stage 1 idea-explorer draft artifacts.",
+        help="Generate Stage 0 idea distribution artifacts.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     idea_commands = idea.add_subparsers(dest="idea_action", required=True)
-    idea_draft = idea_commands.add_parser(
-        "draft",
-        help="Create shared prompt, per-model ledger placeholders, and reconcile template.",
+    idea_distribute = idea_commands.add_parser(
+        "distribute",
+        help=(
+            "Stage 0: emit retrieval pack + symmetric engine prompts "
+            "(claude / codex) under ideas/<idea_id>/."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    idea_draft.add_argument("--idea", required=True, help="Natural-language idea to explore.")
-    idea_draft.add_argument(
-        "--models",
-        default="claude,codex",
-        help="Comma-separated Stage 1 engines, e.g. claude,codex.",
+    idea_distribute.add_argument(
+        "--idea", required=True, help="Natural-language idea to distribute."
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
+        "--engines",
+        default="claude,codex",
+        help="Comma-separated Stage 1 engines (claude / codex).",
+    )
+    idea_distribute.add_argument(
+        "--lab",
+        default="single_factor",
+        choices=["single_factor", "model_factor"],
+        help="Which lab the idea belongs to (selects reviewer schema/validator section).",
+    )
+    idea_distribute.add_argument(
         "--mode",
         default="start",
         choices=["start", "free", "constrained"],
         help="Stage 1 prompt strictness.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--stage",
         default="mechanism_discovery",
         choices=["mechanism_discovery", "signal_mapping"],
-        help="Idea-explorer stage to draft.",
+        help="Retrieval stage used to assemble the Stage 0 pack.",
     )
-    idea_draft.add_argument("--project", default=None, help="Optional bridge project slug.")
-    idea_draft.add_argument("--top-k", type=int, default=8, help="Retrieval depth.")
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
+        "--project", default=None, help="Optional bridge project slug."
+    )
+    idea_distribute.add_argument(
+        "--top-k", type=int, default=8, help="Retrieval depth."
+    )
+    idea_distribute.add_argument(
         "--available-data",
         action="append",
         default=[],
         help="Available data identifier. May be repeated.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--workspace-root",
         default=".",
-        help="Workspace root used for artifacts/alpha_lab_explorer/drafts.",
+        help="Workspace root used for ideas/<idea_id>/ allocation.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--output-root",
         default=None,
-        help="Optional draft output root. Defaults under workspace artifacts.",
+        help="Optional output root override (default: <workspace>/ideas/).",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--vault-root",
         default=None,
         help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--persist-session",
         action="store_true",
         help="Persist the shared explore prompt as an alpha_lab_explorer session.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--inject-recent-drift",
         action="store_true",
         help="Inject recent lint drift into the shared prompt.",
     )
-    idea_draft.add_argument(
+    idea_distribute.add_argument(
         "--parent-session-id",
         default=None,
         help="Optional upstream explore session id for stage chaining.",
+    )
+
+    idea_card = idea_commands.add_parser(
+        "experiment-card",
+        help=(
+            "Stage 4: scaffold experiment_card.md under ideas/<idea_id>/, "
+            "optionally cleanup Stage 0/1/2/3 temp files."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    idea_card.add_argument("--idea-id", required=True, help="ideas/<idea_id>/ basename.")
+    idea_card.add_argument(
+        "--outcome",
+        required=True,
+        choices=["promoted", "killed", "parked"],
+        help="Final outcome for this idea.",
+    )
+    idea_card.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root containing the ideas/ directory.",
+    )
+    idea_card.add_argument(
+        "--cleanup",
+        action="store_true",
+        help=(
+            "After writing the card, delete Stage 0/1/2/3 temp files under "
+            "ideas/<idea_id>/ (keeps manifest.json + experiment_card.md only)."
+        ),
     )
 
     vault = top.add_parser(
@@ -1004,13 +992,162 @@ def build_unified_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _handle_campaign(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.campaign_action == "run":
+        if args.campaign_name not in _SUPPORTED_CAMPAIGNS:
+            parser.error(
+                "unsupported campaign name "
+                f"{args.campaign_name!r}; supported: {sorted(_SUPPORTED_CAMPAIGNS)}"
+            )
+
+        from alpha_lab.campaigns.research_campaign_1 import (
+            main as research_campaign_1_main,
+        )
+
+        return research_campaign_1_main(args.args)
+
+    if args.campaign_action == "compare-profiles":
+        from alpha_lab.campaigns.profile_comparison import (
+            print_campaign_profile_case_evidence,
+            print_campaign_profile_comparison_summary,
+            run_campaign_profile_comparison,
+        )
+
+        try:
+            comparison_result = run_campaign_profile_comparison(
+                source=args.source,
+                output_root_dir=args.output_root_dir,
+                profiles=tuple(args.profiles),
+                pair_mode=args.pair_mode,
+                campaign_config=args.campaign_config,
+                case_output_root_dir=args.case_output_root_dir,
+                artifact_hint_path_mode=args.artifact_hint_path_mode,
+                render_report=not bool(args.no_render_report),
+                render_overwrite=bool(args.render_overwrite),
+                clean_output=not bool(args.no_clean_output),
+            )
+        except (ValueError, FileNotFoundError, RuntimeError) as exc:
+            parser.error(str(exc))
+        print_campaign_profile_comparison_summary(comparison_result)
+        if args.show_case_evidence is not None:
+            try:
+                print_campaign_profile_case_evidence(
+                    comparison_result,
+                    case_name=str(args.show_case_evidence),
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
+        return 0
+
+    if args.campaign_action == "render-dashboard":
+        from alpha_lab.reporting.renderers import (
+            write_campaign_profile_dashboard_html,
+        )
+
+        try:
+            dashboard_path = write_campaign_profile_dashboard_html(
+                args.comparison_json,
+                output_path=args.output_html,
+                overwrite=bool(args.overwrite),
+                title=args.title,
+                artifact_load_mode=args.artifact_load_mode,
+            )
+        except (ValueError, FileNotFoundError, RuntimeError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : campaign-render-dashboard")
+        print("  Status   : success")
+        print(f"  Input    : {Path(args.comparison_json).resolve()}")
+        print(f"  Output   : {dashboard_path}")
+        return 0
+
+    parser.error(f"unsupported campaign command: {args.campaign_action!r}")
+    return 2  # unreachable — parser.error raises SystemExit; placate type checker.
+
+
+def _handle_idea(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.idea_action == "distribute":
+        from alpha_lab.research_bridge.engine_prompts import Lab
+        from alpha_lab.research_bridge.service import distribute_idea
+
+        available_data = (
+            frozenset(args.available_data) if args.available_data else None
+        )
+        try:
+            result = distribute_idea(
+                vault_root=args.vault_root,
+                idea=args.idea,
+                engines=args.engines,
+                lab=Lab(args.lab),
+                mode=args.mode,
+                project_slug=args.project,
+                top_k=args.top_k,
+                available_data=available_data,
+                stage=args.stage,
+                workspace_root=args.workspace_root,
+                output_root=args.output_root,
+                persist_session=bool(args.persist_session),
+                inject_recent_drift=bool(args.inject_recent_drift),
+                parent_session_id=args.parent_session_id,
+            )
+        except (ValueError, FileExistsError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : idea-distribute")
+        print("  Status   : success")
+        print(f"  Lab      : {result.lab.value}")
+        print(f"  Idea ID  : {result.idea_id}")
+        print(f"  Stage    : {result.stage}")
+        print(f"  Engines  : {', '.join(e.value for e in result.engines)}")
+        print(f"  Output   : {result.draft_dir}")
+        print(f"  Retrieval: {result.retrieval_pack_path}")
+        print(f"  Stage2In : {result.stage2_input_path}")
+        print(f"  Manifest : {result.manifest_path}")
+        return 0
+
+    if args.idea_action == "experiment-card":
+        from alpha_lab.research_bridge.experiment_card import (
+            ExperimentCardOutcome,
+            scaffold_experiment_card,
+        )
+
+        try:
+            outcome = ExperimentCardOutcome(args.outcome)
+        except ValueError:
+            parser.error(
+                f"--outcome must be one of "
+                f"{[o.value for o in ExperimentCardOutcome]}"
+            )
+        try:
+            card_path = scaffold_experiment_card(
+                idea_id=args.idea_id,
+                outcome=outcome,
+                workspace_root=args.workspace_root,
+                cleanup=bool(args.cleanup),
+            )
+        except (FileNotFoundError, FileExistsError, OSError) as exc:
+            parser.error(str(exc))
+        print("")
+        print("  Workflow : idea-experiment-card")
+        print("  Status   : success")
+        print(f"  Idea ID  : {args.idea_id}")
+        print(f"  Outcome  : {outcome.value}")
+        print(f"  Card     : {card_path}")
+        if bool(args.cleanup):
+            print("  Cleanup  : removed Stage 0/1/2/3 temp files")
+        return 0
+
+    parser.error(f"unsupported idea command: {args.idea_action!r}")
+    return 2  # unreachable — parser.error raises SystemExit.
+
+
 def unified_main(argv: list[str] | None = None) -> int:
     """Route unified CLI commands to existing module entrypoints."""
     parser = build_unified_parser()
     args = parser.parse_args(argv)
 
     if args.top_command == "run":
-        return _legacy_main(args.args)
+        return _run_main(args.args)
 
     if args.top_command == "fast-screen":
         from alpha_lab.fast_screen.cli import main as fast_screen_main
@@ -1045,75 +1182,7 @@ def unified_main(argv: list[str] | None = None) -> int:
         parser.error(f"unsupported real-case workflow: {args.real_case_kind!r}")
 
     if args.top_command == "campaign":
-        if args.campaign_action == "run":
-            if args.campaign_name not in _SUPPORTED_CAMPAIGNS:
-                parser.error(
-                    "unsupported campaign name "
-                    f"{args.campaign_name!r}; supported: {sorted(_SUPPORTED_CAMPAIGNS)}"
-                )
-
-            from alpha_lab.campaigns.research_campaign_1 import (
-                main as research_campaign_1_main,
-            )
-
-            return research_campaign_1_main(args.args)
-
-        if args.campaign_action == "compare-profiles":
-            from alpha_lab.campaigns.profile_comparison import (
-                print_campaign_profile_case_evidence,
-                print_campaign_profile_comparison_summary,
-                run_campaign_profile_comparison,
-            )
-
-            try:
-                comparison_result = run_campaign_profile_comparison(
-                    source=args.source,
-                    output_root_dir=args.output_root_dir,
-                    profiles=tuple(args.profiles),
-                    pair_mode=args.pair_mode,
-                    campaign_config=args.campaign_config,
-                    case_output_root_dir=args.case_output_root_dir,
-                    artifact_hint_path_mode=args.artifact_hint_path_mode,
-                    render_report=not bool(args.no_render_report),
-                    render_overwrite=bool(args.render_overwrite),
-                    clean_output=not bool(args.no_clean_output),
-                )
-            except (ValueError, FileNotFoundError, RuntimeError) as exc:
-                parser.error(str(exc))
-            print_campaign_profile_comparison_summary(comparison_result)
-            if args.show_case_evidence is not None:
-                try:
-                    print_campaign_profile_case_evidence(
-                        comparison_result,
-                        case_name=str(args.show_case_evidence),
-                    )
-                except ValueError as exc:
-                    parser.error(str(exc))
-            return 0
-
-        if args.campaign_action == "render-dashboard":
-            from alpha_lab.reporting.renderers import (
-                write_campaign_profile_dashboard_html,
-            )
-
-            try:
-                dashboard_path = write_campaign_profile_dashboard_html(
-                    args.comparison_json,
-                    output_path=args.output_html,
-                    overwrite=bool(args.overwrite),
-                    title=args.title,
-                    artifact_load_mode=args.artifact_load_mode,
-                )
-            except (ValueError, FileNotFoundError, RuntimeError, OSError) as exc:
-                parser.error(str(exc))
-            print("")
-            print("  Workflow : campaign-render-dashboard")
-            print("  Status   : success")
-            print(f"  Input    : {Path(args.comparison_json).resolve()}")
-            print(f"  Output   : {dashboard_path}")
-            return 0
-
-        parser.error(f"unsupported campaign command: {args.campaign_action!r}")
+        return _handle_campaign(args, parser)
 
     if args.top_command == "profiles":
         _print_profiles()
@@ -1122,43 +1191,6 @@ def unified_main(argv: list[str] | None = None) -> int:
     if args.top_command == "web":
         if args.port <= 0 or args.port > 65535:
             parser.error("--port must be within 1..65535")
-        if args.web_action == "ui":
-            print(
-                "[DEPRECATED] `alpha-lab web ui` is deprecated. "
-                "Use `alpha-lab web unified` for the maintained research frontend.",
-                file=sys.stderr,
-            )
-            from alpha_lab.web_ui import start_web_ui_server
-
-            try:
-                start_web_ui_server(
-                    host=args.host,
-                    port=args.port,
-                    workspace_root=args.workspace_root,
-                    open_browser=not bool(args.no_open_browser),
-                )
-            except OSError as exc:
-                parser.error(str(exc))
-            return 0
-        if args.web_action == "cockpit":
-            print(
-                "[DEPRECATED] `alpha-lab web cockpit` is deprecated and now aliases "
-                "`alpha-lab web unified`. Use `alpha-lab web unified` directly.",
-                file=sys.stderr,
-            )
-            from alpha_lab.web_unified import start_unified_server
-
-            try:
-                start_unified_server(
-                    host=args.host,
-                    port=args.port,
-                    workspace_root=args.workspace_root,
-                    vault_root=args.vault_root,
-                    open_browser=not bool(args.no_open_browser),
-                )
-            except OSError as exc:
-                parser.error(str(exc))
-            return 0
         if args.web_action == "unified":
             from alpha_lab.web_unified import start_unified_server
 
@@ -1183,39 +1215,7 @@ def unified_main(argv: list[str] | None = None) -> int:
         return bridge_main(resolved_argv_for_bridge(args))
 
     if args.top_command == "idea":
-        if args.idea_action == "draft":
-            from alpha_lab.research_bridge.service import draft_idea
-
-            available_data = list(args.available_data) if args.available_data else None
-            try:
-                result = draft_idea(
-                    vault_root=args.vault_root,
-                    idea=args.idea,
-                    models=args.models,
-                    mode=args.mode,
-                    project_slug=args.project,
-                    top_k=args.top_k,
-                    available_data=available_data,
-                    stage=args.stage,
-                    workspace_root=args.workspace_root,
-                    output_root=args.output_root,
-                    persist_session=bool(args.persist_session),
-                    inject_recent_drift=bool(args.inject_recent_drift),
-                    parent_session_id=args.parent_session_id,
-                )
-            except (ValueError, FileExistsError, OSError) as exc:
-                parser.error(str(exc))
-            payload = result.to_payload()
-            print("")
-            print("  Workflow : idea-draft")
-            print("  Status   : success")
-            print(f"  Stage    : {payload['stage']}")
-            print(f"  Models   : {', '.join(result.models)}")
-            print(f"  Output   : {result.draft_dir}")
-            print(f"  Shared   : {result.shared_prompt_path}")
-            print(f"  Reconcile: {result.reconcile_path}")
-            return 0
-        parser.error(f"unsupported idea command: {args.idea_action!r}")
+        return _handle_idea(args, parser)
 
     if args.top_command == "vault":
         from alpha_lab.vault_cli import run_vault_command  # noqa: PLC0415
@@ -1335,17 +1335,17 @@ def resolved_argv_for_data(args: argparse.Namespace) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entrypoint that preserves the legacy CLI and adds unified routing."""
+    """Entrypoint with unified routing on top of the single-experiment runner."""
     resolved_argv = list(sys.argv[1:] if argv is None else argv)
     if not resolved_argv:
         return unified_main(["--help"])
     if resolved_argv[0] in {"-h", "--help"}:
         return unified_main(resolved_argv)
     if resolved_argv[0] == "run":
-        return _legacy_main(resolved_argv[1:])
+        return _run_main(resolved_argv[1:])
     if resolved_argv[0] in _UNIFIED_TOP_LEVEL_COMMANDS:
         return unified_main(resolved_argv)
-    return _legacy_main(resolved_argv)
+    return _run_main(resolved_argv)
 
 
 def _print_profiles() -> None:

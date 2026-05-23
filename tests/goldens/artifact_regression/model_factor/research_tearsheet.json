@@ -1190,11 +1190,11 @@
       }
     ],
     "notes": [
+      "factor loses to simple momentum/reversal baselines",
       "rebalance cadence is slower than IC decay",
       "single-case verdict indicates fragility",
       "IC decays sharply after 1-day execution lag",
-      "stable across rolling windows",
-      "confidence intervals remain supportive"
+      "stable across rolling windows"
     ],
     "tables": [
       {
@@ -4112,6 +4112,7 @@
   },
   "verdict_layer": {
     "blockers": [
+      "blocked by underperformance vs simple momentum/reversal baselines",
       "blocked by sharp IC decay under 1-day execution lag"
     ],
     "caveats": [
@@ -4120,17 +4121,17 @@
       "uncertainty remains supportive"
     ],
     "factor_verdict": "Promising but fragile",
-    "primary_blocker_summary": "blocked by sharp IC decay under 1-day execution lag",
+    "primary_blocker_summary": "blocked by underperformance vs simple momentum/reversal baselines",
     "primary_support_summary": "positive IC and RankIC means",
     "promotion_decision": "Blocked from Level 2",
-    "summary_sentence": "Promising but fragile; Blocked from Level 2. Primary support: positive IC and RankIC means. Primary blocker/caveat: blocked by sharp IC decay under 1-day execution lag.",
+    "summary_sentence": "Promising but fragile; Blocked from Level 2. Primary support: positive IC and RankIC means. Primary blocker/caveat: blocked by underperformance vs simple momentum/reversal baselines.",
     "verdict_reasons": [
       "positive IC and RankIC means",
       "IC and RankIC signs are consistently positive",
       "rebalance cadence may be too slow for IC decay",
+      "factor underperforms simple momentum/reversal baseline",
       "IC decays sharply after 1-day execution lag",
-      "IC and RankIC validity is high",
-      "long-short spread is positive with positive IR"
+      "IC and RankIC validity is high"
     ]
   }
 }

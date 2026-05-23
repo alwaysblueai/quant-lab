@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import pandas as pd
-
 from alpha_lab.exceptions import AlphaLabConfigError
 
 
@@ -67,6 +65,8 @@ def resolve_slice_window(
     end_date: str | None,
     fallback_end_date: str,
 ) -> tuple[str, str, SlicePresetConfig]:
+    import pandas as pd
+
     preset = get_slice_preset(preset_name)
     end_ts = pd.Timestamp(end_date or fallback_end_date)
     if pd.isna(end_ts):

@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError, AlphaLabExperimentError
 from alpha_lab.research_bridge.categories import (
@@ -67,6 +67,26 @@ from alpha_lab.vault_export_graph_feedback import (
 from . import loaders as bridge_loaders
 from . import mechanism_index
 from . import sessions as bridge_sessions
+from .codebase_index import CodebaseSnapshot, build_codebase_snapshot
+from .engine_prompts import (
+    CardForPrompt,
+    Engine,
+    Lab,
+    PromptContext,
+    normalize_engines,
+)
+from .engine_prompts import (
+    build_prompt as _build_engine_prompt,
+)
+from .engine_prompts import (
+    output_filename_for as _engine_output_filename,
+)
+from .engine_prompts import (
+    prompt_filename_for as _engine_prompt_filename,
+)
+from .engine_prompts import (
+    _render_move_lines,
+)
 from .llm_rerank import (
     DEFAULT_MAX_CANDIDATES,
     CategorizeOutcome,
@@ -221,44 +241,6 @@ class ExploreIdeaResult:
             "constraint_report": dict(self.constraint_report),
             "gpt_prompt": self.gpt_prompt,
             "insight_brief": list(self.insight_brief),
-            "retrieval_diagnostics": dict(self.retrieval_diagnostics),
-        }
-
-
-@dataclass(frozen=True)
-class IdeaDraftResult:
-    idea: str
-    mode: str
-    stage: str
-    models: tuple[str, ...]
-    draft_dir: Path
-    shared_prompt_path: Path
-    model_dispatch_paths: dict[str, Path]
-    ledger_paths: dict[str, Path]
-    final_ledger_path: Path
-    reconcile_path: Path
-    retrieval_log_path: Path
-    manifest_path: Path
-    retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "idea": self.idea,
-            "mode": self.mode,
-            "stage": self.stage,
-            "models": list(self.models),
-            "draft_dir": str(self.draft_dir),
-            "shared_prompt_path": str(self.shared_prompt_path),
-            "model_dispatch_paths": {
-                key: str(value) for key, value in self.model_dispatch_paths.items()
-            },
-            "ledger_paths": {
-                key: str(value) for key, value in self.ledger_paths.items()
-            },
-            "final_ledger_path": str(self.final_ledger_path),
-            "reconcile_path": str(self.reconcile_path),
-            "retrieval_log_path": str(self.retrieval_log_path),
-            "manifest_path": str(self.manifest_path),
             "retrieval_diagnostics": dict(self.retrieval_diagnostics),
         }
 
@@ -1003,11 +985,60 @@ def explore_idea(
     )
 
 
-def draft_idea(
+@dataclass(frozen=True)
+class IdeaDistributeResult:
+    """Stage 0 distribution result (5-file layout).
+
+    Layout under ``ideas/<idea_id>/`` per ``docs/end_to_end_workflow.md``:
+
+    - manifest.json         — idea_id, retrieval diagnostics, codebase snapshot
+    - retrieval_pack.md     — shared context复印件 (vault cards + codebase)
+    - prompt_<engine>.md    — symmetric Stage 1 prompts (generator + reviewer)
+    - stage2_input.md       — web GPT入口 (reconcile + Stage 2 contract pointer)
+    """
+
+    idea: str
+    idea_id: str
+    lab: Lab
+    mode: str
+    stage: str
+    engines: tuple[Engine, ...]
+    draft_dir: Path
+    manifest_path: Path
+    retrieval_pack_path: Path
+    engine_prompt_paths: dict[Engine, Path]
+    engine_output_paths: dict[Engine, Path]
+    stage2_input_path: Path
+    retrieval_diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "idea": self.idea,
+            "idea_id": self.idea_id,
+            "lab": self.lab.value,
+            "mode": self.mode,
+            "stage": self.stage,
+            "engines": [e.value for e in self.engines],
+            "draft_dir": str(self.draft_dir),
+            "manifest_path": str(self.manifest_path),
+            "retrieval_pack_path": str(self.retrieval_pack_path),
+            "engine_prompt_paths": {
+                e.value: str(p) for e, p in self.engine_prompt_paths.items()
+            },
+            "engine_output_paths": {
+                e.value: str(p) for e, p in self.engine_output_paths.items()
+            },
+            "stage2_input_path": str(self.stage2_input_path),
+            "retrieval_diagnostics": dict(self.retrieval_diagnostics),
+        }
+
+
+def distribute_idea(
     *,
     vault_root: str | Path | None,
     idea: str,
-    models: list[str] | tuple[str, ...] | str | None = None,
+    engines: list[str] | tuple[str, ...] | tuple[Engine, ...] | str | None = None,
+    lab: Lab | str = Lab.SINGLE_FACTOR,
     mode: str = "start",
     project_slug: str | None = None,
     top_k: int = 8,
@@ -1018,15 +1049,22 @@ def draft_idea(
     persist_session: bool = False,
     inject_recent_drift: bool = False,
     parent_session_id: str | None = None,
-) -> IdeaDraftResult:
-    """Create Stage 1 dual-engine draft artifacts without running an LLM.
+) -> IdeaDistributeResult:
+    """Stage 0 distribution: emit retrieval pack + symmetric engine prompts.
 
-    The generated pack gives every engine the same retrieval snapshot and
-    Markdown-only prompt. Desktop agents should not write YAML or files; the
-    user carries the reviewed Markdown into Stage 2 outside alpha-lab.
+    Calls Claude API (via :func:`explore_idea` → mechanism_index / llm_rerank
+    / query_expansion) to retrieve the most useful vault cards for the idea,
+    then writes the 5-file layout described in
+    ``docs/end_to_end_workflow.md``. Does not run the Stage 1 engines —
+    the user pastes ``prompt_claude.md`` / ``prompt_codex.md`` into Claude
+    Code / Codex GUI manually.
     """
 
-    selected_models = _normalize_idea_draft_models(models)
+    if isinstance(engines, tuple) and engines and isinstance(engines[0], Engine):
+        selected_engines: tuple[Engine, ...] = cast(tuple[Engine, ...], tuple(engines))
+    else:
+        selected_engines = normalize_engines(engines)
+    target_lab = Lab(lab) if isinstance(lab, str) else lab
     resolved_workspace = Path(workspace_root).expanduser().resolve()
     resolved_vault = _resolve_bridge_vault_root(vault_root)
     explore_result = explore_idea(
@@ -1044,117 +1082,270 @@ def draft_idea(
     )
     diagnostics = dict(explore_result.retrieval_diagnostics)
     normalized_stage = str(diagnostics.get("stage") or MECHANISM_DISCOVERY)
+
     base_dir = (
         Path(output_root).expanduser().resolve()
         if output_root is not None
-        else resolved_workspace / "artifacts" / "alpha_lab_explorer" / "drafts"
+        else resolved_workspace / "ideas"
     )
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-    draft_name = f"{stamp}__{_safe_idea_draft_slug(explore_result.idea)[:48]}"
-    draft_dir = _allocate_unique_draft_dir(base_dir, draft_name)
+    idea_id_base = f"{stamp}__{_safe_idea_draft_slug(explore_result.idea)[:48]}"
+    draft_dir = _allocate_unique_draft_dir(base_dir, idea_id_base)
     draft_dir.mkdir(parents=True, exist_ok=False)
+    idea_id = draft_dir.name
 
-    shared_prompt_path = draft_dir / "prompt.shared.md"
-    shared_prompt_path.write_text(explore_result.gpt_prompt, encoding="utf-8")
+    codebase = build_codebase_snapshot(resolved_workspace)
+    ctx = _build_prompt_context(
+        idea=explore_result.idea,
+        draft_dir=draft_dir,
+        vault_root=resolved_vault,
+        result=explore_result,
+        codebase=codebase,
+        lab=target_lab,
+        mode=explore_result.mode,
+    )
 
-    model_dispatch_paths: dict[str, Path] = {}
-    ledger_paths: dict[str, Path] = {}
-    for model in selected_models:
-        dispatch_path = draft_dir / f"dispatch.{model}.md"
-        dispatch_path.write_text(
-            _render_idea_model_dispatch(
-                model=model,
-                idea=explore_result.idea,
-                result=explore_result,
-                draft_dir=draft_dir,
-                vault_root=resolved_vault,
-            ),
+    engine_prompt_paths: dict[Engine, Path] = {}
+    engine_output_paths: dict[Engine, Path] = {}
+    for engine in selected_engines:
+        prompt_path = draft_dir / _engine_prompt_filename(engine)
+        prompt_path.write_text(
+            _build_engine_prompt(engine=engine, ctx=ctx),
             encoding="utf-8",
         )
-        model_dispatch_paths[model] = dispatch_path
+        engine_prompt_paths[engine] = prompt_path
+        engine_output_paths[engine] = draft_dir / _engine_output_filename(engine)
 
-        ledger_paths[model] = draft_dir / f"ledger_v1.{model}.yaml"
-
-    final_ledger_path = draft_dir / "ledger_v1.yaml"
-    reconcile_path = draft_dir / "reconcile.md"
-    reconcile_path.write_text(
-        _render_reconcile_template(
-            idea=explore_result.idea,
-            models=selected_models,
-            ledger_paths=ledger_paths,
-            final_ledger_path=final_ledger_path,
+    retrieval_pack_path = draft_dir / "retrieval_pack.md"
+    retrieval_pack_path.write_text(
+        _render_retrieval_pack(
+            ctx=ctx,
+            engines=selected_engines,
+            engine_prompt_paths=engine_prompt_paths,
         ),
         encoding="utf-8",
     )
-    retrieval_log_path = draft_dir / "retrieval_log.md"
-    retrieval_log_path.write_text(
-        _render_stage1_retrieval_log(explore_result),
+
+    stage2_input_path = draft_dir / "stage2_input.md"
+    stage2_input_path.write_text(
+        _render_stage2_input(
+            idea=explore_result.idea,
+            engines=selected_engines,
+            engine_prompt_paths=engine_prompt_paths,
+            engine_output_paths=engine_output_paths,
+            lab=target_lab,
+            idea_id=idea_id,
+        ),
         encoding="utf-8",
     )
+
     manifest_path = draft_dir / "manifest.json"
     manifest_payload = {
-        "type": "alpha_lab_idea_draft",
+        "type": "alpha_lab_idea_distribute",
         "created_at_utc": dt.datetime.now(dt.UTC).isoformat(),
         "idea": explore_result.idea,
+        "idea_id": idea_id,
+        "lab": target_lab.value,
         "mode": explore_result.mode,
         "stage": normalized_stage,
-        "models": list(selected_models),
-        "shared_prompt_path": str(shared_prompt_path),
-        "model_dispatch_paths": {
-            key: str(value) for key, value in model_dispatch_paths.items()
+        "engines": [e.value for e in selected_engines],
+        "retrieval_pack_path": str(retrieval_pack_path),
+        "engine_prompt_paths": {
+            e.value: str(p) for e, p in engine_prompt_paths.items()
         },
-        "ledger_paths": {key: str(value) for key, value in ledger_paths.items()},
-        "final_ledger_path": str(final_ledger_path),
-        "reconcile_path": str(reconcile_path),
-        "retrieval_log_path": str(retrieval_log_path),
+        "engine_output_paths": {
+            e.value: str(p) for e, p in engine_output_paths.items()
+        },
+        "stage2_input_path": str(stage2_input_path),
         "retrieval_diagnostics": diagnostics,
+        "codebase_snapshot": codebase.to_payload(),
     }
     manifest_path.write_text(
         json.dumps(manifest_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
-    return IdeaDraftResult(
+    return IdeaDistributeResult(
         idea=explore_result.idea,
+        idea_id=idea_id,
+        lab=target_lab,
         mode=explore_result.mode,
         stage=normalized_stage,
-        models=selected_models,
+        engines=selected_engines,
         draft_dir=draft_dir,
-        shared_prompt_path=shared_prompt_path,
-        model_dispatch_paths=model_dispatch_paths,
-        ledger_paths=ledger_paths,
-        final_ledger_path=final_ledger_path,
-        reconcile_path=reconcile_path,
-        retrieval_log_path=retrieval_log_path,
         manifest_path=manifest_path,
+        retrieval_pack_path=retrieval_pack_path,
+        engine_prompt_paths=engine_prompt_paths,
+        engine_output_paths=engine_output_paths,
+        stage2_input_path=stage2_input_path,
         retrieval_diagnostics=diagnostics,
     )
 
 
-def _normalize_idea_draft_models(
-    models: list[str] | tuple[str, ...] | str | None,
-) -> tuple[str, ...]:
-    raw_items: list[str]
-    if models is None:
-        raw_items = ["claude", "codex"]
-    elif isinstance(models, str):
-        raw_items = [item.strip() for item in models.split(",")]
+def _render_retrieval_pack(
+    *,
+    ctx: PromptContext,
+    engines: tuple[Engine, ...],
+    engine_prompt_paths: dict[Engine, Path],
+) -> str:
+    """Render the human-readable shared-context copy for web GPT.
+
+    Same content the two engine prompts have embedded — kept as a separate
+    file so the web GPT can be given a clean reference without re-reading
+    the engine prompts themselves.
+    """
+
+    lines: list[str] = [
+        f"# Retrieval Pack — {ctx.idea}",
+        "",
+        f"idea_id: `{ctx.idea_id}`",
+        f"lab: `{ctx.lab.value}`",
+        f"mode: `{ctx.mode}`",
+        "",
+        "## Engines (Stage 1, symmetric task)",
+        "Both engines run the same generator + reviewer task and produce one",
+        "markdown each. Web GPT综合两份输出取长补短 in Stage 2.",
+        "",
+    ]
+    for engine in engines:
+        prompt = engine_prompt_paths.get(engine)
+        prompt_name = (
+            prompt.name if prompt is not None else _engine_prompt_filename(engine)
+        )
+        lines.append(f"- `{engine.value}` → `{prompt_name}`")
+    lines.extend(
+        [
+            "",
+            "## Vault cards (shared retrieval; identical between engines)",
+            f"- vault_root: `{ctx.vault_root}`",
+        ]
+    )
+    if ctx.related_cards:
+        for idx, card in enumerate(ctx.related_cards, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"### K{idx}: {card.name}",
+                    f"- path: `{card.path}`",
+                    f"- summary: {card.summary}",
+                ]
+            )
+            if card.transferable_moves:
+                lines.append("- transferable_moves:")
+                for move in card.transferable_moves[:4]:
+                    lines.extend(_render_move_lines(move))
     else:
-        raw_items = []
-        for item in models:
-            raw_items.extend(str(item).split(","))
-    normalized: list[str] = []
-    for item in raw_items:
-        name = item.strip().lower()
-        if not name:
-            continue
-        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", name):
-            raise ValueError(f"invalid model name: {item!r}")
-        if name not in normalized:
-            normalized.append(name)
-    if not normalized:
-        raise ValueError("at least one model must be provided")
-    return tuple(normalized)
+        lines.append("- 未命中卡片（novel synthesis 合法）。")
+    lines.extend(["", "## Cross-card synthesis"])
+    if ctx.insight_brief:
+        for brief in ctx.insight_brief:
+            lines.append(f"- {brief}")
+    else:
+        lines.append("- 本轮未生成跨卡合成摘要。")
+    lines.extend(
+        [
+            "",
+            "## Codebase snapshot",
+            f"- single-factor promoted: {len(ctx.codebase.factors_promoted)}",
+            f"- single-factor research: {len(ctx.codebase.factors_research)}",
+            f"- model candidates promoted: {len(ctx.codebase.model_candidates_promoted)}",
+            f"- model candidates research: {len(ctx.codebase.model_candidates_research)}",
+            f"- single-factor cases registered: {len(ctx.codebase.single_factor_cases)}",
+            f"- model-factor cases registered: {len(ctx.codebase.model_factor_cases)}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_stage2_input(
+    *,
+    idea: str,
+    engines: tuple[Engine, ...],
+    engine_prompt_paths: dict[Engine, Path],
+    engine_output_paths: dict[Engine, Path],
+    lab: Lab,
+    idea_id: str,
+) -> str:
+    """Render the web GPT Stage 2 entry template.
+
+    Replaces the legacy ``reconcile.md`` — collapses the reconcile slots and
+    Stage 2 contract pointer into one file (per ``docs/end_to_end_workflow.md``
+    Stage 0 5-file layout).
+    """
+
+    if lab is Lab.SINGLE_FACTOR:
+        source_pack = "docs/templates/single_factor_source_pack.md"
+        stage1_contract = "docs/templates/single_factor_stage1_reconcile_contract.md"
+        stage2_contract = "docs/templates/single_factor_stage2_candidate_contract.md"
+        payload_label = "factor_json_payload"
+    else:
+        source_pack = "docs/templates/model_lab_source_pack.md"
+        stage1_contract = "docs/templates/model_lab_stage1_reconcile_contract.md"
+        stage2_contract = "docs/templates/model_lab_stage2_candidate_contract.md"
+        payload_label = "model_candidate_payload"
+
+    lines: list[str] = [
+        f"# Stage 2 Input — {idea}",
+        "",
+        f"idea_id: `{idea_id}`",
+        f"lab: `{lab.value}`",
+        "",
+        "## 协议（2026-05-11，docs/end_to_end_workflow.md）",
+        "Stage 1 = 两引擎并行执行**同一任务**（generator + reviewer 合一）。",
+        "网页 GPT 在 Stage 2 综合两份输出取长补短，输出唯一 `" + payload_label + "`。",
+        "",
+        "## 网页 GPT 项目 'sources' 必须包含（且只包含）",
+        f"- `{source_pack}`",
+        f"- `{stage1_contract}`",
+        f"- `{stage2_contract}`",
+        "",
+        "Stage 3 envelope 是给 Codex GUI 的开场提示，**不**放网页 GPT 项目。",
+        "",
+        "## 输入产物（Stage 1）",
+    ]
+    for engine in engines:
+        prompt = engine_prompt_paths.get(engine)
+        out = engine_output_paths.get(engine)
+        prompt_name = prompt.name if prompt else _engine_prompt_filename(engine)
+        output_name = out.name if out else _engine_output_filename(engine)
+        lines.extend(
+            [
+                f"- `{engine.value}` prompt: `{prompt_name}`",
+                f"  output: `{output_name}`",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 输出产物（Stage 2）",
+            "- Step 2.1 reconcile → 写入 `ideas/<idea_id>/stage1_reconcile.yaml`",
+            "  - 输入：两份 stage1_<engine>.md（含 Part A 机制 + Part B 评审）",
+            "    + retrieval_pack.md",
+            "  - 输出 YAML 顶层含 `provenance.idea_id`、`mechanisms[]`、",
+            "    合并的 `code_feasibility_review`、`stage2_entry_recommendation`",
+            "  - 取两引擎机制并集；implementation_status 冲突时取更保守那方",
+            "- Step 2.2 candidate → 写入 `ideas/<idea_id>/stage2_payload_v<n>.json`",
+            "  - 输出完整 `" + payload_label + "`（不接受 patch）",
+            "  - 必填 `provenance.{idea_id, stage2_payload_sha256, audience_chain}`",
+            "  - `audience_chain` 固定为 ",
+            "    `[\"claude\", \"codex\", \"web_gpt_stage2\"]`（两引擎对称协议）",
+            "",
+            "## 迭代回灌（Stage 3 → Stage 2）",
+            "Stage 3 每轮跑完后，Codex GUI 直接把摘要段落粘回同一个网页 GPT 项目。",
+            "网页 GPT 出 v<n+1> payload，`idea_id` 不变，`stage2_payload_sha256` 更新。",
+            "不需要中转文件。",
+            "",
+            "## quality gate",
+            "- mechanisms 至少 1 条",
+            "- code_feasibility_review 必须覆盖每条机制的 implementation_status",
+            "- payload provenance.idea_id 与 `manifest.json::idea_id` 一致",
+            "- 不把 `operative_claims` 当作 kill 条件",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _safe_idea_draft_slug(value: str) -> str:
@@ -1177,97 +1368,49 @@ def _allocate_unique_draft_dir(base_dir: Path, draft_name: str) -> Path:
     raise FileExistsError(f"unable to allocate unique draft directory under {base_dir}")
 
 
-def _render_idea_model_dispatch(
+def _cards_for_prompt(result: ExploreIdeaResult) -> tuple[CardForPrompt, ...]:
+    return tuple(
+        CardForPrompt(
+            name=card.name,
+            path=card.path,
+            summary=card.summary,
+            transferable_moves=tuple(card.transferable_moves),
+        )
+        for card in result.related_cards[:8]
+    )
+
+
+def _idea_id_from_dir(draft_dir: Path) -> str:
+    """Stable id used in engine prompts; falls back to draft_dir name."""
+
+    return draft_dir.name or "<unknown_idea>"
+
+
+def _build_prompt_context(
     *,
-    model: str,
     idea: str,
-    result: ExploreIdeaResult,
     draft_dir: Path,
     vault_root: Path,
-) -> str:
-    label = _idea_draft_model_label(model)
-    bias = _idea_draft_model_bias(model)
-    lines = [
-        f"# Stage 1 Agent Prompt - {label}",
-        "",
-        "## 1. 新 idea",
-        idea,
-        "",
-        "## 2. 工作目录与资料位置",
-        f"- draft_dir：`{draft_dir}`",
-        f"- vault_root：`{vault_root}`",
-        "- 本轮不要创建、修改或保存任何 YAML 文件。",
-        "- 本轮只输出 Markdown 研究点评，供用户阅读、追问和带到网页版 GPT 讨论。",
-        "- 不要读取、引用或改写另一个 agent 的输出。",
-        "",
-        "## 3. Stage 1 纪律",
-        "- 第一轮回复必须是 Markdown 研究草稿：供用户阅读和讨论，不要输出 YAML，不要写文件。",
-        "- 即使用户后续要求补充，也优先继续完善 Markdown 点评；最终实现和结构化整理发生在 Stage2。",
-        "- 当前只做机制探索，不输出最终因子定义、完整公式、排名或 single best idea。",
-        "- 候选机制只增不减；不要做 keep/kill 判决。",
-        "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
-        "- `operative_claims` 只能作为弱上下文 hint，不作为淘汰条件。",
-        "- `inspired_by` / `fusion_of` / `cross_domain_jump` 是可选溯源；novel synthesis 合法。",
-        "- 机制命名不要直接使用 reversal / momentum / value / quality / size / "
-        "liquidity 等既有标签，也不要预设收益方向。",
-        "",
-        "## 4. 相关卡片列表",
-        "卡片路径相对于 vault root；请按 path 打开 quant-knowledge 原文后再写 Markdown 草稿。",
-    ]
-    if result.related_cards:
-        for idx, card in enumerate(result.related_cards[:8], start=1):
-            lines.extend(
-                [
-                    "",
-                    f"### K{idx}: {card.name}",
-                    f"- path: `{card.path}`",
-                    f"- summary: {card.summary}",
-                ]
-            )
-            if card.transferable_moves:
-                lines.append("- transferable_moves:")
-                for move in card.transferable_moves[:4]:
-                    lines.append(f"  - {move}")
-            else:
-                lines.append("- transferable_moves: []")
-    else:
-        lines.append("- 未命中相关卡片；可以做 novel synthesis，但需要把假设边界写清楚。")
-
-    prompt_briefs = _complete_stage1_prompt_briefs(result.insight_brief)
-    lines.extend(["", "### Cross-card synthesis"])
-    lines.append(
-        "以下只作为候选生成素材；不是约束或 keep/kill 规则。"
-        "收敛语气已弱化为可探索分支或 concern。"
+    result: ExploreIdeaResult,
+    codebase: CodebaseSnapshot,
+    lab: Lab = Lab.SINGLE_FACTOR,
+    mode: str = "start",
+) -> PromptContext:
+    insight = tuple(
+        _stage1_generation_material_text(text)
+        for text in _complete_stage1_prompt_briefs(result.insight_brief)
     )
-    if prompt_briefs:
-        for brief in prompt_briefs:
-            lines.append(f"- {_stage1_generation_material_text(brief)}")
-    else:
-        lines.append("- 本轮未生成可用的跨卡合成摘要；请以相关卡片原文为准自行寻找可迁移动作。")
-
-    lines.extend(
-        [
-            "",
-            "## 5. Markdown 输出格式 + 生成偏好",
-            f"- 生成倾向：{bias}",
-            "- 只输出 Markdown 点评，不输出 YAML，不写文件。",
-        (
-            "- 建议包含：阅读过的卡片、可迁移动作、候选机制点评、关键分歧、"
-            "主要疑问、后续应由用户和网页版 GPT 讨论的问题。"
-        ),
-            "- 每个候选机制只需写成可讨论的研究判断，不要收敛成最终因子定义或完整公式。",
-            "- 若某个机制之后可能进入实现，请说明所需数据、可能的混淆项和最容易出错的假设。",
-            "",
-            "建议结构：",
-            "- `阅读摘要`: 实际打开了哪些卡片，分别拿走了什么 move。",
-            "- `候选机制点评`: 3-8 个互补机制，每个机制说明市场参与者行为、可观察信号和不确定性。",
-            "- `与相近标签的差异`: 说明它和普通波动、普通反应不足、价量背离等标签的结构差异。",
-            "- `需要用户重点判断`: 哪些地方必须由用户读卡或结合业务知识确认。",
-            "- `进入 Stage2 的讨论问题`: 给网页版 GPT 和用户继续融合时使用。",
-            "",
-        ]
+    return PromptContext(
+        idea=idea,
+        idea_id=_idea_id_from_dir(draft_dir),
+        lab=lab,
+        draft_dir=draft_dir,
+        vault_root=vault_root,
+        related_cards=_cards_for_prompt(result),
+        insight_brief=insight,
+        codebase=codebase,
+        mode=mode,
     )
-    return "\n".join(lines)
 
 
 def _complete_stage1_prompt_briefs(values: list[str], *, limit: int = 6) -> list[str]:
@@ -1303,130 +1446,6 @@ def _stage1_generation_material_text(value: str) -> str:
     for old, new in replacements:
         text = text.replace(old, new)
     return text
-
-
-def _idea_draft_model_label(model: str) -> str:
-    key = model.strip().lower()
-    if key == "claude":
-        return "Claude Code"
-    if key == "codex":
-        return "Codex"
-    return model.strip() or "Agent"
-
-
-def _idea_draft_model_bias(model: str) -> str:
-    if model == "claude":
-        return "偏深度组合：在 3-5 张卡内寻找深层结构相似性，把多个 move 融合成少数高密度机制假设。"
-    if model == "codex":
-        return "偏广度迁移：从更远的 asset class / 频率 / method 拉跨领域类比，提出更多互补候选。"
-    return "保持独立 voice：从共享素材中提出与其他引擎互补的新机制。"
-
-
-def _render_stage1_ledger_template(*, model: str, idea: str) -> str:
-    return "\n".join(
-        [
-            "# Stage 1 ledger template",
-            f"# model: {model}",
-            f"# idea: {idea}",
-            "mechanisms:",
-            "  - id: mechanism_1",
-            "    hypothesis: \"\"",
-            "    # optional: cite source cards only when useful for learning",
-            "    # - card: \"\"",
-            "    #   what_i_took: \"\"",
-            "    #   cross_domain_jump: \"\"",
-            "    inspired_by: []",
-            "    # optional: [card_1, card_2]",
-            "    fusion_of: []",
-            "    novel_delta: \"\"",
-            "    signal_sketch: \"\"",
-            "    data_needs: []",
-            "    concern: \"\"",
-            "",
-        ]
-    )
-
-
-def _render_reconcile_template(
-    *,
-    idea: str,
-    models: tuple[str, ...],
-    ledger_paths: dict[str, Path],
-    final_ledger_path: Path,
-) -> str:
-    model_rows = [
-        f"- `{model}`: `{ledger_paths[model].name}`" for model in models
-    ]
-    return "\n".join(
-        [
-            f"# Reconcile - {idea}",
-            "",
-            "目标：加法合并，不做互审淘汰。最终 `ledger_v1.yaml` 应该是候选并集，",
-            "并额外尝试第三轮 fusion 候选；弱项只标 concern，不删除。",
-            "",
-            "## 输入 ledger",
-            *model_rows,
-            "",
-            "## 输出 ledger",
-            f"- `{final_ledger_path.name}`",
-            "",
-            "## union",
-            "- 原样保留各模型中结构不同的机制候选。",
-            "- 如果两个候选只是在措辞上重复，合并描述但保留两个来源的 inspired_by。",
-            "",
-            "## fusion_candidates",
-            "- 从不同模型各取至少一个 move，提出新的融合候选。",
-            "- 只要机制有可验证信号草图，即使无明确来源卡也可以保留。",
-            "",
-            "## notes",
-            "- concern: 记录需要 Stage 3 数据验证的弱点。",
-            "- 不写淘汰式三分法栏目。",
-            "- 不把 `operative_claims` 当作 kill 条件。",
-            "",
-        ]
-    )
-
-
-def _render_stage1_retrieval_log(result: ExploreIdeaResult) -> str:
-    diagnostics = result.retrieval_diagnostics
-    lines = [
-        f"# Retrieval Log - {result.idea}",
-        "",
-        f"- mode: `{result.mode}`",
-        f"- stage: `{diagnostics.get('stage', MECHANISM_DISCOVERY)}`",
-        f"- available_data_source: `{diagnostics.get('available_data_source', 'none')}`",
-        "",
-        "## surfaced_cards",
-    ]
-    for idx, card in enumerate(result.related_cards, start=1):
-        lines.append(f"### K{idx}: {card.name}")
-        lines.append(f"- path: `{card.path}`")
-        if card.type:
-            lines.append(f"- type: `{card.type}`")
-        if card.mechanism:
-            lines.append(f"- mechanism: `{card.mechanism}`")
-        if card.factor_family:
-            lines.append(f"- factor_family: `{card.factor_family}`")
-        lines.append(f"- summary: {card.summary}")
-        if card.transferable_moves:
-            lines.append("- transferable_moves:")
-            for move in card.transferable_moves[:5]:
-                lines.append(f"  - {move}")
-        if card.operative_claims:
-            lines.append("- operative_claims (weak_hint_only):")
-            for claim in card.operative_claims[:5]:
-                lines.append(f"  - {claim}")
-        lines.append("")
-    lines.extend(
-        [
-            "## diagnostics",
-            "```json",
-            json.dumps(diagnostics, ensure_ascii=False, indent=2),
-            "```",
-            "",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def _build_factor_recipe_payload(
@@ -3641,8 +3660,17 @@ def _extract_frontmatter_field_items(
     field_name: str,
     *,
     max_items: int = 4,
-    max_chars: int = 180,
+    max_chars: int = 220,
 ) -> list[str]:
+    """Extract a list-shaped frontmatter field as renderable items.
+
+    Each returned item is a single string; for dict-shaped entries (e.g.
+    ``transferable_moves`` whose items have ``id`` / ``one_line`` /
+    ``why_it_works`` sub-fields), the string carries ``\\n`` between sub-fields
+    so downstream renderers can indent continuation lines. Plain string items
+    stay single-line.
+    """
+
     if not text.startswith("---\n"):
         return []
     try:
@@ -3652,45 +3680,68 @@ def _extract_frontmatter_field_items(
     target = field_name.strip()
     if not target:
         return []
-    lines = frontmatter.splitlines()
-    captured: list[str] = []
-    in_field = False
-    for line in lines:
-        stripped = line.strip()
-        if not in_field:
-            if stripped.startswith(f"{target}:"):
-                value = stripped.split(":", 1)[1].strip()
-                if value:
-                    captured.append(value)
-                    break
-                in_field = True
-            continue
-        if stripped and not line[:1].isspace() and not stripped.startswith("-"):
-            break
-        captured.append(stripped)
-    if not captured:
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover
+        return []
+    try:
+        payload = yaml.safe_load(frontmatter)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get(target)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items_raw: list[Any] = [raw]
+    elif isinstance(raw, list):
+        items_raw = list(raw)
+    else:
         return []
 
-    items: list[str] = []
-    current: list[str] = []
-    for line in captured:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("- "):
-            if current:
-                items.append(" ".join(current))
-            current = [stripped[2:].strip()]
-        else:
-            current.append(stripped)
-    if current:
-        items.append(" ".join(current))
-    if not items:
-        items = [" ".join(captured)]
-    return [
-        _truncate_text(re.sub(r"\s+", " ", item), max_chars=max_chars)
-        for item in items[:max_items]
-    ]
+    rendered: list[str] = []
+    for item in items_raw[:max_items]:
+        rendered.append(_render_frontmatter_item(item, max_chars=max_chars))
+    return [text for text in rendered if text]
+
+
+def _render_frontmatter_item(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, dict):
+        sub_lines: list[str] = []
+        for key, sub in value.items():
+            if sub is None:
+                continue
+            text = _format_frontmatter_sub_value(sub, max_chars=max_chars)
+            if not text:
+                continue
+            sub_lines.append(f"{key}: {text}")
+        return "\n".join(sub_lines)
+    return _truncate_text(
+        re.sub(r"\s+", " ", str(value).strip()),
+        max_chars=max_chars,
+    )
+
+
+def _format_frontmatter_sub_value(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, list):
+        parts = [
+            re.sub(r"\s+", " ", str(item).strip())
+            for item in value
+            if str(item).strip()
+        ]
+        return _truncate_text("; ".join(parts), max_chars=max_chars)
+    if isinstance(value, dict):
+        parts = [
+            f"{k}={re.sub(r'\\s+', ' ', str(v).strip())}"
+            for k, v in value.items()
+            if str(v).strip()
+        ]
+        return _truncate_text("; ".join(parts), max_chars=max_chars)
+    return _truncate_text(
+        re.sub(r"\s+", " ", str(value).strip()),
+        max_chars=max_chars,
+    )
 
 
 def _strip_frontmatter(text: str) -> str:
@@ -4149,13 +4200,13 @@ def _append_mechanism_discovery_concept_constraints(
         )
 
 
-def _append_stage1_ledger_protocol(lines: list[str]) -> None:
+def _append_stage1_output_protocol(lines: list[str]) -> None:
     lines.extend(
         [
             "",
-            "## Stage 1 ledger 协议",
+            "## Stage 1 output 协议",
             "本 prompt 只负责 Stage 1：用 vault 素材起草可验证机制。"
-            "输出应能转写为 `ledger_v1.yaml` + `retrieval_log.md`；"
+            "输出应能并入 mechanism candidates + code feasibility review；"
             "不要给 keep/kill 结论。",
             "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
             "- `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。",
@@ -4221,7 +4272,7 @@ def _build_factor_recipe_start_prompt(
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=False)
-    _append_stage1_ledger_protocol(lines)
+    _append_stage1_output_protocol(lines)
     _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode="start"
@@ -4302,7 +4353,7 @@ def _build_factor_recipe_structured_prompt(
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=False)
-    _append_stage1_ledger_protocol(lines)
+    _append_stage1_output_protocol(lines)
     _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode="free"
@@ -4339,7 +4390,7 @@ def _build_factor_recipe_structured_prompt(
             "- Stage 2 可拓展的外部视角：",
             "- Stage 3 需要用数据验证的 concern：",
             "",
-            "[ledger_v1.yaml 草案]",
+            "[Stage 1 mechanism candidates 草案]",
             (
                 "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ "
                 "fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern"
@@ -4396,7 +4447,7 @@ def _build_factor_recipe_constrained_prompt(
         ]
     )
     _append_mechanism_discovery_concept_constraints(lines, strict=True)
-    _append_stage1_ledger_protocol(lines)
+    _append_stage1_output_protocol(lines)
     _append_cross_domain_generation_prompts(lines)
     _append_factor_recipe_context(
         lines, context=context, include_hard_graph=True, mode="constrained"
@@ -4534,7 +4585,7 @@ def _build_factor_recipe_constrained_prompt(
             "- 彻底失效的市场环境：",
             "- Stage 3 数据验证问题：",
             "",
-            "[ledger_v1.yaml 草案]",
+            "[Stage 1 mechanism candidates 草案]",
             (
                 "- mechanisms: hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
                 "novel_delta / signal_sketch / data_needs / concern"
@@ -4601,7 +4652,7 @@ def _build_factor_recipe_signal_mapping_prompt(
             idea,
         ]
     )
-    _append_stage1_ledger_protocol(lines)
+    _append_stage1_output_protocol(lines)
     _append_factor_recipe_context(
         lines, context=context, include_soft_graph=True, mode=mode
     )
@@ -4731,12 +4782,12 @@ def _build_factor_recipe_signal_mapping_prompt(
             "- v2：…",
             "- v3：…（可选）",
             "",
-            "[ledger_v1.yaml 草案]",
+            "[Stage 1 mechanism candidates 草案]",
             "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
             "novel_delta / signal_sketch / data_needs / concern",
             "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
             "",
-            "[retrieval_log.md 草案]",
+            "[Retrieval pack synthesis notes 草案]",
             "- surfaced_cards: 本阶段实际使用的 [Kx] 卡片与用途",
             "- data_dependency_notes: daily sufficient / intraday required 的边界",
         ]

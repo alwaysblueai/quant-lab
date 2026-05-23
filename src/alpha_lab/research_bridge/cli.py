@@ -1,18 +1,44 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from typing import Any
 
-from alpha_lab.research_bridge.exploration import ExplorationMap
-from alpha_lab.research_bridge.graph_view import VaultGraph
-from alpha_lab.research_bridge.models import AlphaLabDefaults, ProjectStatus, WritebackPolicy
-from alpha_lab.research_bridge.service import (
-    init_project,
-    refresh_project_pack,
-    scaffold_case,
-    start_round,
-    structure_candidates,
-    summarize_run,
-)
+# All heavy imports (``service``, ``models``, ``exploration``, ``graph_view``)
+# are deferred to ``main()`` and the handlers that need them. ``service`` in
+# particular pulls in pandas + networkx + embeddings (~250ms cold). Keeping
+# this module light makes ``alpha-lab --help`` register the bridge subparser
+# without paying that cost.
+#
+# Service-layer names are exposed via ``__getattr__`` (below) so test code
+# that monkeypatches ``alpha_lab.research_bridge.cli.<name>`` keeps working.
+# Inside ``main()`` we resolve those names through ``sys.modules[__name__]``
+# so a pre-installed monkeypatch is honored.
+_LAZY_CLI_EXPORTS: dict[str, tuple[str, str]] = {
+    "AlphaLabDefaults": ("alpha_lab.research_bridge.models", "AlphaLabDefaults"),
+    "ProjectStatus": ("alpha_lab.research_bridge.models", "ProjectStatus"),
+    "WritebackPolicy": ("alpha_lab.research_bridge.models", "WritebackPolicy"),
+    "ExplorationMap": ("alpha_lab.research_bridge.exploration", "ExplorationMap"),
+    "VaultGraph": ("alpha_lab.research_bridge.graph_view", "VaultGraph"),
+    "init_project": ("alpha_lab.research_bridge.service", "init_project"),
+    "refresh_project_pack": ("alpha_lab.research_bridge.service", "refresh_project_pack"),
+    "scaffold_case": ("alpha_lab.research_bridge.service", "scaffold_case"),
+    "start_round": ("alpha_lab.research_bridge.service", "start_round"),
+    "structure_candidates": ("alpha_lab.research_bridge.service", "structure_candidates"),
+    "summarize_run": ("alpha_lab.research_bridge.service", "summarize_run"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    target = _LAZY_CLI_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(
+            f"module 'alpha_lab.research_bridge.cli' has no attribute {name!r}"
+        )
+    from importlib import import_module
+
+    submodule_path, attr = target
+    return getattr(import_module(submodule_path), attr)
 
 
 def build_bridge_parser(parser: argparse.ArgumentParser) -> None:
@@ -251,6 +277,23 @@ def build_bridge_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Lazy attributes resolved via ``__getattr__`` — pulled into locals so
+    # the dispatch below can use bare names. Tests that monkeypatch e.g.
+    # ``alpha_lab.research_bridge.cli.init_project`` before calling ``main``
+    # will have their patch honored: ``sys.modules[__name__]`` is the same
+    # module object the test wrote to.
+    _self = sys.modules[__name__]
+    AlphaLabDefaults = _self.AlphaLabDefaults  # noqa: N806
+    ExplorationMap = _self.ExplorationMap  # noqa: N806
+    ProjectStatus = _self.ProjectStatus  # noqa: N806
+    WritebackPolicy = _self.WritebackPolicy  # noqa: N806
+    init_project = _self.init_project
+    refresh_project_pack = _self.refresh_project_pack
+    scaffold_case = _self.scaffold_case
+    start_round = _self.start_round
+    structure_candidates = _self.structure_candidates
+    summarize_run = _self.summarize_run
+
     parser = argparse.ArgumentParser(
         prog="alpha-lab bridge",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -384,6 +427,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.bridge_action == "factor-coverage":
+        VaultGraph = _self.VaultGraph  # noqa: N806
+
         graph = VaultGraph.from_vault_root(args.vault_root)
         graph.build(vault_root=args.vault_root)
         coverage = graph.coverage_by_type().get(

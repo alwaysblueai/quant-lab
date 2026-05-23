@@ -254,3 +254,57 @@ def test_run_model_factor_case_writes_draft_model_source(tmp_path: Path) -> None
         assert audit["feature_contract_sha256"]
         assert audit["path"]
         assert audit["contract_version"] == "stage2_model_candidate_v1"
+
+
+# ---------------------------------------------------------------------------
+# provenance block (Stage 0 idea_id passthrough)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_draft_model_warns_when_provenance_missing(tmp_path: Path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="prov_missing")
+    payload = _legal_payload(spec_path, candidate_name="prov_missing")
+    candidate_path = _write_candidate(tmp_path, "prov_missing", payload)
+    result = validate_draft_model_file(candidate_path)
+    assert result.ok
+    assert any(w.code == "provenance_missing" for w in result.warnings)
+
+
+def test_validate_draft_model_accepts_complete_provenance(tmp_path: Path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="prov_full")
+    payload = dict(_legal_payload(spec_path, candidate_name="prov_full"))
+    payload["provenance"] = {
+        "idea_id": "20260511T140000Z__turnover-conditioned",
+        "stage2_payload_sha256": "b" * 64,
+        "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+    }
+    candidate_path = _write_candidate(tmp_path, "prov_full", payload)
+    result = validate_draft_model_file(candidate_path)
+    assert result.ok
+    assert not any(w.code == "provenance_missing" for w in result.warnings)
+
+
+def test_validate_draft_model_rejects_provenance_without_idea_id(tmp_path: Path) -> None:
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="prov_noid")
+    payload = dict(_legal_payload(spec_path, candidate_name="prov_noid"))
+    payload["provenance"] = {"stage2_payload_sha256": "c" * 64}
+    candidate_path = _write_candidate(tmp_path, "prov_noid", payload)
+    result = validate_draft_model_file(candidate_path)
+    assert not result.ok
+    assert any(e.code == "provenance_idea_id_missing" for e in result.errors)
+
+
+def test_draft_model_source_passes_provenance_to_audit(tmp_path: Path) -> None:
+    from alpha_lab.model_candidates import read_draft_model_source
+
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="prov_audit")
+    payload = dict(_legal_payload(spec_path, candidate_name="prov_audit"))
+    payload["provenance"] = {
+        "idea_id": "20260511T150000Z__audited",
+        "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+    }
+    candidate_path = _write_candidate(tmp_path, "prov_audit", payload)
+    source = read_draft_model_source(candidate_path)
+    audit = source.to_audit_dict()
+    assert "provenance" in audit
+    assert audit["provenance"]["idea_id"] == "20260511T150000Z__audited"

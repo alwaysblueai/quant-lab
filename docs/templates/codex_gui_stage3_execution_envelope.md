@@ -31,13 +31,26 @@
 
 必须完成：
 1. preflight 检查
-2. 写入 factor.json
+2. 写入 factor.json（保留 Stage2 输出中的 provenance 块；不要删 idea_id / stage2_payload_sha256 / audience_chain）
 3. 运行 validate-draft-factor
 4. 运行标准 single-factor backend experiment
-5. 检查 artifact custom_factor_source 审计字段
+5. 检查 artifact custom_factor_source 审计字段（含 provenance.idea_id）
 6. 输出结果摘要和下一步建议
 
-如果 validator、字段可用性、leakage 检查或 artifact hash 审计失败，停止并报告失败，不要自行改写为另一个流程。
+forbidden_actions（Stage 3 执行者硬约束，违反任一即视为本轮失败）：
+- 自行补全 Stage2 payload 中缺失的字段（缺什么停下来回写到 research_log 的 deferred 段，不要凭机制名补）
+- 改写 factor_json_payload 中的 code / required_columns / pit_assumption（与机制冲突时以 payload 为准 + 写 research_log）
+- 跳过 validate-draft-factor 或 silently 接受 validator warnings
+- 删除或重写 provenance 块（provenance 是合同审计字段，不是注释）
+- 写临时脚本 / notebook / 散落 .py
+- 修改 src/alpha_lab/factors / custom_factors/promoted / 前端正式注册
+
+escalation_triggers（出现以下任一情况，停下并以中文报告，不继续自动修复）：
+- validate-draft-factor 报错
+- artifact 缺 code_sha256 / factor_json_sha256 / source path / provenance.idea_id
+- 实验运行抛 PIT / leakage / cross_section_full_sample 硬错
+- factor_json_payload 中 required_columns 包含 factor_recipe.py 未注册列名
+- Stage2 payload 与 stage3_notes / human_summary 出现机器不可调和冲突
 
 下面是 Stage2 输出全文：
 <PASTE_STAGE2_OUTPUT_HERE>

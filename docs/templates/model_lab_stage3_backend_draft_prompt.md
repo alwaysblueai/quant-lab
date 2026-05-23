@@ -129,7 +129,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab validate-draft-mo
 
 5. validator 通过后，按照 `run_controls` 设定的 profile 跑标准 pipeline。
 
-快速初筛（默认）：
+快速初筛（Codex GUI 后端默认）：
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-factor run \
@@ -141,7 +141,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
   --draft-model-candidate model_candidates/research/<candidate_name>/model_candidate.json
 ```
 
-更完整验证（在初筛通过后再跑）：
+更完整验证（候选成熟后，可在前端 Draft Candidates 触发完整报告）：
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-factor run \

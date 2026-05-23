@@ -247,6 +247,8 @@ def _mean_or_none(values: pd.Series) -> float | None:
 def _float_or_none(value: object) -> float | None:
     if value is None:
         return None
+    if not isinstance(value, str | int | float):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError):

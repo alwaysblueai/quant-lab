@@ -281,7 +281,10 @@ def render_experiment_card_markdown(
         "## 回灌素材",
         "",
         "- `emergent_moves`: <!-- Manual: 这次实验浮现、可被未来研究复用的新 move -->",
-        "- `operative_claims`: <!-- Manual: 观察到的现象 / 经验 / 边界条件；弱 hint，不作为 kill 条件 -->",
+        (
+            "- `operative_claims`: <!-- Manual: 观察到的现象 / 经验 / 边界条件；"
+            "弱 hint，不作为 kill 条件 -->"
+        ),
         "",
         "## 下一步",
         "",

@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from alpha_lab.reporting.factor_correlation import collect_run_factor_correlation_summary
-from alpha_lab.reporting.factor_decomposition import inspect_run_decomposition
 from alpha_lab.vault_export import ExportResult
+
+# ``alpha_lab.reporting.factor_correlation`` / ``factor_decomposition`` pull
+# in ``alpha_lab.reporting/__init__.py`` → ``experiment`` → ``evaluation`` →
+# scipy.stats. To keep CLI cold-start fast (--help in 2s instead of 4s), we
+# defer those imports to the call sites that actually need them, below.
 
 if TYPE_CHECKING:
     from alpha_lab.research_bridge.graph_view import VaultGraph
@@ -56,6 +59,8 @@ def collect_graph_feedback_summary(
     This is shared by both summarize and apply-writeback paths so their
     suggestion behavior stays consistent.
     """
+    from alpha_lab.reporting.factor_decomposition import inspect_run_decomposition
+
     decomposition = inspect_run_decomposition(run_root)
     raw_correlation_summary = collect_correlation_summary(run_root)
     suggested_sources: dict[str, str] = {}
@@ -195,6 +200,8 @@ def collect_correlation_summary(
     *,
     limit: int = 3,
 ) -> list[dict[str, object]]:
+    from alpha_lab.reporting.factor_correlation import collect_run_factor_correlation_summary
+
     matches = collect_run_factor_correlation_summary(run_root, limit=limit)
     return [item.to_payload() for item in matches]
 

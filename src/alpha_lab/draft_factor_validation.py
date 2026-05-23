@@ -91,6 +91,10 @@ _LEAKAGE_IDENTIFIER_FRAGMENTS = (
     "label_return",
     "target_return",
 )
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_KNOWN_AUDIENCES: frozenset[str] = frozenset(
+    {"claude", "codex", "web_gpt_stage2"}
+)
 
 
 @dataclass(frozen=True)
@@ -264,6 +268,10 @@ def validate_draft_factor_file(
                 errors=errors,
             )
 
+    _validate_provenance(
+        payload.get("provenance"), errors=errors, warnings=warnings
+    )
+
     return _result(
         factor_path,
         factor_name,
@@ -272,6 +280,67 @@ def validate_draft_factor_file(
         errors=errors,
         warnings=warnings,
     )
+
+
+def _validate_provenance(
+    raw: object,
+    *,
+    errors: list[DraftFactorIssue],
+    warnings: list[DraftFactorIssue],
+) -> None:
+    """Shape-check the optional ``provenance`` block.
+
+    Emits a warning when the block is absent (back-compat: pre-protocol factors
+    have no provenance). When present the block must declare a non-empty
+    ``idea_id``; ``stage2_payload_sha256`` and ``audience_chain`` are
+    shape-checked but optional.
+    """
+
+    if raw is None:
+        warnings.append(
+            _warning(
+                "provenance_missing",
+                "provenance block missing; new factors should record idea_id from "
+                "alpha-lab idea distribute output",
+            )
+        )
+        return
+    if not isinstance(raw, dict):
+        errors.append(_error("provenance_type", "provenance must be a JSON object"))
+        return
+    idea_id = _optional_text(raw.get("idea_id"))
+    if idea_id is None:
+        errors.append(
+            _error("provenance_idea_id_missing", "provenance.idea_id must be non-empty")
+        )
+    payload_sha = raw.get("stage2_payload_sha256")
+    if payload_sha is not None:
+        if not isinstance(payload_sha, str) or not _SHA256_RE.match(payload_sha):
+            errors.append(
+                _error(
+                    "provenance_payload_sha256",
+                    "provenance.stage2_payload_sha256 must be a 64-char hex sha256",
+                )
+            )
+    audience_chain = raw.get("audience_chain")
+    if audience_chain is not None:
+        chain = _string_list(audience_chain)
+        if chain is None:
+            errors.append(
+                _error(
+                    "provenance_audience_chain_type",
+                    "provenance.audience_chain must be a string list",
+                )
+            )
+        else:
+            unknown = [item for item in chain if item not in _KNOWN_AUDIENCES]
+            if unknown:
+                warnings.append(
+                    _warning(
+                        "provenance_audience_unknown",
+                        f"provenance.audience_chain contains unknown audiences: {unknown}",
+                    )
+                )
 
 
 def _validate_code_contract(

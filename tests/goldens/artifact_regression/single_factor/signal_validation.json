@@ -23,7 +23,7 @@
   },
   "fallback_derived_fields": [],
   "metrics": {
-    "campaign_triage": "Fragile / monitor",
+    "campaign_triage": "Drop for now",
     "capacity_status": "available",
     "conditional_ic_extreme_minus_base_ic": 0.1476174326124033,
     "estimated_capacity_upper_bound": 7063874.76813311,

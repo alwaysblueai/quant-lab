@@ -34,16 +34,32 @@
 
 必须完成：
 1. preflight 检查
-2. 写入 model_candidate.json（完整 case_spec_payload）
+2. 写入 model_candidate.json（完整 case_spec_payload；保留 Stage2 输出中的 provenance 块）
 3. 写入 case YAML（与 case_spec_payload 字段一致）
 4. 运行 validate-draft-model
 5. 运行标准 model-factor backend experiment
-6. 检查 artifact draft_model_source 审计字段（candidate_json_sha256、case_spec_sha256、feature_contract_sha256、source path）
+6. 检查 artifact draft_model_source 审计字段（candidate_json_sha256、case_spec_sha256、feature_contract_sha256、source path、provenance.idea_id）
 7. 输出结果摘要和下一轮 case_spec_payload 字段修改建议
 
-如果本地 Web Model Lab 已启动，也可以优先使用 `/model-lab` 的 `Draft Candidates`
-面板执行同一流程：粘贴 payload -> 保存 Candidate -> Validate -> 生成 Case YAML ->
-Validate + Run Screening。无论走 CLI 还是 Web UI，最终判断都以 validator 和
+forbidden_actions（Stage 3 执行者硬约束，违反任一即视为本轮失败）：
+- 自行补全 Stage2 payload 中缺失的字段（缺什么停下来回写 research_log 的 deferred 段）
+- 改写 case_spec_payload 中的 feature_columns / model.family / training / target / feature_availability
+- 跳过 validate-draft-model 或 silently 接受 warnings
+- 删除或重写 provenance 块
+- 引入自定义 feature builder code / 自定义 estimator code / sample_weight hook
+- 修改 src/alpha_lab/model_factor / src/alpha_lab/factors / model_candidates/promoted / 前端正式注册
+
+escalation_triggers（出现以下任一情况，停下并以中文报告，不继续自动修复）：
+- validate-draft-model 报错
+- artifact 缺 candidate_json_sha256 / case_spec_sha256 / feature_contract_sha256 / source path / provenance.idea_id
+- features 文件缺 case_spec_payload.feature_columns 中的列名
+- payload 出现 Level 3 / execution_replay / fill_simulation / portfolio_construction / live_trading 关键词
+- Stage2 payload 与 human_summary / risk_controls 出现机器不可调和冲突
+
+默认在 Codex GUI 后端完成初筛实验和迭代点评。只有当候选已经比较成熟、需要
+完整可视化报告时，才使用 `/model-lab` 的 `Draft Candidates` 面板执行前端
+完整报告流程：粘贴 payload -> 保存 Candidate -> Validate -> 生成 Case YAML ->
+Validate + Run Full Report。无论走 CLI 还是 Web UI，最终判断都以 validator 和
 artifact 中的 `draft_model_source` hash 审计字段为准。
 
 如果 validator、case_spec_payload schema、feature 字段可用性、PIT 检查或

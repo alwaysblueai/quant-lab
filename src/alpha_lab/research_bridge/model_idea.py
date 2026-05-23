@@ -11,6 +11,12 @@ import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from alpha_lab.research_bridge.service import (
+        IdeaDistributeResult as _IdeaDistributeResult,
+    )
 
 from alpha_lab.baseline_factor_suite import baseline_factor_suite_payload
 from alpha_lab.config import PROJECT_ROOT
@@ -126,174 +132,138 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="alpha-lab model-idea",
         description=(
-            "Model-lab idea explorer for prompt generation. "
-            "Batch 3 adds session/memory context for iterative exploration."
+            "Model-lab Stage 0 idea distribution for symmetric engine prompts."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     commands = parser.add_subparsers(dest="action", required=True)
 
-    explore = commands.add_parser(
-        "explore",
-        help="Generate a model-research prompt from local context.",
+    distribute = commands.add_parser(
+        "distribute",
+        help=(
+            "Stage 0: emit retrieval pack + symmetric engine prompts "
+            "(claude / codex) for a model-lab idea."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    explore.add_argument(
+    distribute.add_argument(
         "--idea",
         required=True,
-        help="Natural-language model idea to explore.",
+        help="Natural-language model idea to distribute.",
     )
-    explore.add_argument(
+    distribute.add_argument(
+        "--engines",
+        default="claude,codex",
+        help="Comma-separated Stage 1 engines (claude / codex).",
+    )
+    distribute.add_argument(
         "--mode",
-        default="explore",
-        choices=sorted(_SUPPORTED_MODES),
-        help=(
-            "Prompt mode. 'start' kicks off cross-domain brainstorming "
-            "(contracts shown as discussion-only); 'explore' is the default "
-            "structured expansion; 'constrained' enforces system-contract "
-            "constraints and emits a candidate spec patch hint."
-        ),
+        default="start",
+        choices=["start", "free", "constrained"],
+        help="Stage 1 prompt strictness (mirrors single-factor distribute).",
     )
-    explore.add_argument(
-        "--spec",
-        default=None,
-        help=(
-            "Optional model-factor spec path. Relative names are resolved against "
-            "configs/real_cases/model_factor/."
-        ),
+    distribute.add_argument(
+        "--stage",
+        default="mechanism_discovery",
+        choices=["mechanism_discovery", "signal_mapping"],
+        help="Retrieval stage used to assemble the Stage 0 pack.",
     )
-    explore.add_argument(
+    distribute.add_argument("--project", default=None, help="Optional bridge project slug.")
+    distribute.add_argument("--top-k", type=int, default=8, help="Retrieval depth.")
+    distribute.add_argument(
+        "--available-data",
+        action="append",
+        default=[],
+        help="Available data identifier. May be repeated.",
+    )
+    distribute.add_argument(
         "--workspace-root",
         default=".",
-        help="Workspace root used for scanning model-lab run artifacts under dist/.",
+        help="Workspace root used for ideas/<idea_id>/ allocation.",
     )
-    explore.add_argument(
+    distribute.add_argument(
+        "--output-root",
+        default=None,
+        help="Optional ideas/ output root override.",
+    )
+    distribute.add_argument(
         "--vault-root",
         default=None,
-        help="Optional quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
-    )
-    explore.add_argument(
-        "--top-k",
-        type=int,
-        default=6,
-        help="Top-K context rows to include for knowledge and run matching.",
-    )
-    explore.add_argument(
-        "--memory-limit",
-        type=int,
-        default=3,
-        help="Max prior idea sessions injected as memory context.",
-    )
-    explore.add_argument(
-        "--stage",
-        default=None,
-        choices=["mechanism_discovery", "signal_mapping"],
-        help=(
-            "Workflow stage. mechanism_discovery finds model mechanisms; "
-            "signal_mapping maps them to spec/run variants. Stage 3 data validation "
-            "is handled by the structured kill workflow, not this explorer."
-        ),
-    )
-    explore.add_argument(
-        "--inject-recent-drift",
-        action="store_true",
-        help="Inject recent lint violations and upstream stage artifacts into the prompt.",
-    )
-    explore.add_argument(
-        "--parent-session-id",
-        default=None,
-        help="Optional upstream model-idea session id used for cross-stage chaining.",
-    )
-    explore.add_argument(
-        "--save-session",
-        action="store_true",
-        help="Persist this exploration under artifacts/model_lab_explorer/sessions/.",
-    )
-    explore.add_argument(
-        "--session-id",
-        default=None,
-        help="Optional explicit session id when --save-session is enabled.",
-    )
-
-    record = commands.add_parser(
-        "record-response",
-        help="Lint and persist an externally produced model-idea response.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    record.add_argument("--session-id", required=True, help="Session id to update.")
-    response_group = record.add_mutually_exclusive_group(required=True)
-    response_group.add_argument(
-        "--response-text",
-        default=None,
-        help="Raw LLM response text to lint and persist.",
-    )
-    response_group.add_argument(
-        "--response-file",
-        default=None,
-        help="UTF-8 file containing the LLM response text.",
-    )
-    record.add_argument(
-        "--workspace-root",
-        default=".",
-        help="Workspace root containing artifacts/model_lab_explorer/sessions/.",
+        help="Quant-knowledge vault root. Defaults to OBSIDIAN_VAULT_PATH.",
     )
 
     return parser
 
 
+def distribute_model_idea(
+    *,
+    idea: str,
+    engines: str | tuple[str, ...] | list[str] | None = None,
+    mode: str = "start",
+    project_slug: str | None = None,
+    top_k: int = 8,
+    available_data: frozenset[str] | list[str] | None = None,
+    stage: str | None = None,
+    workspace_root: str | Path = ".",
+    output_root: str | Path | None = None,
+    vault_root: str | Path | None = None,
+) -> _IdeaDistributeResult:
+    """Stage 0 distribute for the model lab.
+
+    Thin wrapper around :func:`alpha_lab.research_bridge.service.distribute_idea`
+    with ``lab=Lab.MODEL_FACTOR``. Both engines receive the same symmetric
+    prompt (generator + reviewer合一); the reviewer section is populated with
+    ModelFactorCaseSpec top-level fields + model validator hard rules.
+    """
+
+    # Local import to avoid circulars (service imports model_idea via CLI bridge).
+    from alpha_lab.research_bridge.engine_prompts import Lab
+    from alpha_lab.research_bridge.service import distribute_idea
+
+    return distribute_idea(
+        vault_root=vault_root,
+        idea=idea,
+        engines=engines,
+        lab=Lab.MODEL_FACTOR,
+        mode=mode,
+        project_slug=project_slug,
+        top_k=top_k,
+        available_data=available_data,
+        stage=stage,
+        workspace_root=workspace_root,
+        output_root=output_root,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.action == "record-response":
-        response_text = str(args.response_text or "")
-        if args.response_file:
-            try:
-                response_text = Path(str(args.response_file)).read_text(encoding="utf-8")
-            except OSError as exc:
-                parser.error(f"unable to read response file: {exc}")
+    if args.action == "distribute":
         try:
-            report = record_model_idea_response(
-                session_id=str(args.session_id),
-                response_text=response_text,
-                workspace_root=str(args.workspace_root),
-            )
-        except (ValueError, FileNotFoundError) as exc:
-            parser.error(str(exc))
-        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
-        return 0
-
-    if args.action != "explore":
-        parser.error(f"unsupported action: {args.action!r}")
-
-    try:
-        payload = explore_model_idea(
-            idea=str(args.idea),
-            mode=str(args.mode),
-            spec=str(args.spec) if args.spec else None,
-            workspace_root=str(args.workspace_root),
-            vault_root=str(args.vault_root) if args.vault_root else None,
-            top_k=int(args.top_k),
-            memory_limit=int(args.memory_limit),
-            stage=str(args.stage) if args.stage else None,
-            inject_recent_drift=bool(args.inject_recent_drift),
-            parent_session_id=(
-                str(args.parent_session_id) if args.parent_session_id else None
-            ),
-        )
-        if bool(args.save_session):
-            payload["session"] = save_model_idea_session(
-                payload=payload,
-                workspace_root=str(args.workspace_root),
-                session_id=str(args.session_id) if args.session_id else None,
-                parent_session_id=(
-                    str(args.parent_session_id) if args.parent_session_id else None
+            result = distribute_model_idea(
+                idea=str(args.idea),
+                engines=str(args.engines) if args.engines else None,
+                mode=str(args.mode),
+                project_slug=(
+                    str(args.project) if getattr(args, "project", None) else None
                 ),
+                top_k=int(args.top_k),
+                available_data=(
+                    frozenset(str(x) for x in args.available_data)
+                    if args.available_data
+                    else None
+                ),
+                stage=str(args.stage) if args.stage else None,
+                workspace_root=str(args.workspace_root),
+                output_root=str(args.output_root) if args.output_root else None,
+                vault_root=str(args.vault_root) if args.vault_root else None,
             )
-    except ValueError as exc:
-        parser.error(str(exc))
-
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
-    return 0
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_payload(), ensure_ascii=False, indent=2))
+        return 0
+    parser.error(f'unsupported action: {args.action!r}')
+    return 2
 
 
 def explore_model_idea(
@@ -2309,7 +2279,7 @@ def _build_recommendations(
             "Tag every required field as necessary, decorative, or risk control.",
             "Address model confounds: PIT, target leakage, complexity, turnover/cost, feature stability, and split fragility.",
             "Explain which mechanism the current implementation captures and which cannot be disambiguated at this data tier.",
-            "Emit ledger_v1/retrieval_log-ready synthesis notes; do not make kill verdicts in Stage 1.",
+            "Emit Stage 1 mechanism-candidate and feasibility-review notes; do not make kill verdicts in Stage 1.",
         ]
     else:
         next_actions = [
@@ -2959,7 +2929,7 @@ def _append_model_stage1_ledger_protocol(lines: list[str]) -> None:
             "",
             "## Stage 1 ledger 协议",
             "本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。"
-            "输出必须能转写为 `ledger_v1.yaml` + `retrieval_log.md`；不要给 kill 结论。",
+            "输出必须能并入 Stage 1 mechanism candidates + code feasibility review；不要给 kill 结论。",
             "- vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。",
             "- `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。",
             "- 每条 model mechanism 至少写 `hypothesis` / `signal_sketch` / `data_needs`，"
@@ -3039,7 +3009,7 @@ def _append_model_mechanism_discovery_task(lines: list[str], *, mode: str) -> No
             "- turnover / cost risk:",
             "- feature instability risk:",
             "",
-            "[ledger_v1.yaml 草案]",
+            "[Stage 1 mechanism candidates 草案]",
             "- mechanisms: hypothesis / inspired_by（可选）/ fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern",
             "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
         ]
@@ -3107,12 +3077,12 @@ def _append_model_signal_mapping_task(lines: list[str], *, mode: str) -> None:
             "- v2: mechanism | minimal spec/run delta | controls | residual assumptions",
             "- v3: optional; only if structurally different",
             "",
-            "[ledger_v1.yaml 草案]",
+            "[Stage 1 mechanism candidates 草案]",
             "- mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ fusion_of（可选）/ "
             "novel_delta / signal_sketch / data_needs / concern",
             "- retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints",
             "",
-            "[retrieval_log.md 草案]",
+            "[Retrieval pack synthesis notes 草案]",
             "- surfaced_cards: 本阶段实际使用的 [Kx] / [Ex] / [Fx] 与用途",
             "- spec_dependency_notes: 当前 contracts、required fields 与 data tier 边界",
         ]

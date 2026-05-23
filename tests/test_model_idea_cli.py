@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 import alpha_lab.research_bridge.model_idea as model_idea_module
 from alpha_lab.research_bridge.llm_rerank import RerankOutcome
 from alpha_lab.research_bridge.model_idea import main as model_idea_main
-from tests.model_factor_case_helpers import write_demo_model_factor_case
 
 
 @pytest.fixture(autouse=True)
@@ -57,120 +55,45 @@ def _minimal_model_prompt_report() -> dict[str, object]:
     }
 
 
-def test_model_idea_cli_empty_idea_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit):
-        model_idea_main(["explore", "--idea", "   "])
-    captured = capsys.readouterr()
-    assert "idea must be non-empty" in captured.err
 
-
-def test_model_idea_cli_constrained_contains_model_contracts(
-    tmp_path: Path,
+def test_model_idea_cli_routes_distribute(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    spec_path = write_demo_model_factor_case(tmp_path, factor_name="model_idea_demo")
+    captured: dict[str, object] = {}
+
+    class _FakeResult:
+        def to_payload(self) -> dict[str, object]:
+            return {"ok": True, "idea_id": "idea-1", "engines": ["claude", "codex"]}
+
+    def _fake_distribute_model_idea(**kwargs: object) -> _FakeResult:
+        captured.update(kwargs)
+        return _FakeResult()
+
+    monkeypatch.setattr(
+        model_idea_module,
+        "distribute_model_idea",
+        _fake_distribute_model_idea,
+    )
 
     rc = model_idea_main(
         [
-            "explore",
+            "distribute",
             "--idea",
-            "Build a stronger tree-based model for daily financial panel data.",
-            "--mode",
-            "constrained",
-            "--spec",
-            str(spec_path),
+            "turnover-aware model idea",
+            "--engines",
+            "claude,codex",
+            "--vault-root",
+            "/tmp/vault",
         ]
     )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    report = payload["constraint_report"]
-    assert set(report.keys()) == {
-        "system_contracts",
-        "current_spec",
-        "validated_baselines",
-        "recent_failures",
-        "recommendations",
-    }
-    assert "ridge" in report["system_contracts"]["supported_model_families"]
-    assert payload["mode"] == "constrained"
-    assert "Supported model families" in payload["gpt_prompt"]
-
-
-def test_model_idea_cli_missing_spec_degrades_gracefully(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    rc = model_idea_main(
-        [
-            "explore",
-            "--idea",
-            "Try robust model-selection logic for noisy cross-sectional features.",
-            "--spec",
-            "non_existing_spec.yaml",
-        ]
-    )
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    current_spec = payload["constraint_report"]["current_spec"]
-    warnings = payload["constraint_report"]["recommendations"]["extras"]["warnings"]
-    assert current_spec["status"] == "unavailable"
-    assert isinstance(warnings, list)
-    assert len(warnings) >= 1
-
-
-def test_model_idea_cli_start_mode_is_kickoff(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    spec_path = write_demo_model_factor_case(tmp_path, factor_name="model_idea_kickoff")
-
-    rc = model_idea_main(
-        [
-            "explore",
-            "--idea",
-            "Borrow ideas from imbalanced-classification literature for daily panels.",
-            "--mode",
-            "start",
-            "--spec",
-            str(spec_path),
-        ]
-    )
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["mode"] == "start"
-    # Kickoff must not collapse the idea into a deterministic spec patch.
-    assert payload["spec_patch_hint"] is None
-    prompt = payload["gpt_prompt"]
-    assert "kickoff" in prompt.lower()
-    assert "discussion-only" in prompt
-    assert "Candidate Spec Patch Hint" not in prompt
-    # Recommendations should reflect the kickoff-specific guidance.
-    recommendations = payload["constraint_report"]["recommendations"]
-    assert "kickoff" in str(recommendations["mode_guidance"]).lower()
-    next_actions = recommendations["next_actions"]
-    assert any("do NOT converge" in str(item) for item in next_actions)
-
-
-def test_model_idea_cli_stage_axis_defaults_to_mechanism_discovery(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    rc = model_idea_main(
-        [
-            "explore",
-            "--idea",
-            "Try ridge with turnover-aware selection.",
-        ]
-    )
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["stage"] == "mechanism_discovery"
-    diag = payload["retrieval_diagnostics"]
-    assert diag["stage"] == "mechanism_discovery"
-    assert diag["recommended_next_stage"] == "signal_mapping"
-    assert "Stage: mechanism_discovery" in payload["gpt_prompt"]
-
+    assert payload["idea_id"] == "idea-1"
+    assert captured["idea"] == "turnover-aware model idea"
+    assert captured["engines"] == "claude,codex"
+    assert captured["vault_root"] == "/tmp/vault"
 
 def test_model_idea_explicit_stage_progresses_recommended_next() -> None:
     from alpha_lab.research_bridge.model_idea import explore_model_idea
@@ -201,86 +124,6 @@ def test_model_idea_rejects_validation_kill_tests_public_stage() -> None:
             mode="constrained",
             stage="validation_kill_tests",
         )
-
-
-def test_model_idea_cli_save_session_writes_session(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
-
-    rc = model_idea_main(
-        [
-            "explore",
-            "--idea",
-            "Explore ridge baseline with turnover control.",
-            "--workspace-root",
-            str(workspace),
-            "--save-session",
-        ]
-    )
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert isinstance(payload.get("session"), dict)
-    session_id = str(payload["session"]["session_id"])
-    assert session_id
-    session_path = (
-        workspace
-        / "artifacts"
-        / "model_lab_explorer"
-        / "sessions"
-        / f"{session_id}.json"
-    )
-    assert session_path.exists()
-
-
-def test_model_idea_cli_record_response_updates_session(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
-
-    rc = model_idea_main(
-        [
-            "explore",
-            "--idea",
-            "Explore model response recording.",
-            "--workspace-root",
-            str(workspace),
-            "--save-session",
-        ]
-    )
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    session_id = str(payload["session"]["session_id"])
-
-    rc2 = model_idea_main(
-        [
-            "record-response",
-            "--session-id",
-            session_id,
-            "--workspace-root",
-            str(workspace),
-            "--response-text",
-            "[模型机制候选]\n只有一段，缺少其余必需结构。",
-        ]
-    )
-    assert rc2 == 0
-    report = json.loads(capsys.readouterr().out)
-    assert report["has_errors"] is True
-    session_path = (
-        workspace
-        / "artifacts"
-        / "model_lab_explorer"
-        / "sessions"
-        / f"{session_id}.json"
-    )
-    session_payload = json.loads(session_path.read_text(encoding="utf-8"))
-    assert session_payload["response"]
-    assert session_payload["lint_report"]["has_errors"] is True
 
 
 def test_model_idea_stage_prompts_align_with_lint_anchors() -> None:

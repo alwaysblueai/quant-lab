@@ -49,6 +49,7 @@
 ```yaml
 contract_version: "model_stage2_candidate_output_v1"
 stage: "stage2_candidate"
+provenance: {}
 human_summary: {}
 model_candidate_payload: {}
 deferred_mechanisms: []
@@ -61,6 +62,10 @@ quality_gate: {}
 ```yaml
 contract_version: "model_stage2_candidate_output_v1"
 stage: "stage2_candidate"
+provenance:
+  idea_id: ""
+  stage2_payload_sha256: ""           # sha256 of canonical-JSON(model_candidate_payload), filled by GPT
+  audience_chain: ["claude", "codex", "web_gpt_stage2"]
 human_summary:
   candidate_name: ""
   implemented_mechanism_ids: []
@@ -72,6 +77,10 @@ model_candidate_payload:
   candidate_name: ""
   implementation_status: "draft_for_stage3"
   implementation_type: "spec_variant"
+  provenance:
+    idea_id: ""
+    stage2_payload_sha256: ""
+    audience_chain: ["claude", "codex", "web_gpt_stage2"]
   source_mechanisms: []
   base_case_spec_path: ""
   expected_horizon: "t_plus_1_or_later"

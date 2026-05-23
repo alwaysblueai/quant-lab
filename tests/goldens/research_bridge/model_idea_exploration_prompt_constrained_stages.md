@@ -51,6 +51,11 @@
 - [F1] run=gbdt_unlagged_fundamentals status=failed outputs=metrics.json reason=known_at missing for restated fundamentals
 - [E1] run=ridge_momentum_202604 model=ridge mean_rank_ic=0.041 rank_ic_ir=0.72 ls_ir=0.83 net_ls_ir=0.61 turnover=0.18 coverage=0.97 outputs=metrics.json, summary.md
 
+## Existing Model And Factor Inventory
+- No model-factor specs found under configs/real_cases/model_factor.
+### Factor registry / cases
+- Built-in factor methods: -
+
 ## Session Memory
 - [M1] 2026-04-27T09:00:00Z stage=mechanism_discovery mode=constrained responded=True lint_errors=False idea=Test nonlinear feature interactions under cost limits. patch=candidate uses lightgbm and turnover penalty
 
@@ -94,7 +99,7 @@
 5. 禁止输出最终 spec patch、JSON patch、single best model、推荐版本或完整训练方案。
 
 ## Stage 1 ledger 协议
-本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。输出必须能转写为 `ledger_v1.yaml` + `retrieval_log.md`；不要给 kill 结论。
+本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。输出必须能并入 Stage 1 mechanism candidates + code feasibility review；不要给 kill 结论。
 - vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。
 - `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。
 - 每条 model mechanism 至少写 `hypothesis` / `signal_sketch` / `data_needs`，并说明 touched contract surfaces。
@@ -133,7 +138,7 @@
 - turnover / cost risk:
 - feature instability risk:
 
-[ledger_v1.yaml 草案]
+[Stage 1 mechanism candidates 草案]
 - mechanisms: hypothesis / inspired_by（可选）/ fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern
 - retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints
 
@@ -142,7 +147,7 @@
 - 模型机制候选至少 2 个；每个候选必须写清 touched contract surfaces 与 concern。
 - 机制发现阶段不得输出最终 spec patch、不得推荐 single best model、不得把方向写成单纯调参。
 - 必须至少覆盖两类不同模型机制：loss/regularization、feature interaction、target construction、sample weighting、training window、model selection 中的两类。
-- 每个机制候选应能落入 ledger_v1：包含 hypothesis / signal_sketch / data_needs，inspired_by / fusion_of / cross_domain_jump 可选；无来源不算缺口。
+- 每个机制候选应能落入 Stage 1 mechanism schema：包含 hypothesis / signal_sketch / data_needs，inspired_by / fusion_of / cross_domain_jump 可选；无来源不算缺口。
 
 ---
 
@@ -199,6 +204,11 @@
 - [F1] run=gbdt_unlagged_fundamentals status=failed outputs=metrics.json reason=known_at missing for restated fundamentals
 - [E1] run=ridge_momentum_202604 model=ridge mean_rank_ic=0.041 rank_ic_ir=0.72 ls_ir=0.83 net_ls_ir=0.61 turnover=0.18 coverage=0.97 outputs=metrics.json, summary.md
 
+## Existing Model And Factor Inventory
+- No model-factor specs found under configs/real_cases/model_factor.
+### Factor registry / cases
+- Built-in factor methods: -
+
 ## Session Memory
 - [M1] 2026-04-27T09:00:00Z stage=mechanism_discovery mode=constrained responded=True lint_errors=False idea=Test nonlinear feature interactions under cost limits. patch=candidate uses lightgbm and turnover penalty
 
@@ -242,7 +252,7 @@
 5. 输出 2-3 个可测试模型版本；禁止推荐 final pick。Stage 3 数据验证 / spec 审计才做最终 KILL / HOLD-FOR-AUDIT。
 
 ## Stage 1 ledger 协议
-本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。输出必须能转写为 `ledger_v1.yaml` + `retrieval_log.md`；不要给 kill 结论。
+本 prompt 只负责 model-lab 的 Stage 1：用 vault 素材起草模型改进机制。输出必须能并入 Stage 1 mechanism candidates + code feasibility review；不要给 kill 结论。
 - vault 是素材库，不是判决书；`transferable_moves` 是主要生成原料。
 - `operative_claims` 只能作为弱上下文 hint，不能触发 precedent kill。
 - 每条 model mechanism 至少写 `hypothesis` / `signal_sketch` / `data_needs`，并说明 touched contract surfaces。
@@ -286,11 +296,11 @@
 - v2: mechanism | minimal spec/run delta | controls | residual assumptions
 - v3: optional; only if structurally different
 
-[ledger_v1.yaml 草案]
+[Stage 1 mechanism candidates 草案]
 - mechanisms: 每条机制保留 hypothesis / inspired_by（可选）/ fusion_of（可选）/ novel_delta / signal_sketch / data_needs / concern
 - retrieval_log: surfaced_cards + transferable_moves + operative_claims weak hints
 
-[retrieval_log.md 草案]
+[Retrieval pack synthesis notes 草案]
 - surfaced_cards: 本阶段实际使用的 [Kx] / [Ex] / [Fx] 与用途
 - spec_dependency_notes: 当前 contracts、required fields 与 data tier 边界
 

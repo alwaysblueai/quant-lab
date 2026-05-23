@@ -14,7 +14,6 @@ from alpha_lab.vault_export import ExportResult, export_to_vault, resolve_vault_
 DEFAULT_ACTIVE_OUTPUT_ROOTS = (
     "outputs/real_cases",
     "dist/bridge_runs",
-    "dist/web_ui_runs",
 )
 
 

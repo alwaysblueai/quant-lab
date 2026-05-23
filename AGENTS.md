@@ -213,6 +213,19 @@ each layer owns its own contract; this table is what makes that layout legible.
 | `scripts/verify/` | Cross-checks against vendor parquet |
 | `scripts/{ab_compare,gc_web_runs,diagnose_runtime_stability}.{py,sh}` | Top-level miscellaneous tools |
 
+### Archived / opt-out paths
+
+These directories are intentionally outside the active surface — leave them
+alone unless you're explicitly working on archival, perf baselining, or
+ad-hoc data backfill.
+
+| Path | What it is |
+| --- | --- |
+| `configs/_archive/single_factor/` | Pre-2026-05 tushare `_qfq`/no-suffix sweep configs. Moved out because vendor `_qfq` is not point-in-time; new single-factor work uses no-suffix + `_bfq` under `configs/real_cases/single_factor/`. History preserved via rename (commit `dbf38a7`). |
+| `configs/_archive/model_factor/` | Pre-2026-05 bare `stock_*.yaml` configs targeting the legacy `features_safe.parquet` suite. Superseded by `*_safe_bfq*` variants under `configs/real_cases/model_factor/` once 35-feature safe_bfq became the primary benchmark line (commit `310e7f4`). |
+| `tests/perf_baselines/*.json` | Frozen `scripts/bench/bench_pipeline.py` outputs used by `.github/workflows/bench.yml` for informational A/B compare against the current branch. Not pytest fixtures — refreshed by re-running `bench_pipeline.py --size <medium\|small>` when the baseline intentionally moves. |
+| `scripts/intraday/_oneshots/` | Gitignored ad-hoc backfill / cleanup scripts (e.g., `strip_year_column.py`, `apply_cutoff_2025.py`, `rebuild_summaries.py`). They run once against a specific local snapshot and are deliberately not version-controlled; do not promote them out without first making them idempotent and contract-checked. |
+
 ## 9) Card Language Policy
 - Generated cards, summaries, and human-facing research docs should be Chinese-first.
 - The main body, section titles, and explanatory text should use Chinese by default.

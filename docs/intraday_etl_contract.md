@@ -1,5 +1,7 @@
 # 分钟数据 ETL 契约 v1
 
+研究侧用法：因子要在前端跑回测时同时消费日频 + 日内派生列，请走 `docs/intraday_factor_workflow.md` 与 `scripts/etl/build_factor_run_inputs.py` 的 slim slice + `mode=file` 流程，不要直接把 case YAML 指向完整 joined dataset，否则会 OOM。
+
 本文档是 `ashare_institutional_20160418_20260415_supplemented` 这批分钟数据接入的单一真理源。范围只覆盖：
 
 - `data/processed/real_case_inputs/ashare_institutional_20160418_20260415_supplemented/prices.parquet`
@@ -12,15 +14,17 @@ Stage B 保留 lookback，Stage C 保持正式研究边界：
 
 ```text
 Stage B: data/processed/minute_panel/year=YYYY/part-0.parquet
-  date range: 2016-04-18 -> 2026-04-15
+  date range: 2016-04-18 -> 2025-12-31
   asset set : universe_mask.asset 去重后的 5416 只
   content   : raw minute bars，按 asset, datetime 排序
 
 Stage C: data/processed/intraday_features/year=YYYY/part-0.parquet
-  date range: 2016-10-17 -> 2026-04-15
+  date range: 2016-10-17 -> 2025-12-31
   asset set : prices.parquet 中存在的 (date, asset)
   content   : Group A daily PV + status flags + 已 promote 的 intraday feature batches
 ```
+
+> Intraday-cutoff = 2025-12-31。上游 daily-PV (`ashare_institutional_20160418_20260415_supplemented`) 仍保留到 2026-04-15；但 Stage B 的 1min 源仅到 2025-12-31，因此 Stage C / `ashare_institutional_intraday_v1` 也截到 2025-12-31，避免下游训练吃到 intraday 列全 NaN 的尾巴。
 
 `universe_mask.parquet` 是稀疏长表，只存 `in_universe=1` 的行。ETL 不按 daily universe mask 删除分钟行；研究侧使用 mask 时必须 reindex 到完整 `(date, asset)` 网格，并把缺失解释为 `False`。
 
@@ -329,6 +333,13 @@ sign_flip_count >= 0
 - 因此分钟聚合的 open/high/low 与 `prices.raw_open/raw_high/raw_low` 在除权日、上市首日、涨跌停日和北交所样本上预期存在结构性差异。这类差异不单独判为 ETL 错误。
 - 北交所部分股票的 `prices.raw_open` 来自集合竞价成交价，可能不同于 09:30 第一根分钟 bar 的 open。BJ open mismatch 单独归类为集合竞价口径差异，不作为硬 gate；非北交所 open 仍保留宽松硬 gate，用来捕捉全局错位。
 - 少数资产存在成交量/成交额 vendor 异常，例如分钟值本身相对 daily truth 偏离约 2 倍。ETL 不对单资产做 hard-coded 修复，用 `vol_unreliable` / `amt_unreliable` 屏蔽依赖成交数据的因子。
+
+## Known Feature Limitations
+
+- `amount_share_close30`（Group E，尾盘 30min 成交占比）：在 2024-2025 子样本上对 1 日前向收益有显著横截面 IC（约 +0.014, t=+3.8），但**全 10 年样本（2016-2025）IC 趋零（约 -0.001, t=-0.74）**，呈现"近期管用、长期失效"特征。原因推测是 2021 年量化普及后机构尾盘策略竞争加剧。
+  - 列本身的物理量与公式都正确（value_distribution 分布正常、`amount_share_morning + amount_share_afternoon == 1` 恒等通过），不是 ETL 或公式 bug
+  - 研究侧不应单独把它当因子直接用；可作为多因子模型输入或与其他时段 share 列做交互
+  - readiness review 里 sanity_ic 会触发该列的 "flat" 条件，属于已知现象，不阻断 v1.0 release
 
 ## Residual Amount / Volume Tolerance
 

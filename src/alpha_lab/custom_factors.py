@@ -32,6 +32,7 @@ class CustomFactorSource:
     frequency: str | None = None
     unavailable_data_policy: str | None = None
     pit_assumption: str | None = None
+    provenance: dict[str, Any] | None = None
 
     def to_audit_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -55,6 +56,8 @@ class CustomFactorSource:
             payload["unavailable_data_policy"] = self.unavailable_data_policy
         if self.pit_assumption:
             payload["pit_assumption"] = self.pit_assumption
+        if self.provenance:
+            payload["provenance"] = dict(self.provenance)
         return payload
 
 
@@ -195,6 +198,13 @@ def read_custom_factor_source(path: str | Path) -> CustomFactorSource:
     if not code.strip():
         raise ValueError(f"custom factor metadata missing code: {meta_path}")
 
+    provenance_raw = payload.get("provenance")
+    provenance: dict[str, Any] | None
+    if isinstance(provenance_raw, dict):
+        provenance = dict(provenance_raw)
+    else:
+        provenance = None
+
     return CustomFactorSource(
         name=name,
         scope=_infer_scope(meta_path),
@@ -209,6 +219,7 @@ def read_custom_factor_source(path: str | Path) -> CustomFactorSource:
         frequency=_optional_text(payload.get("frequency")),
         unavailable_data_policy=_optional_text(payload.get("unavailable_data_policy")),
         pit_assumption=_optional_text(payload.get("pit_assumption")),
+        provenance=provenance,
     )
 
 

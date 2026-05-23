@@ -382,7 +382,7 @@ def test_tearsheet_payload_chart_inputs_cover_all_artifact_curves(tmp_path: Path
     assert set(chart_by_title) == {
         "Cumulative Long-Short NAV",
         "IC Time Series + Cumulative IC",
-        "Quantile Cumulative Returns",
+        "Quantile Cumulative NAV (non-overlapping 5D)",
         "Group Mean Return",
         "Rolling IC / RankIC",
         "IC Decay",
@@ -410,14 +410,13 @@ def test_tearsheet_payload_chart_inputs_cover_all_artifact_curves(tmp_path: Path
 
     quantile_series = {
         series["name"]: series["points"]
-        for series in chart_by_title["Quantile Cumulative Returns"]["series"]
+        for series in chart_by_title["Quantile Cumulative NAV (non-overlapping 5D)"]["series"]
     }
-    assert [point[1] for point in quantile_series["Q1"]] == pytest.approx(
-        [1.01, 0.9898, 0.9898]
-    )
-    assert [point[1] for point in quantile_series["Q2"]] == pytest.approx(
-        [1.03, 1.0403, 1.061106]
-    )
+    # Chart now uses non-overlapping 5D sampling; with 3 daily rows only the
+    # first sample lands. We assert presence and the leading value rather than
+    # the full daily-compounded curve.
+    assert [point[1] for point in quantile_series["Q1"]] == pytest.approx([1.01])
+    assert [point[1] for point in quantile_series["Q2"]] == pytest.approx([1.03])
 
     group_bars = chart_by_title["Group Mean Return"]["series"][0]["bars"]
     assert [bar["group"] for bar in group_bars] == ["Q1", "Q2"]

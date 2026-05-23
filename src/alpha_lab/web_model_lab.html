@@ -1943,56 +1943,49 @@
     <div class="topbar">
       <div>
         <h1>Model Lab</h1>
-        <p>面向 `model-factor` 的研究工作台：选 spec、改 YAML、启动 run、查看训练日志与产物。</p>
+        <p>面向成熟 model candidate 的完整报告工作台；早期想法探索与快速迭代默认在 Codex GUI 后端完成。</p>
       </div>
       <div class="inline-controls">
         <a class="link-btn" href="/">返回 Unified 首页</a>
       </div>
     </div>
 
+    <div class="panel" id="stage0DistributePanel" style="margin-bottom:18px">
+      <span class="idea-stage-tag">Stage 0: Idea Distribute (model_factor)</span>
+      <h2>模糊想法 → Stage 0 分发</h2>
+      <p class="idea-prompt-hint">把模糊 model idea 粘进下方文本框，点击"调用 Stage 0 分发"。后端走 <code>alpha-lab model-idea distribute</code>（Claude API 检索 + codebase 快照），产出 <code>ideas/&lt;idea_id&gt;/</code> 下 5 个文件。两份 prompt 字节级相同（generator + reviewer 合一），粘到 Claude Code / Codex GUI 即可。</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <textarea id="stage0IdeaInput" class="candidate-payload code" spellcheck="false" placeholder="例: turnover-conditioned price-volume synthesis with regime gate…"></textarea>
+        <div class="toolbar">
+          <button class="primary" id="btnStage0Distribute">调用 Stage 0 分发</button>
+          <span id="stage0Status" class="muted" style="font-size:12px"></span>
+        </div>
+        <div id="stage0Results"></div>
+      </div>
+    </div>
+
     <div class="panel">
-      <span class="idea-stage-tag">Stage 1: Knowledge + Codebase Retrieval</span>
-      <h2>想法探索器 / Model Idea Explorer</h2>
-      <p class="idea-prompt-hint">输入一个模糊 model idea；后端检索 quant-knowledge、当前 model-factor spec、已有特征字段和代码锚点，然后生成两份 Markdown-only 桌面 agent prompt。</p>
-      <div class="idea-simple-entry">
-        <label>模糊 Model Idea</label>
-        <textarea
-          id="explorerIdea"
-          class="idea-textarea"
-          spellcheck="false"
-          placeholder="例如：针对 safe_bfq 特征，探索一个更重视特征稳定性和换手成本的模型合成因子方案。"
-        ></textarea>
-        <div class="toolbar idea-toolbar">
-          <button id="btnIdeaExplore" class="primary">探索并生成双 Agent Prompt</button>
+      <span class="idea-stage-tag">Backend-first research loop</span>
+      <h2>后端迭代优先</h2>
+      <p class="idea-prompt-hint">模糊 model idea 的初步探索、草稿实验和下一轮点评默认在 Codex GUI 后端完成；本页面只接收已经迭代到较成熟的 `model_candidate_payload`，用于标准验证、完整报告和 artifact 可视化。新 idea 请先在终端跑 <code>alpha-lab model-idea distribute --idea "..."</code> 生成 <code>ideas/&lt;idea_id&gt;/</code>（含 generator + reviewer prompts），再把网页版 GPT 输出粘到下方。粘贴的 payload 没有 <code>provenance.idea_id</code> 时 validator 会发出 <code>provenance_missing</code> warning。</p>
+      <div class="idea-workflow-strip">
+        <div class="idea-workflow-step active">
+          <strong>0. Stage 0 分发</strong>
+          <span>终端或上方面板调用 <code>alpha-lab model-idea distribute</code>，产出 retrieval pack + 两份对称 engine prompts（claude / codex）。</span>
         </div>
-        <div class="muted" style="font-size:12px">默认绑定当前选中的 Spec；Stage1 只生成 Claude Code / Codex GUI 的 Markdown 点评 prompt，不生成 model_candidate_payload，不启动实验。</div>
-        <div id="explorerStageBadge" class="muted" style="font-size:12px"></div>
-        <div id="explorerMechanismIndexStatus" class="idea-index-status"></div>
-        <div id="explorerQuickSessions" class="idea-quick-sessions"></div>
-      </div>
-      <div id="explorerFlash" class="idea-flash muted"></div>
-      <div id="explorerAgentPanel" class="idea-results-wrap">
-        <div id="explorerDraftMeta" class="idea-preview-header">
-          <strong>尚未生成探索结果</strong>
-          <span class="muted">等待输入 idea</span>
+        <div class="idea-workflow-step active">
+          <strong>1. 双引擎并行</strong>
+          <span>Claude Code 与 Codex GUI 各自完成 generator + reviewer 合一任务；两者互不可见。</span>
         </div>
-        <div id="explorerDraftProtocol" class="idea-workflow-strip"></div>
-        <div id="explorerAgentPromptCards" class="idea-agent-panel">
-          <div class="idea-agent-note">生成后这里会出现 Claude Code 和 Codex GUI 两张 prompt 卡片；复制后分别交给桌面 agent 做独立 Markdown 点评，再带到网页版 GPT 做 Stage2 汇总。</div>
+        <div class="idea-workflow-step active">
+          <strong>2. 网页版 GPT 迭代</strong>
+          <span>把两份 Stage 1 输出 + stage2_input 模板交给网页版 GPT，产出含 provenance 的 `model_candidate_payload`。</span>
+        </div>
+        <div class="idea-workflow-step active">
+          <strong>3. 前端完整报告</strong>
+          <span>候选足够成熟后，在下方 Draft Candidates 面板运行完整报告并检查审计 hash + provenance.idea_id。</span>
         </div>
       </div>
-      <details class="idea-advanced-settings">
-        <summary>管理历史会话</summary>
-        <div class="muted" style="font-size:12px;margin:6px 0 8px">
-          日常只需要生成双 agent prompt；这里用于查看、刷新或归档历史会话。
-        </div>
-        <div class="toolbar idea-toolbar">
-          <button id="btnIdeaRefreshSessions">刷新会话</button>
-        </div>
-        <div id="explorerSessionList" class="idea-session-list">
-          <div class="muted">加载中…</div>
-        </div>
-      </details>
     </div>
 
     <div class="panel" id="draftCandidatePanel">
@@ -2018,7 +2011,7 @@
             <button id="btnCandidateSave">保存 Candidate</button>
             <button id="btnCandidateValidate">Validate</button>
             <button id="btnCandidateMaterialize">生成 Case YAML</button>
-            <button id="btnCandidateRun" class="primary">Validate + Run Screening</button>
+            <button id="btnCandidateRun" class="primary">Validate + Run Full Report</button>
           </div>
           <div id="candidatePreview">
             <div class="muted">粘贴 payload 后会预览 candidate、features 和 model family。</div>
@@ -2263,10 +2256,6 @@
       runFilterOnlyFailed: false,
       runFilterRecentDays: 0,
       overviewCache: new Map(),
-      ideaExplorerResult: null,
-      ideaSessions: [],
-      selectedIdeaSessionId: "",
-      mechanismIndexStatus: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -2318,20 +2307,6 @@
           if (el.textContent === msg) el.textContent = "";
         }, 3500);
       }
-    }
-
-    function showIdeaFlash(msg, isError = false) {
-      const el = $("explorerFlash");
-      if (!el) return;
-      el.textContent = String(msg || "");
-      el.className = `idea-flash ${isError ? "danger-text" : "muted"}`;
-      if (!msg) return;
-      setTimeout(() => {
-        if (el.textContent === msg) {
-          el.textContent = "";
-          el.className = "idea-flash muted";
-        }
-      }, 3500);
     }
 
     function shortHash(value) {
@@ -2490,7 +2465,7 @@
       return data;
     }
 
-    async function runSelectedCandidateScreening() {
+    async function runSelectedCandidateFullReport() {
       const saved = await saveCandidateFromEditor();
       const name = String(saved.name || state.selectedCandidateName || "").trim();
       if (!name) throw new Error("candidate name missing");
@@ -2498,7 +2473,7 @@
       if (!data.ok) {
         state.candidateValidation = data.validation || null;
         renderCandidateValidation();
-        throw new Error("Validate + Run Screening failed");
+        throw new Error("Validate + Run Full Report failed");
       }
       state.candidateValidation = data.validation || null;
       renderCandidateValidation();
@@ -2507,7 +2482,7 @@
         await openSpec(data.materialized.name);
       }
       await loadRuns();
-      showFlash(`已提交 screening run: ${String(data.run?.run_id || "").slice(0, 10)}`);
+      showFlash(`已提交 full report run: ${String(data.run?.run_id || "").slice(0, 10)}`);
       return data;
     }
 
@@ -2595,471 +2570,6 @@
       box.style.height = `${safeHeight}px`;
       box.style.minHeight = `${safeHeight}px`;
       box.style.maxHeight = `${safeHeight}px`;
-    }
-
-    function resolveIdeaSpecName() {
-      return String(state.selectedSpec || "").trim();
-    }
-
-    function selectedIdeaSession() {
-      const sid = String(state.selectedIdeaSessionId || "").trim();
-      if (!sid) return null;
-      return (Array.isArray(state.ideaSessions) ? state.ideaSessions : [])
-        .find((item) => String(item.session_id || "") === sid) || null;
-    }
-
-    function nextModelIdeaStage(stage) {
-      const current = String(stage || "").trim();
-      if (current === "mechanism_discovery") return "signal_mapping";
-      return "";
-    }
-
-    function modelIdeaStageLabel(stage) {
-      if (stage === "signal_mapping") return "Signal Mapping";
-      return "Mechanism Discovery";
-    }
-
-    function modelIdeaSessionHasPassingEvidence(source) {
-      const item = source && typeof source === "object" ? source : {};
-      const lint = item.lint_report && typeof item.lint_report === "object" ? item.lint_report : {};
-      const hasResponse = Boolean(item.has_response || String(item.response || "").trim());
-      const hasLintErrors = Boolean(item.has_lint_errors || lint.has_errors);
-      return hasResponse && !hasLintErrors;
-    }
-
-    function currentModelIdeaStageDecision() {
-      const result = state.ideaExplorerResult && typeof state.ideaExplorerResult === "object"
-        ? state.ideaExplorerResult
-        : {};
-      const diagnostics = result.retrieval_diagnostics && typeof result.retrieval_diagnostics === "object"
-        ? result.retrieval_diagnostics
-        : {};
-      const session = selectedIdeaSession() || {};
-      const explicitNext = String(
-        result.recommended_next_stage
-        || diagnostics.recommended_next_stage
-        || session.recommended_next_stage
-        || ""
-      ).trim();
-      if (["mechanism_discovery", "signal_mapping"].includes(explicitNext)) {
-        const evidenceSource = Object.keys(session).length ? session : result;
-        if (modelIdeaSessionHasPassingEvidence(evidenceSource)) {
-          return {
-            stage: explicitNext,
-            reason: `上一阶段已有外部点评产物，自动进入 ${modelIdeaStageLabel(explicitNext)}。`,
-          };
-        }
-        const current = String(session.stage || diagnostics.stage || result.stage || "mechanism_discovery").trim();
-        return {
-          stage: ["mechanism_discovery", "signal_mapping"].includes(current)
-            ? current
-            : "mechanism_discovery",
-          blockedNext: explicitNext,
-          reason: `建议进入 ${modelIdeaStageLabel(explicitNext)}；请先完成双 agent 点评与网页版 GPT 汇总。`,
-        };
-      }
-      const current = String(session.stage || diagnostics.stage || result.stage || "mechanism_discovery").trim();
-      const inferredNext = nextModelIdeaStage(current);
-      if (inferredNext && modelIdeaSessionHasPassingEvidence(session || result)) {
-        return {
-          stage: inferredNext,
-          reason: `上一阶段已有外部点评产物，自动进入 ${modelIdeaStageLabel(inferredNext)}。`,
-        };
-      }
-      return {
-        stage: ["mechanism_discovery", "signal_mapping"].includes(current)
-          ? current
-          : "mechanism_discovery",
-        reason: inferredNext
-          ? `建议进入 ${modelIdeaStageLabel(inferredNext)}；请先完成双 agent 点评与网页版 GPT 汇总。`
-          : current === "signal_mapping"
-            ? "Stage 1 已到 Signal Mapping；下一步交接 ledger_v1/retrieval_log。"
-            : "默认从 Mechanism Discovery 开始，先扩展模型机制空间。",
-      };
-    }
-
-    function autoModelIdeaStage() {
-      return currentModelIdeaStageDecision().stage;
-    }
-
-    function autoModelIdeaMode(stage) {
-      if (stage === "signal_mapping") return "explore";
-      return "start";
-    }
-
-    function updateModelIdeaStageBadge() {
-      const el = $("explorerStageBadge");
-      if (!el) return;
-      const decision = currentModelIdeaStageDecision();
-      el.textContent = `当前阶段：${modelIdeaStageLabel(decision.stage)} · ${decision.reason}`;
-    }
-
-    function renderIdeaQuickSessions() {
-      const box = $("explorerQuickSessions");
-      if (!box) return;
-      const sessions = Array.isArray(state.ideaSessions) ? state.ideaSessions.slice(0, 3) : [];
-      if (!sessions.length) {
-        box.innerHTML = "<span class='idea-quick-session-label'>暂无可继续会话。</span>";
-        return;
-      }
-      box.innerHTML = [
-        "<span class='idea-quick-session-label'>继续上一轮：</span>",
-        ...sessions.map((item) => {
-          const sid = String(item.session_id || "");
-          const stage = modelIdeaStageLabel(String(item.stage || "mechanism_discovery"));
-          const idea = truncateText(String(item.idea || sid || "-"), 22);
-          return `<button
-            class="ghost small idea-quick-session-btn"
-            data-action="open-idea-session"
-            data-session-id="${escAttr(sid)}"
-            title="${escAttr(sid)}"
-          >${escHtml(stage)} · ${escHtml(idea)}</button>`;
-        }),
-      ].join("");
-    }
-
-    function renderModelMechanismIndexStatus() {
-      const el = $("explorerMechanismIndexStatus");
-      if (!el) return;
-      const status = state.mechanismIndexStatus || {};
-      const v2On = !!status.research_bridge_v2_enabled;
-      const hasKey = !!status.anthropic_api_key_configured;
-      const ready = !!status.ready;
-      const cardCount = Number(status.card_count || 0);
-      if (!v2On) {
-        el.textContent = "机制索引：待命 · V2 未启用，当前使用字面召回";
-      } else if (!hasKey) {
-        el.textContent = "机制索引：待命 · Claude key 未配置，当前退回 v1";
-      } else if (ready) {
-        el.textContent = `机制索引：已就绪 · ${cardCount} 张卡`;
-      } else if (status.status === "vault_mismatch") {
-        el.textContent = "机制索引：vault 不匹配 · 当前仅字面召回";
-      } else if (status.status === "missing_embeddings") {
-        el.textContent = "机制索引：缺少向量文件 · 当前仅字面召回";
-      } else if (status.status === "invalid_embeddings") {
-        el.textContent = "机制索引：向量文件异常 · 当前仅字面召回";
-      } else if (status.status === "unavailable") {
-        el.textContent = "机制索引：状态读取失败 · 当前按降级路径处理";
-      } else {
-        el.textContent = "机制索引：未构建 · 当前仅字面召回";
-      }
-    }
-
-    async function loadMechanismIndexStatus() {
-      try {
-        state.mechanismIndexStatus = await api("/api/settings/mechanism-index");
-      } catch (err) {
-        state.mechanismIndexStatus = {
-          ready: false,
-          status: "unavailable",
-          research_bridge_v2_enabled: false,
-          anthropic_api_key_configured: false,
-        };
-      }
-      renderModelMechanismIndexStatus();
-    }
-
-    function renderIdeaSessions() {
-      const box = $("explorerSessionList");
-      renderIdeaQuickSessions();
-      if (!box) return;
-      if (!state.ideaSessions.length) {
-        box.innerHTML = "<div class='muted'>暂无已保存会话。</div>";
-        return;
-      }
-      box.innerHTML = state.ideaSessions.map((item) => {
-        const sid = String(item.session_id || "");
-        const active = sid && sid === state.selectedIdeaSessionId;
-        const stage = String(item.stage || "mechanism_discovery");
-        return `
-          <div
-            class="idea-session-item ${active ? "active" : ""}"
-            data-action="open-idea-session"
-            data-session-id="${escAttr(sid)}"
-          >
-            <div class="idea-session-head">
-              <strong>${escHtml(sid)}</strong>
-              <button
-                class="idea-session-delete"
-                data-action="delete-idea-session"
-                data-session-id="${escAttr(sid)}"
-                title="归档这条历史会话"
-              >归档</button>
-            </div>
-            <div class="muted">${escHtml(item.created_at_utc || "-")} · ${escHtml(modelIdeaStageLabel(stage))}</div>
-            <div class="muted">${escHtml(item.idea || "-")}</div>
-          </div>
-        `;
-      }).join("");
-    }
-
-    function modelIdeaAgentLabel(agent) {
-      const key = String(agent || "").trim().toLowerCase();
-      if (key === "claude") return "Claude Code";
-      if (key === "codex") return "Codex GUI";
-      return key || "Agent";
-    }
-
-    function fallbackModelIdeaAgentPrompts(result) {
-      const safe = result && typeof result === "object" ? result : {};
-      const report = safe.constraint_report && typeof safe.constraint_report === "object"
-        ? safe.constraint_report
-        : {};
-      const currentSpec = report.current_spec && typeof report.current_spec === "object"
-        ? report.current_spec
-        : {};
-      const sharedPrompt = String(safe.gpt_prompt || "");
-      const context = [
-        `idea: ${String(safe.idea || "-")}`,
-        `stage: ${String(safe.stage || "-")}`,
-        `mode: ${String(safe.mode || "-")}`,
-        `model_family: ${String(currentSpec.model_family || "-")}`,
-        `feature_count: ${String(currentSpec.feature_count || "-")}`,
-        `feature_sample: ${(Array.isArray(currentSpec.feature_columns_sample) ? currentSpec.feature_columns_sample : []).join(", ") || "-"}`,
-      ].join("\n");
-      return ["claude", "codex"].map((agent) => {
-        const label = modelIdeaAgentLabel(agent);
-        const role = agent === "claude"
-          ? "机制深挖与跨卡片融合"
-          : "本地合同、字段和可执行性审查";
-        const focus = agent === "claude"
-          ? "从知识库卡片和共享检索上下文中提出可讨论的模型机制，只输出 Markdown 点评。"
-          : "从 alpha-lab/model-lab 的 spec、字段、PIT 和 artifact 审计合同角度检查可执行性，只输出 Markdown 点评。";
-        return {
-          agent,
-          label,
-          role,
-          copy_label: `复制 ${label} Prompt`,
-          prompt: [
-            `# Model-Lab Stage 1 Agent Prompt - ${label}`,
-            focus,
-            "不要写 YAML、不要写代码、不要启动实验、不要给最终有效性判断。",
-            "## 共享上下文",
-            context,
-            "## 后端检索上下文摘要",
-            sharedPrompt || "(empty retrieval context)",
-          ].join("\n\n"),
-        };
-      });
-    }
-
-    function modelIdeaAgentPrompts(result) {
-      const safe = result && typeof result === "object" ? result : null;
-      if (!safe) return [];
-      const rows = Array.isArray(safe.agent_prompts) ? safe.agent_prompts : [];
-      const normalized = rows
-        .filter((item) => item && typeof item === "object" && String(item.prompt || "").trim())
-        .map((item) => ({
-          agent: String(item.agent || "").trim() || "agent",
-          label: String(item.label || modelIdeaAgentLabel(item.agent)),
-          role: String(item.role || ""),
-          copy_label: String(item.copy_label || `复制 ${modelIdeaAgentLabel(item.agent)} Prompt`),
-          prompt: String(item.prompt || ""),
-        }));
-      return normalized.length ? normalized : fallbackModelIdeaAgentPrompts(safe);
-    }
-
-    function renderModelIdeaDraftProtocol(result) {
-      const container = $("explorerDraftProtocol");
-      if (!container) return;
-      const hasResult = Boolean(result && typeof result === "object");
-      const steps = [
-        {
-          title: "输入模糊 idea",
-          body: "只描述模型方向，不手写 spec patch",
-          active: true,
-        },
-        {
-          title: "后端检索",
-          body: "quant-knowledge / model specs / factor 数据 / safe_bfq 等字段 / 代码锚点",
-          active: hasResult,
-        },
-        {
-          title: "复制双 prompt",
-          body: "Claude Code 与 Codex GUI 独立输出 Markdown 点评",
-          active: hasResult,
-        },
-        {
-          title: "Stage2 汇总",
-          body: "网页版 GPT + 用户讨论后生成 model_candidate_payload",
-          active: false,
-        },
-      ];
-      container.innerHTML = steps.map((step) => `
-        <div class="idea-workflow-step ${step.active ? "active" : ""}">
-          <strong>${escHtml(step.title)}</strong>
-          <span>${escHtml(step.body)}</span>
-        </div>
-      `).join("");
-    }
-
-    function renderModelIdeaAgentPrompts(result) {
-      const meta = $("explorerDraftMeta");
-      const cards = $("explorerAgentPromptCards");
-      const safe = result && typeof result === "object" ? result : null;
-      renderModelIdeaDraftProtocol(safe);
-      if (!meta || !cards) return;
-      if (!safe) {
-        meta.innerHTML = `
-          <strong>尚未生成探索结果</strong>
-          <span class="muted">等待输入 idea</span>
-        `;
-        cards.innerHTML = `
-          <div class="idea-agent-note">
-            生成后这里会出现 Claude Code 和 Codex GUI 两张 prompt 卡片；复制后分别交给桌面 agent 做独立 Markdown 点评，再带到网页版 GPT 做 Stage2 汇总。
-          </div>
-        `;
-        return;
-      }
-      const prompts = modelIdeaAgentPrompts(safe);
-      const diagnostics = safe.retrieval_diagnostics && typeof safe.retrieval_diagnostics === "object"
-        ? safe.retrieval_diagnostics
-        : {};
-      const report = safe.constraint_report && typeof safe.constraint_report === "object"
-        ? safe.constraint_report
-        : {};
-      const spec = report.current_spec && typeof report.current_spec === "object"
-        ? report.current_spec
-        : {};
-      meta.innerHTML = `
-        <div style="min-width:0">
-          <strong>${escHtml(safe.idea || "model idea")}</strong>
-          <div class="muted">
-            stage=${escHtml(safe.stage || "-")} · mode=${escHtml(safe.mode || "-")} · spec=${escHtml(safe.spec_name || resolveIdeaSpecName() || "-")}
-          </div>
-        </div>
-        <span class="idea-agent-chip">${escHtml(String(prompts.length))} prompts</span>
-      `;
-      const note = `
-        <div class="idea-agent-note">
-          后端已把 quant-knowledge、当前 spec、已有 model/factor 数据、特征字段样本和代码锚点放入共享上下文。
-          feature_count=${escHtml(spec.feature_count || "-")} · availability=${escHtml(spec.feature_availability_mode || "-")} · source=${escHtml(diagnostics.available_data_source || "-")}
-        </div>
-      `;
-      const cardsHtml = prompts.map((item) => `
-        <div class="idea-agent-card">
-          <div class="idea-agent-head">
-            <strong>${escHtml(item.label || modelIdeaAgentLabel(item.agent))}</strong>
-            <span class="idea-agent-chip">Markdown-only</span>
-          </div>
-          <div class="muted" style="font-size:12px;line-height:1.5">${escHtml(item.role || "独立研究点评")}</div>
-          <div class="toolbar idea-toolbar" style="margin-bottom:0">
-            <button class="small primary" data-action="copy-model-idea-agent-prompt" data-agent="${escAttr(item.agent)}">${escHtml(item.copy_label || "复制 Prompt")}</button>
-          </div>
-        </div>
-      `).join("");
-      cards.innerHTML = `${note}<div class="idea-agent-grid">${cardsHtml}</div>`;
-    }
-
-    function renderIdeaExplorerResult(result) {
-      state.ideaExplorerResult = result || null;
-      if (!result || typeof result !== "object") {
-        renderModelIdeaAgentPrompts(null);
-        return;
-      }
-      const session = result.session && typeof result.session === "object"
-        ? result.session
-        : null;
-      const sessionId = session
-        ? String(session.session_id || "").trim()
-        : String(result.session_id || "").trim();
-      if (sessionId) {
-        state.selectedIdeaSessionId = sessionId;
-      }
-      const ideaInput = $("explorerIdea");
-      if (ideaInput) ideaInput.value = String(result.idea || "");
-      renderModelIdeaAgentPrompts(result);
-      renderIdeaSessions();
-      updateModelIdeaStageBadge();
-    }
-
-    async function loadIdeaSessions(selectedSessionId = "") {
-      const data = await api("/api/model-lab/idea-explorer/sessions?limit=20");
-      state.ideaSessions = Array.isArray(data.sessions) ? data.sessions : [];
-      if (selectedSessionId) {
-        state.selectedIdeaSessionId = String(selectedSessionId);
-      } else if (
-        state.selectedIdeaSessionId
-        && !state.ideaSessions.some((item) => item.session_id === state.selectedIdeaSessionId)
-      ) {
-        state.selectedIdeaSessionId = "";
-      }
-      renderIdeaSessions();
-      updateModelIdeaStageBadge();
-    }
-
-    async function openIdeaSession(sessionId) {
-      const sid = String(sessionId || "").trim();
-      if (!sid) return;
-      state.selectedIdeaSessionId = sid;
-      renderIdeaSessions();
-      const payload = await api(`/api/model-lab/idea-explorer/sessions/${encodeURIComponent(sid)}`);
-      renderIdeaExplorerResult(payload);
-      updateModelIdeaStageBadge();
-      showIdeaFlash(`已加载会话 ${sid}`);
-    }
-
-    async function deleteIdeaSession(sessionId) {
-      const sid = String(sessionId || "").trim();
-      if (!sid) return;
-      if (!confirm(`归档历史会话 ${sid}？这不会删除 spec、run 或知识库卡片。`)) return;
-      await api(`/api/model-lab/idea-explorer/sessions/${encodeURIComponent(sid)}`, "DELETE");
-      if (state.selectedIdeaSessionId === sid) {
-        state.selectedIdeaSessionId = "";
-      }
-      await loadIdeaSessions();
-      showIdeaFlash("已归档历史会话。");
-    }
-
-    async function runIdeaExplore() {
-      const idea = String($("explorerIdea")?.value || "").trim();
-      if (!idea) {
-        showIdeaFlash("请输入 idea。", true);
-        return;
-      }
-      const stage = autoModelIdeaStage();
-      const mode = autoModelIdeaMode(stage);
-      const topK = 6;
-      const memoryLimit = 3;
-      const specName = resolveIdeaSpecName();
-      const req = {
-        idea,
-        mode,
-        stage,
-        top_k: topK,
-        memory_limit: memoryLimit,
-        save_session: true,
-        inject_recent_drift: true,
-      };
-      if (specName) req.spec_name = specName;
-      if (state.selectedIdeaSessionId) req.parent_session_id = state.selectedIdeaSessionId;
-      const result = await api("/api/model-lab/idea-explorer/explore", "POST", req);
-      renderIdeaExplorerResult(result);
-      await loadIdeaSessions(result.session && result.session.session_id ? result.session.session_id : "");
-      showIdeaFlash("探索完成，Claude Code / Codex GUI 双 agent prompt 已生成。");
-    }
-
-    async function copyModelIdeaAgentPrompt(agent, button) {
-      const key = String(agent || "").trim().toLowerCase();
-      const prompts = modelIdeaAgentPrompts(state.ideaExplorerResult || {});
-      const item = prompts.find((row) => String(row.agent || "").trim().toLowerCase() === key)
-        || prompts.find((row) => String(row.label || "").trim().toLowerCase() === key);
-      const prompt = String(item && item.prompt ? item.prompt : "").trim();
-      if (!prompt) {
-        showIdeaFlash("当前没有可复制的 agent prompt。", true);
-        return;
-      }
-      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
-        showIdeaFlash("浏览器不支持 clipboard API。", true);
-        return;
-      }
-      await navigator.clipboard.writeText(prompt);
-      if (button) {
-        const original = button.textContent;
-        button.textContent = `已复制 ${modelIdeaAgentLabel(key)}`;
-        setTimeout(() => { button.textContent = original; }, 1500);
-      }
-      showIdeaFlash(`已复制 ${modelIdeaAgentLabel(key)} prompt。`);
     }
 
     function syncSpecDiffPanelHeightWithEditor() {
@@ -11579,12 +11089,6 @@ ${styleText}
           }
           setCheckedSpecsFromSet(selected);
           renderSpecList();
-        } else if (el.dataset.action === "copy-model-idea-agent-prompt") {
-          await copyModelIdeaAgentPrompt(String(el.dataset.agent || ""), el);
-        } else if (el.dataset.action === "open-idea-session") {
-          await openIdeaSession(el.dataset.sessionId);
-        } else if (el.dataset.action === "delete-idea-session") {
-          await deleteIdeaSession(el.dataset.sessionId);
         } else if (el.dataset.action === "open-candidate") {
           await openCandidate(el.dataset.candidate);
         } else if (el.dataset.action === "open-source") {
@@ -11636,16 +11140,7 @@ ${styleText}
           }
         }
       } catch (err) {
-        const action = String(el.dataset.action || "");
-        if (
-          action.startsWith("open-idea")
-          || action === "delete-idea-session"
-          || action === "copy-model-idea-agent-prompt"
-        ) {
-          showIdeaFlash(err.message || String(err), true);
-        } else {
-          showFlash(err.message || String(err), true);
-        }
+        showFlash(err.message || String(err), true);
       }
     });
 
@@ -11664,10 +11159,77 @@ ${styleText}
     $("btnRunSelectedSpecs").addEventListener("click", () => startSelectedRuns().catch((err) => showFlash(err.message, true)));
     $("btnDuplicateSpec").addEventListener("click", () => duplicateSpec().catch((err) => showFlash(err.message, true)));
     $("btnDiffSpec").addEventListener("click", () => diffSpecs().catch((err) => showFlash(err.message, true)));
-    $("btnIdeaExplore")?.addEventListener("click", () => runIdeaExplore().catch((err) => showIdeaFlash(err.message, true)));
-    $("btnIdeaRefreshSessions")?.addEventListener("click", () => {
-      loadIdeaSessions().catch((err) => showIdeaFlash(err.message, true));
+    // Stage 0 distribute (model_factor)
+    function renderStage0Files(files) {
+      const target = $("stage0Results");
+      if (!target) return;
+      if (!Array.isArray(files) || files.length === 0) {
+        target.innerHTML = "<div class=\"muted\">未返回文件。</div>";
+        return;
+      }
+      const escape = (s) => String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const blocks = files.map((f, idx) => {
+        const taId = "stage0FileTextarea_" + idx;
+        return [
+          "<details" + (idx < 2 ? " open" : "") + " style=\"margin-bottom:10px;border:1px solid var(--border);padding:8px;border-radius:4px\">",
+          "<summary><strong>" + escape(f.name) + "</strong> <span class=\"muted\" style=\"font-size:11px\">" + escape(f.path) + "</span></summary>",
+          "<div class=\"toolbar\" style=\"margin-top:6px\">",
+          "<button data-copy-target=\"" + taId + "\">复制内容</button>",
+          "</div>",
+          "<textarea id=\"" + taId + "\" class=\"candidate-payload code\" readonly style=\"min-height:140px;margin-top:6px\">" + escape(f.content) + "</textarea>",
+          "</details>",
+        ].join("");
+      });
+      target.innerHTML = blocks.join("");
+      target.querySelectorAll("[data-copy-target]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const ta = document.getElementById(btn.getAttribute("data-copy-target"));
+          if (!ta) return;
+          try {
+            await navigator.clipboard.writeText(ta.value || "");
+            const orig = btn.textContent;
+            btn.textContent = "已复制";
+            setTimeout(() => { btn.textContent = orig; }, 1200);
+          } catch (err) {
+            ta.select();
+            document.execCommand("copy");
+          }
+        });
+      });
+    }
+    $("btnStage0Distribute")?.addEventListener("click", async () => {
+      const input = $("stage0IdeaInput");
+      const status = $("stage0Status");
+      const idea = (input && input.value || "").trim();
+      if (!idea) {
+        if (status) status.textContent = "请先输入想法。";
+        return;
+      }
+      if (status) status.textContent = "分发中…";
+      try {
+        const resp = await fetch("/api/model-lab/idea-distribute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idea }),
+        });
+        const data = await resp.json();
+        if (!data || !data.ok) {
+          if (status) status.textContent = "失败: " + (data && data.error || "unknown");
+          return;
+        }
+        if (status) {
+          status.textContent = "成功: idea_id=" + (data.idea_id || "")
+            + " (" + (data.draft_dir || "") + ")";
+        }
+        renderStage0Files(data.files || []);
+      } catch (err) {
+        if (status) status.textContent = "请求异常: " + (err && err.message || err);
+      }
     });
+
     $("btnRefreshCandidates")?.addEventListener("click", () => loadCandidates().catch((err) => showFlash(err.message, true)));
     $("candidatePayloadInput")?.addEventListener("input", () => {
       state.selectedCandidateName = "";
@@ -11679,7 +11241,7 @@ ${styleText}
     $("btnCandidateSave")?.addEventListener("click", () => saveCandidateFromEditor().catch((err) => showFlash(err.message, true)));
     $("btnCandidateValidate")?.addEventListener("click", () => validateSelectedCandidate().catch((err) => showFlash(err.message, true)));
     $("btnCandidateMaterialize")?.addEventListener("click", () => materializeSelectedCandidate().catch((err) => showFlash(err.message, true)));
-    $("btnCandidateRun")?.addEventListener("click", () => runSelectedCandidateScreening().catch((err) => showFlash(err.message, true)));
+    $("btnCandidateRun")?.addEventListener("click", () => runSelectedCandidateFullReport().catch((err) => showFlash(err.message, true)));
     $("btnCompareRuns").addEventListener("click", () => compareRuns().catch((err) => showFlash(err.message, true)));
     $("btnSelectAllRuns")?.addEventListener("click", () => {
       try {
@@ -11851,12 +11413,9 @@ ${styleText}
           return;
         }
         bindSpecDiffPanelHeightSync();
-        renderModelIdeaAgentPrompts(null);
         await loadProfiles();
         await loadSpecs();
         await loadCandidates();
-        await loadIdeaSessions();
-        await loadMechanismIndexStatus();
         syncSpecDiffPanelHeightWithEditor();
         await loadRuns();
         await loadSources();

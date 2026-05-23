@@ -19,13 +19,9 @@ from alpha_lab.research_bridge.scoring import (
     SIGNAL_MAPPING,
 )
 from alpha_lab.research_bridge.service import (
-    ExploreIdeaCard,
-    ExploreIdeaResult,
     _build_factor_recipe_signal_mapping_prompt,
     _build_factor_recipe_validation_kill_tests_prompt,
-    _render_idea_model_dispatch,
     apply_writeback,
-    draft_idea,
     explore_idea,
     init_project,
     normalize_fast_decision_log,
@@ -894,101 +890,6 @@ def test_explore_idea_constrained_prompt_requires_score_component_rationale(
     prompt = result.to_payload()["gpt_prompt"]
 
     assert "constrained 模式下，引用某张卡片时必须说明你主要依赖哪个检索分量" in prompt
-
-
-def test_draft_idea_prepares_dual_engine_additive_artifacts(tmp_path: Path) -> None:
-    vault = _build_vault_with_uses_data(tmp_path)
-    workspace = tmp_path / "workspace"
-
-    result = draft_idea(
-        vault_root=vault,
-        idea="跨领域成交额机制",
-        models="claude,codex",
-        mode="start",
-        workspace_root=workspace,
-    )
-
-    assert result.shared_prompt_path.exists()
-    assert set(result.ledger_paths) == {"claude", "codex"}
-    assert not result.ledger_paths["claude"].exists()
-    assert not result.ledger_paths["codex"].exists()
-    assert not result.final_ledger_path.exists()
-    assert result.reconcile_path.exists()
-    assert result.retrieval_log_path.exists()
-    assert result.manifest_path.exists()
-
-    reconcile = result.reconcile_path.read_text(encoding="utf-8")
-    assert "## union" in reconcile
-    assert "## fusion_candidates" in reconcile
-    assert "## notes" in reconcile
-    assert "keep / kill / add" not in reconcile
-
-    codex_dispatch = result.model_dispatch_paths["codex"].read_text(encoding="utf-8")
-    assert "## 1. 新 idea" in codex_dispatch
-    assert "## 2. 工作目录与资料位置" in codex_dispatch
-    assert "## 3. Stage 1 纪律" in codex_dispatch
-    assert "## 4. 相关卡片列表" in codex_dispatch
-    assert "## 5. 输出流程 + YAML schema + 生成偏好" in codex_dispatch
-    assert "第一轮回复必须是 Markdown 研究草稿" in codex_dispatch
-    assert "不要输出 YAML，不要写文件" in codex_dispatch
-    assert "用户明确同意后，再输出最终 YAML" in codex_dispatch
-    assert "只写自己的输出文件" not in codex_dispatch
-    assert "ledger_v1.codex.yaml" not in codex_dispatch
-    assert "ledger_v1.claude.yaml" not in codex_dispatch
-    assert "偏广度迁移" in codex_dispatch
-    assert f"- vault_root：`{vault}`" in codex_dispatch
-    assert "### Cross-card synthesis" in codex_dispatch
-    assert "不是约束或 keep/kill 规则" in codex_dispatch
-    assert "score_components_by_name" not in codex_dispatch
-    assert "dropped_cards" not in codex_dispatch
-    assert "输出自检" not in codex_dispatch
-
-
-def test_idea_dispatch_prompt_filters_truncated_synthesis(tmp_path: Path) -> None:
-    result = ExploreIdeaResult(
-        idea="下跌冲击后承接观察",
-        mode="start",
-        related_cards=[
-            ExploreIdeaCard(
-                path="40_papers/Paper - Example.md",
-                name="Example Card",
-                type="paper",
-                lifecycle="theoretical",
-                mechanism="microstructure",
-                factor_family="liquidity",
-                summary="一张测试卡。",
-                snippet="",
-                reasons=[],
-                transferable_moves=["id: move one_line: 可迁移动作。"],
-            )
-        ],
-        constraint_report={},
-        gpt_prompt="",
-        insight_brief=[
-            "因此承接信号必须在控制普通波动率暴露后单独检验，否则是必要步骤。",
-            "建议持有期覆盖1-",
-            "提示可在月度调仓节点",
-        ],
-        retrieval_diagnostics={},
-    )
-
-    dispatch = _render_idea_model_dispatch(
-        model="claude",
-        idea=result.idea,
-        result=result,
-        draft_dir=tmp_path,
-        vault_root=tmp_path / "quant-knowledge",
-    )
-
-    assert "- vault_root：" in dispatch
-    assert "### Cross-card synthesis" in dispatch
-    assert "不是约束或 keep/kill 规则" in dispatch
-    assert "必须在控制普通波动率暴露" not in dispatch
-    assert "否则是必要步骤" not in dispatch
-    assert "可尝试在控制普通波动率暴露" in dispatch
-    assert "对应的 concern 是可选构建分支" in dispatch
-    assert "建议持有期覆盖1-" not in dispatch
-    assert "提示可在月度调仓节点" not in dispatch
 
 
 def test_model_idea_exploration_prompt_matches_byte_golden() -> None:

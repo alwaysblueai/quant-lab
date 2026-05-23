@@ -263,8 +263,7 @@ alpha-lab web unified [--host HOST] [--port PORT] [--workspace-root DIR]
                       [--vault-root DIR] [--no-open-browser]
 ```
 
-Default: `127.0.0.1:8766`. `web cockpit` has been formally deprecated and is now
-only a compatibility alias that routes to `web unified` with a deprecation warning.
+Default: `127.0.0.1:8766`.
 
 ### Implementation constraints
 

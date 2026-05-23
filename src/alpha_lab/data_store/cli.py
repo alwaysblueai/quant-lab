@@ -1,22 +1,54 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Callable
 from pathlib import Path
-
-import pandas as pd
+from typing import TYPE_CHECKING, Any
 
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
 
-from .catalog import DataCatalog, SliceSpec
-from .local_zip import LocalZipAshareDailyIngestor
 from .slice_presets import (
     DEFAULT_SLICE_PRESET,
     SLICE_PRESETS,
     SlicePresetConfig,
     resolve_slice_window,
 )
-from .tushare import TushareIngestor
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from .catalog import DataCatalog, SliceSpec
+
+
+# Lazily resolved on first attribute access. Keeping these names addressable as
+# module attributes (rather than function-local imports) preserves the
+# monkeypatch surface that ``tests/test_data_store_cli.py`` relies on
+# (``monkeypatch.setattr("alpha_lab.data_store.cli.TushareIngestor", ...)``).
+# Tests that install a fake _before_ ``main()`` runs will hit the fake on
+# attribute access; the lazy resolver only fires when the attribute is
+# missing.
+_LAZY_CLI_EXPORTS: dict[str, tuple[str, str]] = {
+    "DataCatalog": ("alpha_lab.data_store.catalog", "DataCatalog"),
+    "SliceSpec": ("alpha_lab.data_store.catalog", "SliceSpec"),
+    "LocalZipAshareDailyIngestor": (
+        "alpha_lab.data_store.local_zip",
+        "LocalZipAshareDailyIngestor",
+    ),
+    "TushareIngestor": ("alpha_lab.data_store.tushare", "TushareIngestor"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    target = _LAZY_CLI_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(
+            f"module 'alpha_lab.data_store.cli' has no attribute {name!r}"
+        )
+    from importlib import import_module
+
+    submodule_path, attr = target
+    return getattr(import_module(submodule_path), attr)
 
 UNIVERSE_CHOICES = [
     "all_ashare",
@@ -313,6 +345,17 @@ def build_data_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # ``DataCatalog`` / ``LocalZipAshareDailyIngestor`` / ``TushareIngestor``
+    # resolve via this module's ``__getattr__`` (lazy import) — pulled into
+    # local bindings here so the dispatch code below can use the bare names.
+    # Tests that ``monkeypatch.setattr("alpha_lab.data_store.cli.X", fake)``
+    # before calling ``main()`` still take effect: ``sys.modules[__name__]``
+    # is the same object the monkeypatch wrote to.
+    _self = sys.modules[__name__]
+    DataCatalog = _self.DataCatalog  # noqa: N806
+    LocalZipAshareDailyIngestor = _self.LocalZipAshareDailyIngestor  # noqa: N806
+    TushareIngestor = _self.TushareIngestor  # noqa: N806
+
     parser = argparse.ArgumentParser(
         prog="alpha-lab data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -575,6 +618,8 @@ def _resolve_export_slice_spec(
     args: argparse.Namespace,
     catalog: DataCatalog,
 ) -> tuple[SliceSpec, SlicePresetConfig]:
+    from .catalog import SliceSpec
+
     fallback_end_date = args.end_date or catalog.latest_date("daily_bars")
     if fallback_end_date is None:
         raise AlphaLabDataError(

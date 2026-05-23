@@ -1,0 +1,15 @@
+{
+  "name": "signed_jump_neg_5d",
+  "description": "5-day rolling mean of intraday signed_jump (rv_pos - rv_neg)/rv, sign-flipped so that high factor value corresponds to long positions. Source column signed_jump comes from the joined prices+intraday dataset built by scripts/etl/build_prices_with_intraday.py. Sanity-IC over 2016-2025 vs next-day return: IC=-0.032, t=-13.3 (highly significant negative), so after sign flip the factor is expected to have positive long-side IC.",
+  "required_columns": [
+    "date",
+    "asset",
+    "signed_jump"
+  ],
+  "optional_columns": [],
+  "frequency": "daily",
+  "unavailable_data_policy": "When signed_jump is NaN (rv_5m below epsilon, or pre-listing / panel-missing rows broadcast NaN through intraday_features), the rolling mean stays NaN and the row is naturally dropped from cross-sectional ranking. No imputation.",
+  "pit_assumption": "signed_jump is computed strictly from same-day 09:30-15:00 minute bars; 5-day rolling mean uses days t-4..t inclusive. The factor value at date t is available at t close (15:00 local). Standard pipeline shift to next-day open is the responsibility of the case YAML target horizon, not this builder.",
+  "code": "def build_factor(frame):\n    \"\"\"Negated 5-day rolling mean of intraday signed_jump.\n\n    Hypothesis: a positive signed_jump (rv_pos > rv_neg) reflects upside\n    overshoot / asymmetric jump risk that mean-reverts within a few days.\n    The factor flips the sign so high values correspond to \"long\" candidates.\n\n    Inputs (from joined prices+intraday dataset):\n      - date (str), asset (str)\n      - signed_jump (float in [-1, 1])\n    Notes:\n      - Rolling per asset, min_periods=3 to allow factor to start within ~3\n        sessions of the universe inclusion date.\n      - Returns canonical 4-col long form (date, asset, factor, value);\n        the factor_recipe wrapper consumes (date, asset, value) and tags\n        factor name from the recipe.\n    \"\"\"\n\n    import numpy as np\n    import pandas as pd\n\n    window = 5\n    min_periods = 3\n\n    df = frame[[\"date\", \"asset\", \"signed_jump\"]].copy()\n    df[\"date\"] = pd.to_datetime(df[\"date\"], errors=\"coerce\")\n    df = (\n        df.dropna(subset=[\"date\", \"asset\"])\n        .sort_values([\"asset\", \"date\"], kind=\"mergesort\")\n        .reset_index(drop=True)\n    )\n\n    rolled = (\n        df.groupby(\"asset\", sort=False)[\"signed_jump\"]\n        .rolling(window=window, min_periods=min_periods)\n        .mean()\n        .reset_index(level=0, drop=True)\n    )\n    df[\"value\"] = -pd.to_numeric(rolled, errors=\"coerce\").replace(\n        [np.inf, -np.inf], np.nan\n    )\n    df[\"date\"] = df[\"date\"].dt.strftime(\"%Y-%m-%d\")\n    return df[[\"date\", \"asset\", \"value\"]]\n",
+  "created_at": "2026-05-10T22:15:00Z"
+}
