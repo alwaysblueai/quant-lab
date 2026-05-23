@@ -404,7 +404,10 @@ def _write_case_stable_promoted(case_root: Path) -> CampaignExampleCaseSpec:
             )
             ret = 0.0046 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            open_price = max(price * (0.998 + 0.0002 * ((idx + t) % 7)), 1.0)
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
 
     prices = pd.DataFrame(rows_price)
     universe = pd.DataFrame(
@@ -507,7 +510,10 @@ def _write_case_short_window_sensitive(case_root: Path) -> CampaignExampleCaseSp
             )
             ret = 0.0042 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            open_price = max(price * (0.998 + 0.0002 * ((idx + t) % 7)), 1.0)
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
             rows_factor.append(
                 {
                     "date": date,
@@ -584,7 +590,10 @@ def _write_case_triage_sensitive(case_root: Path) -> CampaignExampleCaseSpec:
             )
             ret = 0.0024 * pred + eps[t]
             price = max(1.0, price * (1.0 + ret))
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            open_price = max(price * (0.998 + 0.0002 * ((idx + t) % 7)), 1.0)
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
 
     for asset in assets:
         asset_latent = latent[asset]

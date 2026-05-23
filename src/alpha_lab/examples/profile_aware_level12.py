@@ -321,9 +321,12 @@ def _synthetic_case_tables(
             pred = latent[t - 1] if t > 0 else 0.0
             ret = 0.0018 * pred + rng.normal(0.0, 0.01)
             price = max(price * (1.0 + ret), 1.0)
+            open_price = max(price * (0.998 + 0.0002 * ((i + t) % 7)), 1.0)
             factor_val = latent[t] + rng.normal(0.0, 0.25)
 
-            rows_price.append({"date": date, "asset": asset, "close": float(price)})
+            rows_price.append(
+                {"date": date, "asset": asset, "open": float(open_price), "close": float(price)}
+            )
             rows_factor.append(
                 {
                     "date": date,
