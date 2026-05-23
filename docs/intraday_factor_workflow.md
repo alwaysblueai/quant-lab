@@ -33,10 +33,12 @@ python scripts/etl/build_factor_run_inputs.py \
     --factor signed_jump_neg_5d \
     --start-date 2020-01-01
 
-# 2. wire the printed paths into the case YAML (factor_input.mode: file)
+# 2. copy configs/real_cases/single_factor/_template_exploration.yaml
+#    to your own case file and wire the printed paths into
+#    `factor_input.mode: file` + `factor_input.path: ...`.
 # 3. run
 alpha-lab real-case single-factor run \
-    configs/real_cases/single_factor/signed_jump_neg_5d_v1.yaml \
+    configs/real_cases/single_factor/<your-case>.yaml \
     --evaluation-profile default_research \
     --render-report
 ```

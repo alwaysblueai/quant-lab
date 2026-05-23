@@ -8,7 +8,11 @@ from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.exceptions import AlphaLabDataError
-from alpha_lab.real_cases._cli_io import render_case_report, update_run_manifest
+from alpha_lab.real_cases._cli_io import (
+    finalize_contract_if_research_draft,
+    render_case_report,
+    update_run_manifest,
+)
 from alpha_lab.research_evaluation_config import (
     AVAILABLE_RESEARCH_EVALUATION_PROFILES,
     DEFAULT_RESEARCH_EVALUATION_CONFIG,
@@ -109,10 +113,17 @@ def main(argv: list[str] | None = None) -> int:
         result.artifact_paths["run_manifest"],
         render_meta,
     )
+    contract_rc = finalize_contract_if_research_draft(
+        output_dir=result.output_dir,
+        workflow="single_factor",
+        case_spec_path=args.spec_path,
+        evaluation_profile=args.evaluation_profile,
+        command=tuple(sys.argv),
+    )
 
     print("")
     print("  Workflow : real-case-single-factor")
-    print("  Status   : success")
+    print("  Status   : success" if contract_rc == 0 else "  Status   : contract_failed")
     print(f"  Case     : {result.spec.name}")
     print(f"  Output   : {result.output_dir}")
     print(f"  Manifest : {result.artifact_paths['run_manifest']}")
@@ -153,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Report Render Status: {manifest_payload.get('render_status')}")
     print(f"  Report Path         : {manifest_payload.get('rendered_report_path')}")
 
-    return 0
+    return contract_rc
 
 
 def _fmt_text(value: object) -> str:

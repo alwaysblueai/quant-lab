@@ -15,17 +15,16 @@ import pandas as pd
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
 from alpha_lab.campaigns._profile_helpers import (
-    _TRANSITION_DELTA_LABEL_IMPROVED,
     _TRANSITION_DELTA_LABEL_MIXED,
     _TRANSITION_DELTA_LABEL_STABLE,
-    _TRANSITION_DELTA_LABEL_WEAKENED,
     _TRANSITION_DELTA_LABELS,
-    _TRANSITION_DIRECTION_IMPROVED,
-    _TRANSITION_DIRECTION_STABLE,
-    _TRANSITION_DIRECTION_UNKNOWN,
-    _TRANSITION_DIRECTION_WEAKENED,
     _TRANSITION_STRENGTH_SCORE,
+    CampaignCaseProfileSummary,
+    ProfileCampaignSummary,
     _adjacent_profile_pairs,
+    _build_case_level12_transition_profile_delta,
+    _case_field_differences,
+    _case_profile_lookup,
     _case_transition_delta_label,
     _consistently_strong,
     _dominant_reduction_mode,
@@ -40,7 +39,6 @@ from alpha_lab.campaigns._profile_helpers import (
     _to_int_value,
     _transition_pair_proportion_matrix,
     _transition_profile_path_text,
-    _transition_step_direction,
 )
 from alpha_lab.campaigns.research_campaign_1 import (
     CampaignCaseResult,
@@ -111,47 +109,6 @@ class CampaignComparisonCase:
     case_name: str
     case_description: str
     spec_path: Path | None
-
-
-@dataclass(frozen=True)
-class CampaignCaseProfileSummary:
-    case_name: str
-    profile_name: str
-    status: str
-    output_dir: Path | None
-    run_manifest_path: Path | None
-    metrics_path: Path | None
-    summary_path: Path | None
-    experiment_card_path: Path | None
-    factor_verdict: str
-    factor_verdict_reasons: tuple[str, ...]
-    campaign_triage: str
-    campaign_triage_reasons: tuple[str, ...]
-    promotion_decision: str
-    promotion_reasons: tuple[str, ...]
-    promotion_blockers: tuple[str, ...]
-    level12_transition_label: str
-    level12_transition_reasons: tuple[str, ...]
-    portfolio_validation_status: str
-    portfolio_validation_recommendation: str
-    portfolio_validation_major_risks: tuple[str, ...]
-    factor_definition_json_path: Path | None = None
-    signal_validation_json_path: Path | None = None
-    portfolio_recipe_json_path: Path | None = None
-    backtest_result_json_path: Path | None = None
-
-
-@dataclass(frozen=True)
-class ProfileCampaignSummary:
-    profile_name: str
-    case_summaries: tuple[CampaignCaseProfileSummary, ...]
-    ranked_case_order: tuple[str, ...]
-    campaign_output_dir: Path | None
-    campaign_manifest_path: Path | None
-    campaign_results_path: Path | None
-    campaign_summary_path: Path | None
-    campaign_index_path: Path | None
-    campaign_report_path: Path | None
 
 
 @dataclass(frozen=True)
@@ -1348,87 +1305,6 @@ def _write_case_matrix_csv(
     pd.DataFrame(rows).sort_values(["case_name", "profile_name"], kind="mergesort").to_csv(
         path, index=False
     )
-
-
-def _case_profile_lookup(
-    profile_campaigns: tuple[ProfileCampaignSummary, ...],
-) -> dict[str, dict[str, CampaignCaseProfileSummary]]:
-    out: dict[str, dict[str, CampaignCaseProfileSummary]] = {}
-    for campaign in profile_campaigns:
-        for row in campaign.case_summaries:
-            out.setdefault(row.case_name, {})[campaign.profile_name] = row
-    return out
-
-
-def _case_field_differences(
-    profile_rows: dict[str, CampaignCaseProfileSummary],
-    *,
-    fields: tuple[str, ...],
-) -> dict[str, dict[str, str]]:
-    diffs: dict[str, dict[str, str]] = {}
-    for field in fields:
-        values = {
-            profile: str(getattr(row, field)) for profile, row in sorted(profile_rows.items())
-        }
-        if len(set(values.values())) > 1:
-            diffs[field] = values
-    return diffs
-
-
-def _build_case_level12_transition_profile_delta(
-    profile_rows: dict[str, CampaignCaseProfileSummary],
-    *,
-    profiles: list[str],
-) -> dict[str, object]:
-    profile_transition_labels = {
-        profile: (
-            profile_rows[profile].level12_transition_label if profile in profile_rows else "N/A"
-        )
-        for profile in profiles
-    }
-    profile_pair_directions: list[dict[str, str]] = []
-    has_weakened = False
-    has_improved = False
-    has_unknown = False
-
-    for from_profile, to_profile in _adjacent_profile_pairs(profiles):
-        from_label = profile_transition_labels.get(from_profile, "N/A")
-        to_label = profile_transition_labels.get(to_profile, "N/A")
-        direction = _transition_step_direction(from_label, to_label)
-        profile_pair_directions.append(
-            {
-                "from_profile": from_profile,
-                "to_profile": to_profile,
-                "from_label": from_label,
-                "to_label": to_label,
-                "direction": direction,
-            }
-        )
-        if direction == _TRANSITION_DIRECTION_WEAKENED:
-            has_weakened = True
-        elif direction == _TRANSITION_DIRECTION_IMPROVED:
-            has_improved = True
-        elif direction == _TRANSITION_DIRECTION_UNKNOWN:
-            has_unknown = True
-
-    if has_unknown:
-        delta_label = _TRANSITION_DELTA_LABEL_MIXED
-    elif not profile_pair_directions or all(
-        row["direction"] == _TRANSITION_DIRECTION_STABLE for row in profile_pair_directions
-    ):
-        delta_label = _TRANSITION_DELTA_LABEL_STABLE
-    elif has_weakened and not has_improved:
-        delta_label = _TRANSITION_DELTA_LABEL_WEAKENED
-    elif has_improved and not has_weakened:
-        delta_label = _TRANSITION_DELTA_LABEL_IMPROVED
-    else:
-        delta_label = _TRANSITION_DELTA_LABEL_MIXED
-
-    return {
-        "delta_label": delta_label,
-        "profile_transition_labels": profile_transition_labels,
-        "profile_pair_directions": profile_pair_directions,
-    }
 
 
 def _build_level12_transition_profile_delta_matrix(

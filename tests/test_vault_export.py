@@ -120,3 +120,91 @@ def test_vault_export_invalid_path_is_handled_gracefully(tmp_path: Path) -> None
     assert not result.success
     assert result.status == "failed"
     assert result.error is not None
+
+
+def _write_backend_contract_sidecars(src_dir: Path) -> None:
+    (src_dir / "backend_run_receipt.json").write_text(
+        '{"status": "success"}', encoding="utf-8"
+    )
+    (src_dir / "comparison_summary.json").write_text(
+        '{"status": "not_available"}', encoding="utf-8"
+    )
+
+
+def test_vault_export_versioned_includes_backend_contract_sidecars(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir(parents=True, exist_ok=True)
+    source_paths = _write_sources(tmp_path)
+    _write_backend_contract_sidecars(tmp_path / "source")
+
+    result = export_to_vault(
+        source_paths,
+        case_name="contract_case_v1",
+        vault_root=vault_root,
+        mode="versioned",
+    )
+
+    assert result.success
+    case_dir = vault_root / "50_experiments" / "contract_case_v1"
+    assert (case_dir / "latest_backend_run_receipt.json").exists()
+    assert (case_dir / "latest_comparison_summary.json").exists()
+    versioned_receipt = list(case_dir.glob("*__backend_run_receipt.json"))
+    versioned_comparison = list(case_dir.glob("*__comparison_summary.json"))
+    assert len(versioned_receipt) == 1
+    assert len(versioned_comparison) == 1
+
+
+def test_vault_export_overwrite_replaces_backend_contract_sidecars(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir(parents=True, exist_ok=True)
+    source_a = _write_sources(tmp_path / "a", content="first")
+    (tmp_path / "a" / "source" / "backend_run_receipt.json").write_text(
+        '{"status": "success", "round": 1}', encoding="utf-8"
+    )
+    (tmp_path / "a" / "source" / "comparison_summary.json").write_text(
+        '{"status": "not_available", "round": 1}', encoding="utf-8"
+    )
+    source_b = _write_sources(tmp_path / "b", content="second")
+    (tmp_path / "b" / "source" / "backend_run_receipt.json").write_text(
+        '{"status": "failed", "round": 2}', encoding="utf-8"
+    )
+    (tmp_path / "b" / "source" / "comparison_summary.json").write_text(
+        '{"status": "available", "round": 2}', encoding="utf-8"
+    )
+
+    export_to_vault(
+        source_a, case_name="contract_case_ow", vault_root=vault_root, mode="overwrite"
+    )
+    export_to_vault(
+        source_b, case_name="contract_case_ow", vault_root=vault_root, mode="overwrite"
+    )
+
+    case_dir = vault_root / "50_experiments" / "contract_case_ow"
+    latest_receipt = case_dir / "latest_backend_run_receipt.json"
+    latest_comparison = case_dir / "latest_comparison_summary.json"
+    assert '"round": 2' in latest_receipt.read_text(encoding="utf-8")
+    assert '"round": 2' in latest_comparison.read_text(encoding="utf-8")
+
+
+def test_vault_export_omits_sidecars_when_absent(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir(parents=True, exist_ok=True)
+    source_paths = _write_sources(tmp_path)
+
+    result = export_to_vault(
+        source_paths,
+        case_name="no_contract_case",
+        vault_root=vault_root,
+        mode="versioned",
+    )
+
+    assert result.success
+    case_dir = vault_root / "50_experiments" / "no_contract_case"
+    assert not (case_dir / "latest_backend_run_receipt.json").exists()
+    assert not (case_dir / "latest_comparison_summary.json").exists()
+    assert not list(case_dir.glob("*__backend_run_receipt.json"))
+    assert not list(case_dir.glob("*__comparison_summary.json"))

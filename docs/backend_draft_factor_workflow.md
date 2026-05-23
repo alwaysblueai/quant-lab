@@ -161,6 +161,22 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case single-
 `provenance` 缺失时仅产生 warning（兼容旧的 pre-protocol 因子），但所有新走
 `alpha-lab idea distribute` 流的因子必须有 provenance。
 
+## 后端契约自动化
+
+`alpha-lab real-case single-factor run` 在收尾时会自动检测本轮是否走的是
+`custom_factors/research/<factor>/factor.json`，若是则按
+`docs/backend_run_contract.md` 中 `backend_run_contract_v1` 跑完整收尾：
+
+- 写 `comparison_summary.json`、`backend_run_receipt.json`
+- 把 `backend_run_contract.{contract_version,status,issue_count}` 与 sidecar
+  路径回挂到 `run_manifest.json`
+- audit 失败时仍然写出两份 sidecar（`status=failed` + 完整 `issues`），
+  并以非零退出码返回——Codex GUI 看到的就是 sidecar 里的 issues，不需要再
+  自己写临时脚本对比 artifact。
+
+非 research draft run（普通 case YAML、promoted 因子）不会触发契约收尾，
+行为与历史一致。
+
 ## 结果分析
 
 每轮运行后，Codex GUI 必须读取并总结：

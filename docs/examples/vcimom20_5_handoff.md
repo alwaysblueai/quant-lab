@@ -93,7 +93,11 @@ instead of cloning a duplicate YAML file.
 
 - `factor_input_mode`: `recipe`
 - `candidate_case_name`: `vcimom20_5_webui_demo`
-- `candidate_spec_path`: `/home/yukun_zhao/quant/projects/alpha-lab/configs/real_cases/single_factor/vcimom20_5_webui_baostock.yaml`
+- `candidate_spec_path`: *(original demo YAML
+  `configs/real_cases/single_factor/vcimom20_5_webui_baostock.yaml` was
+  retired in the 2026-05 cleanup; copy
+  `configs/real_cases/single_factor/_template_exploration.yaml` and
+  rewire `factor_input` per the original handoff if you want to re-run.)*
 - `notes_for_codex_or_claude`:
   - use `BaoStock`
   - start with a short runtime window such as `2024-01-01` to `2024-03-31`
@@ -110,9 +114,8 @@ instead of cloning a duplicate YAML file.
 
 ## Bound Spec
 
-Use this existing runnable spec:
-
-- [vcimom20_5_webui_baostock.yaml](/home/yukun_zhao/quant/projects/alpha-lab/configs/real_cases/single_factor/vcimom20_5_webui_baostock.yaml)
-
-This example intentionally reuses the existing spec rather than creating a second
-equivalent YAML file.
+The original runnable spec (`vcimom20_5_webui_baostock.yaml`) was retired in
+the 2026-05 backend cleanup. Re-running this handoff requires copying
+`configs/real_cases/single_factor/_template_exploration.yaml` and rewiring
+the fields above. This example intentionally reused an existing spec rather
+than creating a second equivalent YAML file.

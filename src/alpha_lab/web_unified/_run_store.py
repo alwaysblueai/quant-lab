@@ -4,9 +4,8 @@ Holds:
 
 - ``_RunRecord``: dataclass for a single run's mutable state (status,
   progress, artifacts, summary).
-- ``_InputBundleCacheEntry`` + ``_RunStore``: in-memory queue, dispatcher
-  thread, single-factor + model-factor execution drivers, input-bundle
-  cache.
+- ``_RunStore``: in-memory queue, dispatcher thread, single-factor +
+  model-factor execution drivers.
 
 The few symbols this module needs from the rest of ``web_unified``
 (``_resolve_run_artifact_for_endpoint``, ``_extract_metrics_summary``,
