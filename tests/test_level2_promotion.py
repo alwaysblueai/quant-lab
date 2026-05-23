@@ -74,6 +74,16 @@ def test_level2_promotion_blocks_material_neutralization_weakness() -> None:
     assert "blocked by weak neutralized evidence" in decision.blockers
 
 
+def test_level2_promotion_blocks_failing_data_quality() -> None:
+    metrics = _base_metrics()
+    metrics["data_quality_status"] = "fail"
+
+    decision = build_level2_promotion(metrics)
+
+    assert decision.label == "Blocked from Level 2"
+    assert "blocked by failing data-quality checks" in decision.blockers
+
+
 def test_level2_promotion_holds_when_neutralization_support_is_missing() -> None:
     metrics = _base_metrics()
     metrics["neutralization_comparison_flags"] = []
