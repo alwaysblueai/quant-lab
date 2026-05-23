@@ -6045,6 +6045,7 @@
       const policyText = backtestNavRows.length
         ? (navIsSpread ? " · backtest_result NAV=Q5-Q1 多空" : " · backtest_result NAV")
         : ` · 按 ${effectiveStep} 个交易日非重叠抽样（rebalance=${rebalanceStep} / label_horizon=${labelHorizon}）`;
+      const oosResetApplied = Boolean(options && options.oosReset && splitDate);
       const splitText = `${splitDate ? ` · OOS=${splitDate}` : ""}${oosResetApplied ? " · OOS reset NAV" : ""}`;
       const splitCoverageText = splitCoverageMetaText(
         splitCoverageFromDatedRows(navRows, splitDate),
