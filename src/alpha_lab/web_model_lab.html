@@ -6045,7 +6045,7 @@
       const policyText = backtestNavRows.length
         ? (navIsSpread ? " · backtest_result NAV=Q5-Q1 多空" : " · backtest_result NAV")
         : ` · 按 ${effectiveStep} 个交易日非重叠抽样（rebalance=${rebalanceStep} / label_horizon=${labelHorizon}）`;
-      const splitText = splitDate ? ` · OOS=${splitDate}` : "";
+      const splitText = `${splitDate ? ` · OOS=${splitDate}` : ""}${oosResetApplied ? " · OOS reset NAV" : ""}`;
       const splitCoverageText = splitCoverageMetaText(
         splitCoverageFromDatedRows(navRows, splitDate),
         splitDate,
@@ -6322,6 +6322,7 @@
         cardClass: "",
         height: null,
         splitDate: "",
+        oosReset: false,
         strictReturnUnits: true,
         maxAbsSinglePeriodReturn: 0.50,
         groupFieldCandidates: [
@@ -6410,9 +6411,15 @@
       }
       const dates = Array.from(byDate.keys()).sort();
       const safeSampleStep = Math.max(1, Math.floor(toNum(opts.sampleStep) || 1));
-      const plotDates = opts.cumulative && safeSampleStep > 1
+      const sampledDates = opts.cumulative && safeSampleStep > 1
         ? dates.filter((_, idx) => idx % safeSampleStep === 0)
         : dates;
+      const splitDate = normalizeOverviewDate(opts.splitDate);
+      const oosPlotDates = opts.oosReset && splitDate
+        ? sampledDates.filter((date) => date >= splitDate)
+        : [];
+      const oosResetApplied = opts.cumulative && opts.oosReset && oosPlotDates.length > 0;
+      const plotDates = oosResetApplied ? oosPlotDates : sampledDates;
       const indexByDate = new Map();
       plotDates.forEach((date, idx) => indexByDate.set(date, idx + 1));
 
@@ -6509,7 +6516,6 @@
       }
       const first = plotDates[0];
       const last = plotDates[plotDates.length - 1];
-      const splitDate = normalizeOverviewDate(opts.splitDate);
       const splitMarker = buildDateMarker(plotDates, splitDate, "OOS");
       const chartSeries = splitDate ? splitChartLines(series, splitDate) : series;
       const splitCoverageRows = plotDates.map((date) => ({
@@ -8179,7 +8185,7 @@ ${styleText}
         ${buildFailurePanel(snapshotData.failure || null, runId)}
         ${buildIntegrityPanel(snapshotData.integrity || {})}
         ${buildOverviewSplitCoverageNotice({ splitDate, icRows, groupRows, backtest })}
-        <div class="overview-primary-grid">${buildEquityAndDrawdownCards(backtest, groupRows, { splitDate, turnoverRows, summary })}${buildIcDecayCard(decayRows)}${buildGroupReturnCards(groupRows, { ...OVERVIEW_TALL_CHART_OPTIONS, sampleStep: overviewEffectiveStep, includeSpread: false, splitDate })}${buildLongShortSpreadCard(groupRows, { ...OVERVIEW_TALL_CHART_OPTIONS, sampleStep: overviewEffectiveStep, splitDate, backtest, suppressDuplicateBacktestNav: true })}</div>
+        <div class="overview-primary-grid">${buildEquityAndDrawdownCards(backtest, groupRows, { splitDate, turnoverRows, summary })}${buildIcDecayCard(decayRows)}${buildGroupReturnCards(groupRows, { ...OVERVIEW_TALL_CHART_OPTIONS, sampleStep: overviewEffectiveStep, includeSpread: false, splitDate, oosReset: true })}${buildLongShortSpreadCard(groupRows, { ...OVERVIEW_TALL_CHART_OPTIONS, sampleStep: overviewEffectiveStep, splitDate, backtest, suppressDuplicateBacktestNav: true })}</div>
         <div class="overview-chart-grid" style="margin-top:10px">
           ${buildPortfolioValidationCards(snapshotData.portfolioValidation || null)}
           ${buildPortfolioCostSensitivityCard(snapshotData.portfolioValidation || null, { summary, backtest })}

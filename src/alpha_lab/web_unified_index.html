@@ -7414,12 +7414,22 @@ ${styleText}
           return "";
         }
         const quantileReturnLines = buildNonOverlappingGroupLines(groupSeries.lines, overviewEffectiveStep);
-        const validation = validateQuantileReturnInputs(quantileReturnLines);
+        const quantileOosResetLines = splitDate
+          ? quantileReturnLines
+            .map((line) => ({
+              ...line,
+              points: (Array.isArray(line.points) ? line.points : []).filter((point) => isOosPoint(point, splitDate)),
+            }))
+            .filter((line) => line.points.length >= 2)
+          : [];
+        const quantileOosResetApplied = quantileOosResetLines.length > 0;
+        const quantileReturnLinesForNav = quantileOosResetApplied ? quantileOosResetLines : quantileReturnLines;
+        const validation = validateQuantileReturnInputs(quantileReturnLinesForNav);
         if (!validation.ok) {
           addMissingDiagnostic(validation.reason);
           return "";
         }
-        const quantileNavDates = extractDatesFromLines(quantileReturnLines, groupSeries.orderedDates);
+        const quantileNavDates = extractDatesFromLines(quantileReturnLinesForNav, groupSeries.orderedDates);
         const quantileNavColor = (label, idx) => {
           const match = String(label || "").match(/Q\s*([0-9]+)/i);
           const quantile = match ? Number(match[1]) : idx + 1;
@@ -7432,7 +7442,7 @@ ${styleText}
           };
           return palette[quantile] || ["var(--bad)", "var(--warn)", "var(--muted)", "var(--focus)", "var(--ok)"][idx % 5];
         };
-        const validLines = quantileReturnLines
+        const validLines = quantileReturnLinesForNav
           .map((line, idx) => ({
             label: `${line.label} NAV`,
             color: quantileNavColor(line.label, idx),
@@ -7443,7 +7453,7 @@ ${styleText}
 	          addMissingDiagnostic("Quantile cumulative returns unavailable: missing group return series or fewer than two valid NAV points.");
 	          return "";
 	        }
-	        const topSourceLine = quantileReturnLines[quantileReturnLines.length - 1] || null;
+	        const topSourceLine = quantileReturnLinesForNav[quantileReturnLinesForNav.length - 1] || null;
 	        const topNavLine = validLines[validLines.length - 1] || null;
 	        const topStats = topSourceLine
 	          ? computeOverviewReturnStatsFromReturns(
@@ -7475,6 +7485,7 @@ ${styleText}
 	              buildDateWindow(quantileNavDates).label || groupWindow.label,
 	              `Compounds non-overlapping group_return every ${overviewEffectiveStep} trading date(s); raw group_return is ${overviewLabelHorizon}D forward return.`,
 	              splitDate ? `OOS start: ${splitDate}` : "",
+	              quantileOosResetApplied ? "OOS reset NAV: quantile curves restart at 1.0 from the OOS window." : "",
 	            ]),
 	            showPointTooltips: true,
 	            footerHtml: quantileSanityFooter,

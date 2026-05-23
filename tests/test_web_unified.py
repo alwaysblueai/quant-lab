@@ -1642,6 +1642,8 @@ def test_index_html_includes_new_diagnostics_renderers() -> None:
     assert "<th>Module</th><th>Issue</th><th>Evidence</th><th>Impact</th><th>Action</th>" in html
     assert "inspect group_returns.csv / quantile_returns.csv" in html
     assert "Quantile Cumulative NAV" in html
+    assert "quantileOosResetApplied" in html
+    assert "OOS reset NAV: quantile curves restart at 1.0 from the OOS window." in html
     assert "Quantile NAV hidden" in html
     assert "<th>Notes</th>" in html
     assert "展开查看分位组累计净值和 underwater 曲线等组合端细节" in html
@@ -2147,6 +2149,8 @@ def test_model_lab_html_samples_overview_nav_by_rebalance_frequency() -> None:
         in html
     )
     assert "sampleStep: overviewEffectiveStep" in html
+    assert "oosReset: true" in html
+    assert "OOS reset NAV" in html
     assert "按可用日期逐日取点" in html
     assert (
         "buildEquityAndDrawdownCards(backtest, groupRows, { splitDate, turnoverRows, summary })"

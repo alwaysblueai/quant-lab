@@ -116,6 +116,12 @@ def build_backtest_summary_payload(
         periods_per_year=effective_periods_per_year,
     )
     nav_points = _nav_points(stats_series)
+    contribution_diagnostics = build_group_contribution_diagnostics(
+        group_returns_df,
+        rebalance_frequency=rebalance_frequency,
+        label_horizon=safe_label_horizon,
+        metrics_for_payload=metrics_for_payload,
+    )
 
     summary: dict[str, object] = {
         "annualized_return": _safe_float(stats.get("annualized_return")),
@@ -182,6 +188,7 @@ def build_backtest_summary_payload(
         "statistics_series_policy": "rebalance_sampled_non_overlapping_forward_returns",
         "statistics_rebalance_step": effective_step,
         "statistics_periods_per_year": effective_periods_per_year,
+        "contribution_diagnostics": contribution_diagnostics,
     }
 
     fallback_derived_fields = [
@@ -269,6 +276,95 @@ def build_group_nav_table(
     if not rows:
         return pd.DataFrame(columns=columns)
     return pd.DataFrame(rows, columns=columns)
+
+
+def build_group_contribution_diagnostics(
+    group_returns_df: pd.DataFrame,
+    *,
+    rebalance_frequency: str,
+    label_horizon: int = 1,
+    metrics_for_payload: Mapping[str, object] | None = None,
+    top_n_dates: int = 10,
+) -> dict[str, object]:
+    """Summarize which years and dates drive quantile NAV paths.
+
+    The diagnostic uses the same non-overlapping sampling step as
+    ``build_group_nav_table`` so H-day labels are not over-compounded.
+    """
+
+    required = {"date", "group", "group_return"}
+    if not required.issubset(set(group_returns_df.columns)):
+        return {}
+
+    frame = group_returns_df.copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["group"] = pd.to_numeric(frame["group"], errors="coerce")
+    frame["group_return"] = pd.to_numeric(frame["group_return"], errors="coerce")
+    frame = frame.dropna(subset=["date", "group", "group_return"])
+    if frame.empty:
+        return {}
+
+    per_bucket = (
+        frame.groupby(["date", "group"], sort=True, as_index=False)["group_return"]
+        .mean()
+        .sort_values(["date", "group"], kind="mergesort")
+    )
+    rows: list[tuple[pd.Timestamp, float, float, float]] = []
+    for date, block in per_bucket.groupby("date", sort=True):
+        if block["group"].nunique() < 2:
+            continue
+        top = float(block.iloc[-1]["group_return"])
+        bottom = float(block.iloc[0]["group_return"])
+        group_avg = float(block["group_return"].mean())
+        rows.append((pd.Timestamp(date), top, top - group_avg, top - bottom))
+    if not rows:
+        return {}
+
+    index = pd.DatetimeIndex([row[0] for row in rows])
+    series_by_name = {
+        "top_absolute": pd.Series([row[1] for row in rows], index=index, dtype=float),
+        "top_minus_group_average": pd.Series([row[2] for row in rows], index=index, dtype=float),
+        "top_minus_bottom": pd.Series([row[3] for row in rows], index=index, dtype=float),
+    }
+
+    rebalance_step = max(1, _rebalance_step(rebalance_frequency))
+    safe_label_horizon = max(1, int(label_horizon)) if label_horizon else 1
+    sample_step = max(rebalance_step, safe_label_horizon)
+    oos_start = _split_oos_start(metrics_for_payload or {})
+    top_n = max(1, int(top_n_dates))
+
+    series_summaries: list[dict[str, object]] = []
+    annual_contribution: list[dict[str, object]] = []
+    top_positive_dates: list[dict[str, object]] = []
+    top_negative_dates: list[dict[str, object]] = []
+
+    for name, raw_series in series_by_name.items():
+        sampled = _sample_rebalance_series(raw_series, step=sample_step)
+        if sampled.empty:
+            continue
+        series_summaries.append(_contribution_series_summary(name, sampled, oos_start=oos_start))
+        annual_contribution.extend(_annual_contribution_rows(name, sampled))
+        top_positive_dates.extend(
+            _top_contribution_date_rows(name, sampled, ascending=False, limit=top_n)
+        )
+        top_negative_dates.extend(
+            _top_contribution_date_rows(name, sampled, ascending=True, limit=top_n)
+        )
+
+    if not series_summaries:
+        return {}
+
+    return {
+        "source": "group_returns_non_overlapping",
+        "sample_step": sample_step,
+        "rebalance_step": rebalance_step,
+        "label_horizon": safe_label_horizon,
+        "oos_start": oos_start,
+        "series": series_summaries,
+        "annual_contribution": annual_contribution,
+        "top_positive_dates": top_positive_dates,
+        "top_negative_dates": top_negative_dates,
+    }
 
 
 def _long_short_series(group_returns_df: pd.DataFrame) -> pd.Series:
@@ -420,6 +516,120 @@ def _nav_points(series: pd.Series) -> list[list[object]]:
         return []
     nav = (1.0 + clean).cumprod()
     return [[idx.strftime("%Y-%m-%d"), float(value)] for idx, value in nav.items()]
+
+
+def _split_oos_start(metrics: Mapping[str, object]) -> str | None:
+    split_contract = metrics.get("split_contract")
+    if isinstance(split_contract, Mapping):
+        text = _safe_text(split_contract.get("oos_start"))
+        if text:
+            return text
+    for key in ("oos_start", "split_oos_start"):
+        text = _safe_text(metrics.get(key))
+        if text:
+            return text
+    return None
+
+
+def _contribution_series_summary(
+    name: str,
+    series: pd.Series,
+    *,
+    oos_start: str | None,
+) -> dict[str, object]:
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    if clean.empty:
+        return {
+            "name": name,
+            "n_periods": 0,
+            "full_total_return": None,
+            "is_total_return": None,
+            "oos_reset_total_return": None,
+            "full_nav_terminal": None,
+            "is_nav_terminal": None,
+            "oos_reset_nav_terminal": None,
+        }
+    is_series = clean
+    oos_series = pd.Series(dtype=float)
+    if oos_start:
+        start = pd.Timestamp(oos_start)
+        is_series = clean[clean.index < start]
+        oos_series = clean[clean.index >= start]
+    return {
+        "name": name,
+        "n_periods": int(len(clean)),
+        "full_total_return": _series_total_return(clean),
+        "is_total_return": _series_total_return(is_series) if oos_start else None,
+        "oos_reset_total_return": _series_total_return(oos_series) if oos_start else None,
+        "full_nav_terminal": _series_nav_terminal(clean),
+        "is_nav_terminal": _series_nav_terminal(is_series) if oos_start else None,
+        "oos_reset_nav_terminal": _series_nav_terminal(oos_series) if oos_start else None,
+    }
+
+
+def _annual_contribution_rows(name: str, series: pd.Series) -> list[dict[str, object]]:
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    if clean.empty:
+        return []
+    rows: list[dict[str, object]] = []
+    for year, block in clean.groupby(clean.index.year, sort=True):
+        rows.append(
+            {
+                "series": name,
+                "year": str(int(year)),
+                "period_count": int(len(block)),
+                "total_return": _series_total_return(block),
+                "log_return": _series_log_return(block),
+                "mean_period_return": _safe_float(float(block.mean())),
+            }
+        )
+    return rows
+
+
+def _top_contribution_date_rows(
+    name: str,
+    series: pd.Series,
+    *,
+    ascending: bool,
+    limit: int,
+) -> list[dict[str, object]]:
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    clean = clean[clean > -1.0]
+    if clean.empty:
+        return []
+    ranked = clean.sort_values(ascending=ascending, kind="mergesort").head(limit)
+    return [
+        {
+            "series": name,
+            "date": idx.strftime("%Y-%m-%d"),
+            "period_return": _safe_float(float(value)),
+            "log_return": _safe_float(float(math.log1p(float(value)))),
+        }
+        for idx, value in ranked.items()
+    ]
+
+
+def _series_nav_terminal(series: pd.Series) -> float | None:
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    clean = clean[clean > -1.0]
+    if clean.empty:
+        return None
+    return _safe_float(float((1.0 + clean).prod()))
+
+
+def _series_total_return(series: pd.Series) -> float | None:
+    nav_terminal = _series_nav_terminal(series)
+    if nav_terminal is None:
+        return None
+    return _safe_float(float(nav_terminal - 1.0))
+
+
+def _series_log_return(series: pd.Series) -> float | None:
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    clean = clean[clean > -1.0]
+    if clean.empty:
+        return None
+    return _safe_float(float(clean.map(math.log1p).sum()))
 
 
 
