@@ -1191,3 +1191,72 @@ def test_real_case_model_factor_cli_finalizes_contract_for_research_draft(
     contract = manifest["backend_run_contract"]
     assert isinstance(contract, dict)
     assert contract["status"] == "passed"
+
+
+def test_real_case_model_factor_cli_writes_failed_receipt_on_memory_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0: a model-factor draft run that trips the RSS budget writes the standard
+    memory_budget_exceeded failed receipt (mirrors the single-factor path)."""
+    import alpha_lab.real_cases.model_factor.cli as mf_cli
+
+    candidate_name = "e2e_model_memory_candidate"
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name=candidate_name)
+    payload = _model_candidate_payload(spec_path, candidate_name)
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    def _raise_memory_error(*_: object, **__: object) -> object:
+        raise AlphaLabMemoryError(
+            "run memory budget exceeded at stage 'train_model'",
+            stage="train_model",
+            peak_rss_mb=18000.0,
+            max_rss_mb=15000.0,
+            resource_usage={
+                "schema_version": "1.0.0",
+                "artifact_type": "alpha_lab_resource_usage",
+                "monitor_available": True,
+                "max_rss_mb_budget": 15000.0,
+                "peak_rss_mb": 18000.0,
+                "stage_rss_mb": {"run_start": 200.0, "train_model": 18000.0},
+                "note": "soft guard",
+            },
+        )
+
+    monkeypatch.setattr(mf_cli, "run_model_factor_case", _raise_memory_error)
+
+    with pytest.raises(SystemExit) as excinfo:
+        mf_cli.main(
+            [
+                "run",
+                str(spec_path),
+                "--draft-model-candidate",
+                str(candidate_json),
+                "--evaluation-profile",
+                "exploratory_screening",
+            ]
+        )
+    assert excinfo.value.code == 1
+
+    output_dir = tmp_path / "outputs" / f"demo_{candidate_name}_model_factor"
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "model_factor"
+    assert receipt["status"] == "failed"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    details = cast(Mapping[str, object], errors[0]["details"])
+    assert details["stage"] == "train_model"
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    # The snapshot carried by the error also lands as resource_usage.json.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert resource_usage["stage_rss_mb"]["train_model"] == 18000.0

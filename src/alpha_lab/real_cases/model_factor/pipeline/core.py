@@ -46,6 +46,7 @@ from alpha_lab.research_integrity.leakage_checks import (
     check_no_future_dates_in_input,
 )
 from alpha_lab.research_integrity.reporting import build_integrity_report
+from alpha_lab.run_memory import RunMemoryMonitor
 from alpha_lab.splits import (
     TimeSeriesSplitContract,
     build_strict_split_contract_check_result,
@@ -148,6 +149,14 @@ def run_model_factor_case(
         integrity_checks.append(check)
         raise_on_hard_failures((check,))
 
+    # Soft RSS budget (ALPHA_LAB_MAX_RSS_MB), sampled at stage boundaries. This
+    # mirrors the single-factor pipeline so a wide-feature model run fails with an
+    # auditable AlphaLabMemoryError (handled by the CLI's memory_budget_exceeded
+    # receipt path) instead of being silently OOM-killed. Telemetry only; the
+    # diagnostics observer and training/selection logic are untouched.
+    memory_monitor = RunMemoryMonitor.from_env(label="")
+    memory_monitor.sample("run_start")
+
     try:
         _emit_progress("读取模型因子实验合同文件", 3)
         with diagnostics.stage("spec_load") as spec_stage:
@@ -158,6 +167,7 @@ def run_model_factor_case(
                 spec = load_model_factor_case_spec(spec_path)
             evaluation_config = get_research_evaluation_config(evaluation_profile)
             output_dir = _resolve_case_output_dir(spec, output_root_dir=output_root_dir)
+            memory_monitor.label = spec.name
             preparation_cache_dir = _resolve_preparation_cache_dir(
                 output_dir,
                 cache_root_dir=cache_root_dir,
@@ -495,6 +505,8 @@ def run_model_factor_case(
         else:
             features_for_build = features
         known_at_col = resolved_feature_availability.known_at_col
+        memory_monitor.sample("load_inputs")
+        memory_monitor.check("load_inputs")
         build_result = build_model_factor(
             features_for_build,
             prices,
@@ -524,6 +536,11 @@ def run_model_factor_case(
             progress_callback=_emit_training_progress,
         )
         integrity_checks.extend(build_result.integrity_checks)
+        # Sample before the wide feature matrix is released so the reading reflects
+        # the post-training peak (covers prepare_dataset / build_labels / training,
+        # which run inside build_model_factor's own diagnostics stages).
+        memory_monitor.sample("train_model")
+        memory_monitor.check("train_model")
         # The wide feature matrix is no longer needed after training and manifest
         # summarization. Release it before evaluation/artifact export to reduce
         # peak RSS for large model-lab runs.
@@ -681,6 +698,8 @@ def run_model_factor_case(
             output_dir=output_dir,
             status="succeeded",
         )
+        memory_monitor.sample("evaluate")
+        memory_monitor.check("evaluate")
         with diagnostics.stage("artifact_export") as export_stage:
             artifact_paths = export_artifact_bundle(
                 spec=spec,
@@ -713,6 +732,9 @@ def run_model_factor_case(
             output_dir=output_dir,
             diagnostics_payload=diagnostics_payload,
         )
+
+        memory_monitor.sample("artifacts_exported")
+        memory_monitor.write_resource_usage(output_dir)
 
         return ModelFactorCaseRunResult(
             spec=spec,
