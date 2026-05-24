@@ -193,3 +193,27 @@ def test_custom_factor_source_passes_provenance_to_audit(tmp_path: Path) -> None
     audit = source.to_audit_dict()
     assert "provenance" in audit
     assert audit["provenance"]["idea_id"] == "20260511T130000Z__audited"
+
+
+def test_validator_and_loader_code_sha256_agree_with_trailing_whitespace(
+    tmp_path: Path,
+) -> None:
+    """P1: validate-draft-factor and the registry loader must hash the same bytes.
+
+    The loader hashes the raw ``code`` field; the validator must too. Code with
+    trailing whitespace previously diverged (validator stripped, loader did not),
+    so validation.code_sha256 != custom_factor_source.code_sha256 downstream.
+    """
+    from alpha_lab.custom_factors import read_custom_factor_source
+
+    code_with_trailing_ws = VALID_CODE + "\n\n"
+    factor_json = _write_factor_json(
+        tmp_path, "sha_consistency", code_with_trailing_ws, required=["close", "volume"]
+    )
+
+    result = validate_draft_factor_file(factor_json)
+    source = read_custom_factor_source(factor_json)
+
+    assert result.ok
+    assert result.code_sha256 == source.code_sha256
+    assert result.code_sha256 == sha256_text(code_with_trailing_ws)

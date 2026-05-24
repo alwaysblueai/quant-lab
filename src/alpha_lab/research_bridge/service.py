@@ -1363,8 +1363,16 @@ def _render_stage2_input(
 
 def _safe_idea_draft_slug(value: str) -> str:
     normalized = re.sub(r"\s+", "-", value.strip())
-    normalized = re.sub(r"[^A-Za-z0-9_.-]", "-", normalized).strip(".-_")
-    if normalized:
+    normalized = re.sub(r"[^A-Za-z0-9_.-]", "-", normalized)
+    # Collapse runs of the substitution char so a title whose non-ASCII chars
+    # each became "-" does not leave a long dash tail (e.g. a Chinese-only title
+    # previously produced "30----------------------------------------------").
+    normalized = re.sub(r"-{2,}", "-", normalized).strip(".-_")
+    # Require at least one ASCII letter for a human-meaningful slug; a pure
+    # non-ASCII title (Chinese-only) or one that survives as digits/punctuation
+    # only (a stray "30") would otherwise yield a degenerate id, so fall back to
+    # a stable content hash instead.
+    if normalized and re.search(r"[A-Za-z]", normalized):
         return normalized
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
     return f"idea-{digest}"

@@ -29,8 +29,16 @@ def test_monitor_raises_when_peak_exceeds_budget() -> None:
     # The process is comfortably larger than 1 MB, so any sample trips a 1 MB budget.
     monitor = RunMemoryMonitor(1.0, label="demo_case")
     monitor.sample("load_inputs")
-    with pytest.raises(AlphaLabMemoryError, match="memory budget exceeded"):
+    with pytest.raises(AlphaLabMemoryError, match="memory budget exceeded") as excinfo:
         monitor.check("load_inputs")
+    # The raised error carries the full per-stage snapshot so the failure handler
+    # can still emit resource_usage.json after the run aborts (P2(a)).
+    snapshot = excinfo.value.resource_usage
+    assert isinstance(snapshot, dict)
+    assert snapshot["artifact_type"] == "alpha_lab_resource_usage"
+    stage_rss = snapshot["stage_rss_mb"]
+    assert isinstance(stage_rss, dict)
+    assert "load_inputs" in stage_rss
 
 
 def test_stage_context_records_rss_and_enforces_on_success() -> None:

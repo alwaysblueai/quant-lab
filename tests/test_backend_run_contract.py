@@ -999,6 +999,15 @@ def test_real_case_single_factor_cli_writes_failed_receipt_on_memory_budget(
             stage="load_inputs",
             peak_rss_mb=18000.0,
             max_rss_mb=15000.0,
+            resource_usage={
+                "schema_version": "1.0.0",
+                "artifact_type": "alpha_lab_resource_usage",
+                "monitor_available": True,
+                "max_rss_mb_budget": 15000.0,
+                "peak_rss_mb": 18000.0,
+                "stage_rss_mb": {"run_start": 200.0, "load_inputs": 18000.0},
+                "note": "soft guard",
+            },
         )
 
     monkeypatch.setattr(sf_cli, "run_single_factor_case", _raise_memory_error)
@@ -1026,6 +1035,12 @@ def test_real_case_single_factor_cli_writes_failed_receipt_on_memory_budget(
     assert isinstance(contract, dict)
     assert contract["status"] == "failed"
     assert int(cast(int, contract["validation_error_count"])) == 1
+    # P2(a): the budget-failed run aborts before artifact export, but the failure
+    # handler still emits resource_usage.json (snapshot recovered from the error)
+    # so the frontend reads peak/stage RSS from one place for success and failure.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert resource_usage["peak_rss_mb"] == 18000.0
+    assert resource_usage["stage_rss_mb"]["load_inputs"] == 18000.0
 
 
 def test_real_case_single_factor_cli_exports_contract_sidecars_to_vault(

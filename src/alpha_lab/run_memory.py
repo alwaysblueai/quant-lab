@@ -107,6 +107,7 @@ class RunMemoryMonitor:
             stage=stage,
             peak_rss_mb=self._peak_rss_mb,
             max_rss_mb=self.max_rss_mb,
+            resource_usage=self.snapshot(),
         )
 
     @contextmanager
@@ -144,19 +145,33 @@ class RunMemoryMonitor:
         Returns the written path, or ``None`` when ``output_dir`` does not exist
         (e.g. an early failure before any artifacts were created).
         """
-        directory = Path(output_dir)
-        if not directory.is_dir():
-            return None
-        path = directory / RESOURCE_USAGE_ARTIFACT_NAME
-        path.write_text(
-            json.dumps(self.snapshot(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return path
+        return write_resource_usage_snapshot(output_dir, self.snapshot())
+
+
+def write_resource_usage_snapshot(
+    output_dir: str | Path, snapshot: dict[str, object]
+) -> Path | None:
+    """Write a resource-usage ``snapshot`` to ``resource_usage.json``.
+
+    Shared by the success path (:meth:`RunMemoryMonitor.write_resource_usage`)
+    and the budget-failure path, where the snapshot is recovered from the
+    raised :class:`~alpha_lab.exceptions.AlphaLabMemoryError`. Returns the
+    written path, or ``None`` when ``output_dir`` does not exist yet.
+    """
+    directory = Path(output_dir)
+    if not directory.is_dir():
+        return None
+    path = directory / RESOURCE_USAGE_ARTIFACT_NAME
+    path.write_text(
+        json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 __all__ = [
     "MAX_RSS_ENV_VAR",
     "RESOURCE_USAGE_ARTIFACT_NAME",
     "RunMemoryMonitor",
+    "write_resource_usage_snapshot",
 ]

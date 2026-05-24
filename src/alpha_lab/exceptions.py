@@ -70,11 +70,17 @@ class AlphaLabMemoryError(AlphaLabError, MemoryError):
         stage: str | None = None,
         peak_rss_mb: float | None = None,
         max_rss_mb: float | None = None,
+        resource_usage: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage
         self.peak_rss_mb = peak_rss_mb
         self.max_rss_mb = max_rss_mb
+        # Full resource-usage snapshot (per-stage RSS breakdown) captured at the
+        # moment the budget tripped, so the failure handler can still emit a
+        # resource_usage.json artifact even though the run aborted before the
+        # normal artifact-export stage.
+        self.resource_usage = resource_usage
 
 
 class VaultWriteError(AlphaLabError, PermissionError):

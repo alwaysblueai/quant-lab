@@ -154,6 +154,30 @@ draft"，而不是 silently 跑过。
   matplotlib fallback 生成。它满足 artifact contract；需要高保真 PDF 时再安装
   Playwright/Chromium。
 
+## 内存预算与 resource_usage.json
+
+`real-case` pipeline 内置一个**软**内存 guard（`RunMemoryMonitor`）：在阶段边界
+（`run_start` / `load_inputs` / `evaluate` / `artifacts_exported`）采样进程 RSS，
+当 `ALPHA_LAB_MAX_RSS_MB` 设了预算且 peak 超预算时抛
+`AlphaLabMemoryError`，让 run 以可审计、可归因的方式失败，而不是被 OS OOM-killer
+静默杀掉。
+
+- **成功 run**：在 `artifacts_exported` 阶段写出 `resource_usage.json`
+  （`peak_rss_mb`、按阶段的 `stage_rss_mb`、`max_rss_mb_budget`）。
+- **预算失败 run**：run 在导出阶段前中止，但 CLI 的失败收尾仍会写出标准 sidecar
+  （`backend_run_receipt.json` status=`failed` + `validation.errors` 含
+  `memory_budget_exceeded`、`comparison_summary.json`、`run_manifest.json` 的
+  `backend_run_contract.status=failed`），并以非零退出码返回。此时同样写出
+  `resource_usage.json`（快照从 `AlphaLabMemoryError` 中恢复），使前端无论 run
+  成功还是因预算失败，都能在同一个文件里读取 peak/stage RSS。
+- `resource_usage.json` 是**遥测**产物：RSS 读数非确定，不属于必有/golden 比较
+  artifact，audit 不因其缺失而失败。
+
+**软 guard 边界**：采样发生在阶段边界，单个阶段内的瞬时大分配仍可能在下一次采样
+前冲破 OS 硬限并被 OOM-killer 杀掉——这种情况下不会有 receipt。因此预算应设在
+宿主硬限之下（例如 ~18-19GB 的 WSL 机器设 14000-15000），并对 intraday 宽表
+采用更保守的预算。诊断硬 OOM 见 `docs/runtime_stability_runbook.md`。
+
 ## 与前端关系
 
 前端不承担探索期试错。前端只展示已完成标准后端运行、通过 artifact audit、

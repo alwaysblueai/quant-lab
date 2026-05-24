@@ -111,6 +111,30 @@ def _ctx(*, lab: Lab, draft_dir: Path, vault_root: Path) -> PromptContext:
 # ---------------------------------------------------------------------------
 
 
+def test_safe_idea_draft_slug_collapses_dashes_and_keeps_ascii() -> None:
+    from alpha_lab.research_bridge.service import _safe_idea_draft_slug
+
+    # ASCII-led title: clean slug, runs of dashes collapsed, no trailing tail.
+    slug = _safe_idea_draft_slug("tail-drop liquidity-shock reversal\n核心假设：尾盘下跌")
+    assert slug.startswith("tail-drop-liquidity-shock-reversal")
+    assert "--" not in slug
+    assert not slug.endswith("-")
+
+
+def test_safe_idea_draft_slug_falls_back_to_hash_for_non_ascii() -> None:
+    from alpha_lab.research_bridge.service import _safe_idea_draft_slug
+
+    # P2(b): pure non-ASCII (Chinese-only) must hash, not yield a dash tail.
+    chinese_only = _safe_idea_draft_slug("核心假设：尾盘三十分钟下跌反转")
+    assert chinese_only.startswith("idea-")
+    assert "-" * 4 not in chinese_only
+
+    # A stray ASCII digit ("30") must NOT bypass the hash fallback into a
+    # degenerate "30----..." id; a slug needs at least one ASCII letter.
+    digit_residue = _safe_idea_draft_slug("核心假设：尾盘 30 分钟下跌")
+    assert digit_residue.startswith("idea-")
+
+
 def test_normalize_engines_default_returns_both() -> None:
     assert normalize_engines(None) == (Engine.CLAUDE, Engine.CODEX)
 

@@ -23,6 +23,7 @@ from alpha_lab.backend_run_contract import (
 )
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting.renderers import write_case_report
+from alpha_lab.run_memory import write_resource_usage_snapshot
 from alpha_lab.vault_export import ExportResult, export_to_vault, resolve_vault_root
 
 _logger = logging.getLogger(__name__)
@@ -149,7 +150,7 @@ def finalize_memory_failure_contract_if_research_draft(
         value = getattr(error, attr, None)
         if value is not None:
             details[attr] = value
-    return finalize_backend_contract_failure(
+    receipt = finalize_backend_contract_failure(
         output_dir,
         workflow=workflow,
         draft_source_path=draft_source_path,
@@ -160,6 +161,15 @@ def finalize_memory_failure_contract_if_research_draft(
         failure_details=details,
         command=command,
     )
+    # The run aborted before the artifact-export stage, so the normal
+    # resource_usage.json was never written. Recover the per-stage snapshot from
+    # the budget error and emit it here (the failure receipt already created
+    # output_dir) so the frontend has one consistent place to read peak/stage RSS
+    # for both successful and budget-failed runs.
+    snapshot = getattr(error, "resource_usage", None)
+    if isinstance(snapshot, dict):
+        write_resource_usage_snapshot(output_dir, snapshot)
+    return receipt
 
 
 def export_to_vault_after_contract(
