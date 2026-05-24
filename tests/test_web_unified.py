@@ -3823,3 +3823,131 @@ def test_run_store_falls_back_to_serial_for_model_factor_output_conflicts(
     store._execute_task_group(tasks)  # noqa: SLF001
 
     assert max_active == 1
+
+
+def _model_stage2_intake_yaml_pair(
+    idea_id: str = "20260523T132055Z__model-demo",
+) -> tuple[str, str]:
+    stage1 = {
+        "contract_version": "model_stage1_reconcile_v1",
+        "stage": "stage1_reconcile",
+        "provenance": {
+            "idea_id": idea_id,
+            "audience_chain": ["claude", "codex"],
+            "retrieval_pack_sha256": "",
+        },
+        "idea_title": "model demo",
+        "candidate_slug_hint": "turnover_technical_ridge_20",
+        "input_engines": [],
+        "code_feasibility_review": {},
+        "mechanisms": [],
+        "stage2_entry_recommendation": {},
+        "rejected_as_stage2_primary": [],
+        "unresolved_questions": [],
+        "quality_gate": {"contains_machine_payload": True},
+    }
+    stage2 = {
+        "contract_version": "model_stage2_candidate_output_v1",
+        "stage": "stage2_candidate",
+        "provenance": {
+            "idea_id": idea_id,
+            "stage2_payload_sha256": "sha256_pending_compute_after_materialization",
+            "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+        },
+        "human_summary": {"candidate_name": "turnover_technical_ridge_20"},
+        "model_candidate_payload": {
+            "contract_version": "stage2_model_candidate_v1",
+            "candidate_name": "turnover_technical_ridge_20",
+            "implementation_status": "draft_for_stage3",
+            "implementation_type": "spec_variant",
+            "provenance": {
+                "idea_id": idea_id,
+                "stage2_payload_sha256": "sha256_pending_compute_after_materialization",
+                "audience_chain": ["claude", "codex", "web_gpt_stage2"],
+            },
+            "case_spec_payload": {
+                "name": "turnover_technical_ridge_20",
+                "factor_name": "turnover_technical_ridge_20",
+                "feature_columns": ["turnover_rate"],
+                "model": {"family": "ridge", "params": {"alpha": 5.0}},
+            },
+        },
+        "deferred_mechanisms": [],
+        "stage3_execution_notes": [],
+        "quality_gate": {"contains_model_candidate_payload": True},
+    }
+    return (
+        yaml.safe_dump(stage1, sort_keys=False, allow_unicode=True),
+        yaml.safe_dump(stage2, sort_keys=False, allow_unicode=True),
+    )
+
+
+def test_model_factor_stage2_intake_saves_yaml_and_prompt(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    idea_id = "20260523T132055Z__model-demo"
+    idea_dir = tmp_path / "ideas" / idea_id
+    idea_dir.mkdir(parents=True)
+    stage1_yaml, stage2_yaml = _model_stage2_intake_yaml_pair(idea_id)
+
+    result = svc.save_model_factor_stage2_intake(
+        {
+            "idea_id": idea_id,
+            "stage1_reconcile_yaml": stage1_yaml,
+            "stage2_payload_yaml": stage2_yaml,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["candidate_name"] == "turnover_technical_ridge_20"
+    paths = cast(dict[str, str], result["paths"])
+    assert Path(paths["stage1_reconcile"]) == idea_dir / "stage1_reconcile.yaml"
+    assert Path(paths["stage2_payload"]) == idea_dir / "stage2_payload_v1.yaml"
+    assert (idea_dir / "stage1_reconcile.yaml").read_text(encoding="utf-8") == stage1_yaml
+    assert (idea_dir / "stage2_payload_v1.yaml").read_text(encoding="utf-8") == stage2_yaml
+    prompt = str(result["codex_stage3_prompt"])
+    assert "请执行 Stage3 backend draft-model run" in prompt
+    assert "custom_models/research/turnover_technical_ridge_20/model_candidate.json" in prompt
+    assert "validate-draft-model" in prompt
+    assert "stage2_payload_sha256 是 placeholder" in prompt
+    assert "feature_manifest.json" in prompt
+    warnings = cast(list[str], result["warnings"])
+    assert any("stage2_payload_sha256" in warning for warning in warnings)
+
+
+def test_model_factor_stage2_intake_rejects_mismatched_idea_id(tmp_path: Path) -> None:
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    (tmp_path / "ideas" / "20260523T132055Z__model-demo").mkdir(parents=True)
+    stage1_yaml, stage2_yaml = _model_stage2_intake_yaml_pair("20260523T132055Z__model-demo")
+
+    result = svc.save_model_factor_stage2_intake(
+        {
+            "idea_id": "20260523T132055Z__other",
+            "stage1_reconcile_yaml": stage1_yaml,
+            "stage2_payload_yaml": stage2_yaml,
+        }
+    )
+
+    assert result["ok"] is False
+    assert "idea_id mismatch" in str(result["error"])
+
+
+def test_model_factor_stage2_intake_rejects_single_factor_contract(tmp_path: Path) -> None:
+    """A single-factor Stage2 payload must not be accepted by the model intake."""
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+    idea_id = "20260523T132055Z__model-demo"
+    (tmp_path / "ideas" / idea_id).mkdir(parents=True)
+    stage1_yaml, stage2_yaml = _stage2_intake_yaml_pair(idea_id)
+
+    result = svc.save_model_factor_stage2_intake(
+        {
+            "idea_id": idea_id,
+            "stage1_reconcile_yaml": stage1_yaml,
+            "stage2_payload_yaml": stage2_yaml,
+        }
+    )
+
+    assert result["ok"] is False
+    assert "model_stage1_reconcile_v1" in str(result["error"])
