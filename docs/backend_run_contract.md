@@ -55,6 +55,12 @@ draft 到 artifact audit 都有固定路径、固定命令、固定产物和固�
 - `comparison_summary.json`
 - `backend_run_receipt.json`
 
+`run_manifest.json.artifact_tiers` 对重型明细产物使用结构化对象，至少说明
+`tier`、`is_complete`、`row_count`、`source_row_count`、`omitted_row_count`、
+`sampling_policy` 和 `reason`。前端必须据此区分完整产物与
+`exploratory_screening` 下的采样产物，不能把 sampled holdings/weights 当作
+完整 holdings/weights 展示。
+
 single-factor 额外必有：
 
 - `factor_definition.json`

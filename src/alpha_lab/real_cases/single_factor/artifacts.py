@@ -342,7 +342,8 @@ def export_artifact_bundle(
         else "sampled_extreme_quantiles"
     )
     quantile_membership.to_csv(paths["quantile_membership"], index=False)
-    _build_quantile_equal_weights(quantile_membership).to_csv(
+    quantile_equal_weights = _build_quantile_equal_weights(quantile_membership)
+    quantile_equal_weights.to_csv(
         paths["quantile_equal_weights"],
         index=False,
     )
@@ -359,9 +360,53 @@ def export_artifact_bundle(
         else "sampled_nonzero_weights"
     )
     artifact_tiers = {
-        "quantile_membership": membership_tier,
-        "quantile_equal_weights": membership_tier,
-        "portfolio_weights": portfolio_weights_tier,
+        "quantile_membership": _artifact_tier_payload(
+            artifact_filename="quantile_membership.csv",
+            tier=membership_tier,
+            row_count=len(quantile_membership),
+            source_row_count=len(membership_full),
+            sampling_policy=(
+                "none" if membership_tier == "full" else "extreme_quantiles"
+            ),
+            reason=(
+                "complete artifact written by research profile"
+                if membership_tier == "full"
+                else "evaluation profile suppresses full membership artifacts; "
+                "kept min/max quantile rows for screening"
+            ),
+            profile_name=evaluation_config.profile_name,
+        ),
+        "quantile_equal_weights": _artifact_tier_payload(
+            artifact_filename="quantile_equal_weights.csv",
+            tier=membership_tier,
+            row_count=len(quantile_equal_weights),
+            source_row_count=len(membership_full),
+            sampling_policy=(
+                "none" if membership_tier == "full" else "extreme_quantiles"
+            ),
+            reason=(
+                "complete artifact written by research profile"
+                if membership_tier == "full"
+                else "derived from sampled quantile membership rows"
+            ),
+            profile_name=evaluation_config.profile_name,
+        ),
+        "portfolio_weights": _artifact_tier_payload(
+            artifact_filename="portfolio_weights.csv",
+            tier=portfolio_weights_tier,
+            row_count=len(portfolio_weights),
+            source_row_count=portfolio_weights_full_len,
+            sampling_policy=(
+                "none" if portfolio_weights_tier == "full" else "nonzero_weights"
+            ),
+            reason=(
+                "complete artifact written by research profile"
+                if portfolio_weights_tier == "full"
+                else "evaluation profile suppresses full portfolio weights; "
+                "kept non-zero weights for screening"
+            ),
+            profile_name=evaluation_config.profile_name,
+        ),
     }
     evaluation_result.turnover.to_csv(paths["turnover"], index=False)
     evaluation_result.coverage.to_csv(paths["coverage"], index=False)
@@ -1175,6 +1220,40 @@ def _sample_nonzero_weights(weights: pd.DataFrame) -> pd.DataFrame:
         return weights
     numeric = pd.to_numeric(weights["weight"], errors="coerce")
     return weights.loc[numeric.notna() & (numeric != 0.0)].copy()
+
+
+def _artifact_tier_payload(
+    *,
+    artifact_filename: str,
+    tier: str,
+    row_count: int,
+    source_row_count: int,
+    sampling_policy: str,
+    reason: str,
+    profile_name: str,
+) -> dict[str, object]:
+    """Describe whether a heavy artifact is full or profile-sampled."""
+
+    safe_source_rows = max(int(source_row_count), 0)
+    safe_rows = max(int(row_count), 0)
+    omitted_rows = max(safe_source_rows - safe_rows, 0)
+    return {
+        "schema_version": "artifact_tier_v1",
+        "artifact_filename": artifact_filename,
+        "tier": tier,
+        "is_complete": omitted_rows == 0,
+        "row_count": safe_rows,
+        "source_row_count": safe_source_rows,
+        "omitted_row_count": omitted_rows,
+        "sample_fraction": (
+            float(safe_rows / safe_source_rows)
+            if safe_source_rows > 0
+            else None
+        ),
+        "sampling_policy": sampling_policy,
+        "reason": reason,
+        "evaluation_profile": profile_name,
+    }
 
 
 def _build_quantile_equal_weights(quantile_membership: pd.DataFrame) -> pd.DataFrame:

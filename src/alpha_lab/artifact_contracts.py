@@ -186,6 +186,47 @@ def validate_run_manifest_payload(
         f"{label}.evaluation_standard",
     )
     _validate_split_contract_if_present(payload, "split_contract", label)
+    _validate_artifact_tiers_if_present(payload, label=label)
+
+
+def _validate_artifact_tiers_if_present(
+    payload: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    if "artifact_tiers" not in payload:
+        return
+    tiers = _require_object(payload, "artifact_tiers", label)
+    allowed_tiers = {"full", "sampled_extreme_quantiles", "sampled_nonzero_weights"}
+    for artifact_name, raw_entry in tiers.items():
+        if not _is_non_empty_string(artifact_name):
+            _raise(f"{label}.artifact_tiers", "keys must be non-empty strings")
+        entry_label = f"{label}.artifact_tiers[{artifact_name!r}]"
+        if not isinstance(raw_entry, Mapping):
+            _raise(entry_label, "must be an object")
+        entry = cast(Mapping[str, object], raw_entry)
+        _require_non_empty_string(entry, "schema_version", entry_label)
+        _require_non_empty_string(entry, "artifact_filename", entry_label)
+        tier = _require_non_empty_string(entry, "tier", entry_label)
+        if tier not in allowed_tiers:
+            _raise(f"{entry_label}.tier", f"must be one of {sorted(allowed_tiers)}")
+        _require_bool(entry, "is_complete", entry_label)
+        for key in ("row_count", "source_row_count", "omitted_row_count"):
+            value = _require_int(entry, key, entry_label)
+            if value < 0:
+                _raise(f"{entry_label}.{key}", "must be non-negative")
+        sample_fraction = entry.get("sample_fraction")
+        if sample_fraction is not None:
+            if isinstance(sample_fraction, bool) or not isinstance(
+                sample_fraction,
+                (int, float),
+            ):
+                _raise(f"{entry_label}.sample_fraction", "must be a number or null")
+            if not 0.0 <= float(sample_fraction) <= 1.0:
+                _raise(f"{entry_label}.sample_fraction", "must be within [0, 1]")
+        _require_non_empty_string(entry, "sampling_policy", entry_label)
+        _require_non_empty_string(entry, "reason", entry_label)
+        _require_non_empty_string(entry, "evaluation_profile", entry_label)
 
 
 def validate_metrics_payload(

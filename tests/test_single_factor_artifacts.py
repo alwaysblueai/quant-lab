@@ -813,12 +813,33 @@ def test_membership_artifacts_tiered_by_profile(tmp_path: Path) -> None:
     full_mem = _membership(default_run)
     sampled_mem = _membership(exploratory_run)
 
+    default_tiers = _tiers(default_run)
+    exploratory_tiers = _tiers(exploratory_run)
+
     # default_research keeps the full cross-section (all quantiles), tagged full.
-    assert _tiers(default_run)["quantile_membership"] == "full"
+    default_membership_tier = default_tiers["quantile_membership"]
+    assert default_membership_tier["tier"] == "full"
+    assert default_membership_tier["is_complete"] is True
+    assert default_membership_tier["row_count"] == len(full_mem)
+    assert default_membership_tier["source_row_count"] == len(full_mem)
+    assert default_membership_tier["omitted_row_count"] == 0
+    assert default_membership_tier["sampling_policy"] == "none"
     assert set(full_mem["quantile"].unique()) == {1, 2, 3, 4, 5}
 
     # exploratory_screening keeps only the tradeable extremes, fewer rows, tagged.
-    assert _tiers(exploratory_run)["quantile_membership"] == "sampled_extreme_quantiles"
+    exploratory_membership_tier = exploratory_tiers["quantile_membership"]
+    assert exploratory_membership_tier["tier"] == "sampled_extreme_quantiles"
+    assert exploratory_membership_tier["is_complete"] is False
+    assert exploratory_membership_tier["row_count"] == len(sampled_mem)
+    assert exploratory_membership_tier["source_row_count"] == len(full_mem)
+    assert exploratory_membership_tier["omitted_row_count"] == len(full_mem) - len(sampled_mem)
+    assert exploratory_membership_tier["sampling_policy"] == "extreme_quantiles"
+    assert "reason" in exploratory_membership_tier
+    assert exploratory_tiers["quantile_equal_weights"]["tier"] == "sampled_extreme_quantiles"
+    assert exploratory_tiers["portfolio_weights"]["tier"] in {
+        "full",
+        "sampled_nonzero_weights",
+    }
     assert set(sampled_mem["quantile"].unique()) == {1, 5}
     assert len(sampled_mem) < len(full_mem)
 
