@@ -619,7 +619,8 @@
         "run_neutralization_raw_comparison": true,
         "run_param_sensitivity": true,
         "run_random_baseline": true,
-        "run_tradability_checks": true
+        "run_tradability_checks": true,
+        "write_full_membership_artifacts": true
       },
       "uncertainty": {
         "block_bootstrap_block_length": 5,

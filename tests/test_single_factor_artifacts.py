@@ -787,6 +787,42 @@ def test_single_factor_dual_scope_report_path_respects_profile(
             assert "strict_post_split_rank_ic_gap_5_mean" in metrics
 
 
+def test_membership_artifacts_tiered_by_profile(tmp_path: Path) -> None:
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+
+    default_run = run_single_factor_case(
+        spec_path,
+        evaluation_profile="default_research",
+        output_root_dir=tmp_path / "default_out",
+    )
+    exploratory_run = run_single_factor_case(
+        spec_path,
+        evaluation_profile="exploratory_screening",
+        output_root_dir=tmp_path / "explore_out",
+    )
+
+    def _membership(run: object) -> pd.DataFrame:
+        return pd.read_csv(run.output_dir / "quantile_membership.csv")  # type: ignore[attr-defined]
+
+    def _tiers(run: object) -> dict:
+        manifest = json.loads(
+            (run.output_dir / "run_manifest.json").read_text(encoding="utf-8")  # type: ignore[attr-defined]
+        )
+        return manifest["artifact_tiers"]
+
+    full_mem = _membership(default_run)
+    sampled_mem = _membership(exploratory_run)
+
+    # default_research keeps the full cross-section (all quantiles), tagged full.
+    assert _tiers(default_run)["quantile_membership"] == "full"
+    assert set(full_mem["quantile"].unique()) == {1, 2, 3, 4, 5}
+
+    # exploratory_screening keeps only the tradeable extremes, fewer rows, tagged.
+    assert _tiers(exploratory_run)["quantile_membership"] == "sampled_extreme_quantiles"
+    assert set(sampled_mem["quantile"].unique()) == {1, 5}
+    assert len(sampled_mem) < len(full_mem)
+
+
 def test_exploratory_screening_runs_single_core_backtest(tmp_path: Path) -> None:
     """exploratory_screening must not run the full-sample / IS report backtests."""
     import alpha_lab.real_cases.single_factor.evaluate.core as sf_core

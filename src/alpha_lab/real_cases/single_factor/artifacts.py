@@ -325,7 +325,22 @@ def export_artifact_bundle(
         rebalance_frequency=spec.rebalance_frequency,
         label_horizon=int(spec.target.horizon),
     ).to_csv(paths["group_nav"], index=False)
-    quantile_membership = evaluation_result.experiment_result.quantile_assignments_df.copy()
+    # Heavy per-(date, asset) holdings artifacts: written in full for routine
+    # research, or sampled to the tradeable extremes under fast screening
+    # (see write_full_membership_artifacts). Tiers are recorded in the manifest.
+    write_full_membership = (
+        evaluation_config.single_factor_diagnostics.write_full_membership_artifacts
+    )
+    membership_full = evaluation_result.experiment_result.quantile_assignments_df.copy()
+    if write_full_membership:
+        quantile_membership = membership_full
+    else:
+        quantile_membership = _sample_extreme_quantiles(membership_full)
+    membership_tier = (
+        "full"
+        if len(quantile_membership) >= len(membership_full)
+        else "sampled_extreme_quantiles"
+    )
     quantile_membership.to_csv(paths["quantile_membership"], index=False)
     _build_quantile_equal_weights(quantile_membership).to_csv(
         paths["quantile_equal_weights"],
@@ -334,7 +349,20 @@ def export_artifact_bundle(
     portfolio_weights = evaluation_result.experiment_result.portfolio_weights_df
     if portfolio_weights is None:
         portfolio_weights = pd.DataFrame(columns=["date", "asset", "weight"])
+    portfolio_weights_full_len = len(portfolio_weights)
+    if not write_full_membership and "weight" in portfolio_weights.columns:
+        portfolio_weights = _sample_nonzero_weights(portfolio_weights)
     portfolio_weights.to_csv(paths["portfolio_weights"], index=False)
+    portfolio_weights_tier = (
+        "full"
+        if len(portfolio_weights) >= portfolio_weights_full_len
+        else "sampled_nonzero_weights"
+    )
+    artifact_tiers = {
+        "quantile_membership": membership_tier,
+        "quantile_equal_weights": membership_tier,
+        "portfolio_weights": portfolio_weights_tier,
+    }
     evaluation_result.turnover.to_csv(paths["turnover"], index=False)
     evaluation_result.coverage.to_csv(paths["coverage"], index=False)
     evaluation_result.lag_sensitivity.to_csv(paths["lag_sensitivity"], index=False)
@@ -581,6 +609,7 @@ def export_artifact_bundle(
         "spec_path": str(Path(spec_path).resolve()) if spec_path is not None else None,
         "inputs": inputs_payload,
         "outputs": {name: str(path) for name, path in paths.items()},
+        "artifact_tiers": artifact_tiers,
         "required_bundle_files": list(REQUIRED_BUNDLE_FILES),
         "integrity_summary": report.summary.to_dict(),
         "evaluation_standard": {
@@ -1120,6 +1149,32 @@ _BACKTEST_OMITTED_DETAIL_FIELDS = frozenset(
         "regime_analysis",
     }
 )
+
+
+def _sample_extreme_quantiles(membership: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the lowest and highest quantile rows (the tradeable extremes).
+
+    Returns the frame unchanged when it has no usable ``quantile`` column or only
+    a single quantile, so the caller can treat ``len`` equality as "not sampled".
+    """
+    if membership.empty or "quantile" not in membership.columns:
+        return membership
+    quantiles = pd.to_numeric(membership["quantile"], errors="coerce")
+    valid = quantiles.dropna()
+    if valid.empty:
+        return membership
+    low, high = valid.min(), valid.max()
+    if low == high:
+        return membership
+    return membership.loc[quantiles.isin([low, high])].copy()
+
+
+def _sample_nonzero_weights(weights: pd.DataFrame) -> pd.DataFrame:
+    """Keep only non-zero portfolio holdings (drop zero-weight names)."""
+    if weights.empty or "weight" not in weights.columns:
+        return weights
+    numeric = pd.to_numeric(weights["weight"], errors="coerce")
+    return weights.loc[numeric.notna() & (numeric != 0.0)].copy()
 
 
 def _build_quantile_equal_weights(quantile_membership: pd.DataFrame) -> pd.DataFrame:

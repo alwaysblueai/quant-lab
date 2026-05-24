@@ -110,6 +110,7 @@ class Level2PortfolioValidationSnapshot(TypedDict):
 class SingleFactorDiagnosticsSnapshot(TypedDict):
     run_dual_scope_report_path: bool
     run_is_report_path: bool
+    write_full_membership_artifacts: bool
     run_neutralization_raw_comparison: bool
     compute_ic_decay: bool
     compute_factor_autocorrelation: bool
@@ -359,6 +360,11 @@ class SingleFactorDiagnosticsConfig:
     # companions are marked suppressed_by_profile.
     run_dual_scope_report_path: bool = True
     run_is_report_path: bool = True
+    # Heavy per-(date, asset) holdings artifacts (quantile_membership,
+    # quantile_equal_weights, portfolio_weights). When False, only a sampled
+    # subset is written and tagged in the manifest — fast screening doesn't need
+    # the full cross-section history.
+    write_full_membership_artifacts: bool = True
     run_neutralization_raw_comparison: bool = True
     compute_ic_decay: bool = True
     compute_factor_autocorrelation: bool = True
@@ -559,6 +565,9 @@ class ResearchEvaluationConfig:
                     self.single_factor_diagnostics.run_dual_scope_report_path
                 ),
                 "run_is_report_path": self.single_factor_diagnostics.run_is_report_path,
+                "write_full_membership_artifacts": (
+                    self.single_factor_diagnostics.write_full_membership_artifacts
+                ),
                 "run_neutralization_raw_comparison": (
                     self.single_factor_diagnostics.run_neutralization_raw_comparison
                 ),
@@ -713,6 +722,7 @@ def _build_exploratory_screening_profile() -> ResearchEvaluationConfig:
         single_factor_diagnostics=SingleFactorDiagnosticsConfig(
             run_dual_scope_report_path=False,
             run_is_report_path=False,
+            write_full_membership_artifacts=False,
             run_neutralization_raw_comparison=False,
             compute_ic_decay=True,
             compute_factor_autocorrelation=False,
