@@ -3951,3 +3951,19 @@ def test_model_factor_stage2_intake_rejects_single_factor_contract(tmp_path: Pat
 
     assert result["ok"] is False
     assert "model_stage1_reconcile_v1" in str(result["error"])
+
+
+def test_model_lab_html_has_stage2_intake_panel() -> None:
+    """P1-A frontend: the model-lab page exposes a Stage2 YAML paste window wired
+    to the model intake endpoint, mirroring the single-factor one."""
+    html = _model_lab_html()
+
+    assert 'id="modelStage2IntakePanel"' in html
+    assert "Stage 2: Web GPT YAML Intake (model_factor)" in html
+    assert 'id="modelStage2ReconcileYaml"' in html
+    assert 'id="modelStage2PayloadYaml"' in html
+    assert 'id="btnSaveModelStage2Intake"' in html
+    assert 'id="btnCopyModelStage3Prompt"' in html
+    assert "/api/vault/model-factor-stage2-intake" in html
+    assert "model_stage1_reconcile_v1" in html
+    assert "model_stage2_candidate_output_v1" in html
