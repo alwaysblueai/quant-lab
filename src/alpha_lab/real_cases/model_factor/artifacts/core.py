@@ -4,6 +4,7 @@ import datetime
 from collections.abc import Mapping
 from pathlib import Path
 
+from alpha_lab.artifact_contracts import build_model_diagnostic_artifact_status
 from alpha_lab.key_metrics_contracts import project_level12_transition_summary
 from alpha_lab.model_factor import ModelFactorBuildResult
 from alpha_lab.real_cases.artifact_enrichment import (
@@ -670,6 +671,13 @@ def export_artifact_bundle(
             "csv_na_rep": "N/A",
             "details": _to_jsonable(missing_value_notes),
         },
+        # Readable per-diagnostic emission status (model-factor has no row-sampled
+        # heavy artifacts, so it uses this instead of single-factor artifact_tiers).
+        # Notably flags feature_oos_ic as not_emitted_v1 under exploratory_screening
+        # so the frontend does not read a suppressed diagnostic as a real zero.
+        "model_diagnostic_artifacts": build_model_diagnostic_artifact_status(
+            evaluation_config.profile_name
+        ),
     }
     if draft_model_source is not None:
         manifest["draft_model_source"] = dict(draft_model_source)

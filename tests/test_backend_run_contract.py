@@ -1260,3 +1260,92 @@ def test_real_case_model_factor_cli_writes_failed_receipt_on_memory_budget(
     # The snapshot carried by the error also lands as resource_usage.json.
     resource_usage = _read_json(output_dir / "resource_usage.json")
     assert resource_usage["stage_rss_mb"]["train_model"] == 18000.0
+
+
+def test_model_factor_draft_backend_contract_e2e(tmp_path: Path) -> None:
+    """P1-C: lock the full model-factor draft lifecycle in one place — validate ->
+    standard run -> receipt + manifest contract + source-hash audit (3 hashes in
+    every location) + model_definition / feature_manifest draft_model_source +
+    resource_usage.json + readable diagnostic-artifact status."""
+    from alpha_lab.draft_model_validation import validate_draft_model_file
+    from alpha_lab.real_cases.model_factor.cli import main as mf_main
+
+    candidate_name = "e2e_model_contract_full"
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name=candidate_name)
+    payload = _model_candidate_payload(spec_path, candidate_name)
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 1) validate-draft-model gate passes and yields the three source hashes.
+    validation = validate_draft_model_file(candidate_json)
+    assert validation.ok
+    assert validation.candidate_json_sha256
+    assert validation.case_spec_sha256
+    assert validation.feature_contract_sha256
+
+    # 2) standard run through the CLI.
+    rc = mf_main(
+        [
+            "run",
+            str(spec_path),
+            "--draft-model-candidate",
+            str(candidate_json),
+            "--evaluation-profile",
+            "exploratory_screening",
+            "--screening-retrain-every-n-dates",
+            "40",
+        ]
+    )
+    assert rc == 0
+    output_dir = tmp_path / "outputs" / f"demo_{candidate_name}_model_factor"
+
+    # 3) receipt + comparison + manifest contract all written and passing.
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "model_factor"
+    assert receipt["status"] == "success"
+    assert (output_dir / COMPARISON_SUMMARY_NAME).exists()
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = cast(Mapping[str, object], manifest["backend_run_contract"])
+    assert contract["status"] == "passed"
+    assert contract["issue_count"] == 0
+
+    # 4) source-hash audit covers all draft_model_source locations.
+    audit = cast(Mapping[str, object], receipt["artifact_audit"])
+    source_audit = cast(Mapping[str, object], audit["source_audit"])
+    assert source_audit["audit_key"] == "draft_model_source"
+    locations = cast(Mapping[str, Mapping[str, object]], source_audit["locations"])
+    for loc in (
+        "model_definition.draft_model_source",
+        "feature_manifest.draft_model_source",
+        "run_manifest.draft_model_source",
+    ):
+        assert locations[loc]["ok"] is True
+
+    # 5) the 3 model source hashes are present in model_definition + feature_manifest.
+    for artifact in ("model_definition.json", "feature_manifest.json"):
+        src = cast(Mapping[str, object], _read_json(output_dir / artifact)["draft_model_source"])
+        for key in ("candidate_json_sha256", "case_spec_sha256", "feature_contract_sha256"):
+            assert _is_non_empty_string_value(src.get(key))
+
+    # 6) resource_usage.json (P0 telemetry) is present with per-stage RSS.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert "peak_rss_mb" in resource_usage
+    assert "max_rss_mb_budget" in resource_usage
+    assert isinstance(resource_usage["stage_rss_mb"], dict)
+
+    # 7) readable diagnostic-artifact status (P1-B): feature_oos_ic suppressed by
+    # exploratory profile is flagged not_emitted_v1 rather than read as zero IC.
+    diagnostics_status = cast(
+        Mapping[str, Mapping[str, object]], manifest["model_diagnostic_artifacts"]
+    )
+    feature_oos_ic = diagnostics_status["feature_oos_ic"]
+    assert feature_oos_ic["contract_status"] == "not_emitted_v1"
+    assert feature_oos_ic["emitted"] is False
+
+
+def _is_non_empty_string_value(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
