@@ -28,11 +28,13 @@ from alpha_lab.backend_run_contract import (
     build_comparison_summary,
     detect_research_draft_run,
     finalize_backend_contract,
+    finalize_backend_contract_failure,
     write_backend_run_receipt,
     write_comparison_summary,
 )
 from alpha_lab.custom_factors import read_custom_factor_source
 from alpha_lab.custom_models import read_draft_model_source
+from alpha_lab.exceptions import AlphaLabMemoryError
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
 
@@ -686,6 +688,51 @@ def test_finalize_marks_failure_when_required_artifact_missing(tmp_path: Path) -
     assert contract["validation_error_count"] == 0
 
 
+def test_finalize_backend_contract_failure_writes_memory_receipt(
+    tmp_path: Path,
+) -> None:
+    factor_json = _write_factor_draft(tmp_path)
+    run_dir = tmp_path / "outputs" / "memory_failed_case"
+
+    receipt = finalize_backend_contract_failure(
+        run_dir,
+        workflow="single_factor",
+        draft_source_path=factor_json,
+        case_spec_path=tmp_path / "case.yaml",
+        evaluation_profile="exploratory_screening",
+        failure_code="memory_budget_exceeded",
+        failure_message="run memory budget exceeded",
+        failure_details={
+            "stage": "load_inputs",
+            "peak_rss_mb": 18000.0,
+            "max_rss_mb": 15000.0,
+        },
+        command=("alpha-lab", "real-case", "single-factor", "run"),
+    )
+
+    assert receipt["status"] == "failed"
+    assert (run_dir / BACKEND_RUN_RECEIPT_NAME).exists()
+    assert (run_dir / COMPARISON_SUMMARY_NAME).exists()
+    comparison = _read_json(run_dir / COMPARISON_SUMMARY_NAME)
+    assert comparison["status"] == "not_available"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is False
+    assert "metrics.json" in audit["missing_files"]
+    assert COMPARISON_SUMMARY_NAME in audit["present_files"]
+    manifest = _read_json(run_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    assert int(cast(int, contract["validation_error_count"])) == 1
+    assert int(cast(int, contract["artifact_issue_count"])) >= 1
+    assert detect_research_draft_run(run_dir, workflow="single_factor") == factor_json
+
+
 def test_finalize_marks_failure_when_only_validator_fails(tmp_path: Path) -> None:
     """Validator-only failure must surface non-zero ``issue_count`` so the Web
     compare summary does not show 'failed with 0 issues'."""
@@ -933,6 +980,52 @@ def test_real_case_single_factor_cli_fails_contract_when_validator_rejects_draft
     assert int(cast(int, contract["issue_count"])) >= int(
         cast(int, contract["validation_error_count"])
     )
+
+
+def test_real_case_single_factor_cli_writes_failed_receipt_on_memory_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import alpha_lab.real_cases.single_factor.cli as sf_cli
+
+    factor_name = "e2e_memory_factor"
+    _write_research_factor(tmp_path, factor_name)
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    _patch_case_to_use_custom_factor(spec_path, factor_name)
+
+    def _raise_memory_error(*_: object, **__: object) -> object:
+        raise AlphaLabMemoryError(
+            "run memory budget exceeded at stage 'load_inputs'",
+            stage="load_inputs",
+            peak_rss_mb=18000.0,
+            max_rss_mb=15000.0,
+        )
+
+    monkeypatch.setattr(sf_cli, "run_single_factor_case", _raise_memory_error)
+
+    rc = sf_cli.main(
+        ["run", str(spec_path), "--evaluation-profile", "exploratory_screening"]
+    )
+
+    assert rc == 1
+    output_dir = tmp_path / "outputs" / f"e2e_{factor_name}_contract_case"
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["status"] == "failed"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    details = cast(Mapping[str, object], errors[0]["details"])
+    assert details["stage"] == "load_inputs"
+    assert details["peak_rss_mb"] == 18000.0
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is False
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    assert int(cast(int, contract["validation_error_count"])) == 1
 
 
 def test_real_case_single_factor_cli_exports_contract_sidecars_to_vault(

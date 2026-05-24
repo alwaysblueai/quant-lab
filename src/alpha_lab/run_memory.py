@@ -103,7 +103,10 @@ class RunMemoryMonitor:
         label = f" for {self.label!r}" if self.label else ""
         raise AlphaLabMemoryError(
             f"run memory budget exceeded{label}{where}: peak RSS "
-            f"{self._peak_rss_mb:.0f} MB > {MAX_RSS_ENV_VAR}={self.max_rss_mb:.0f} MB"
+            f"{self._peak_rss_mb:.0f} MB > {MAX_RSS_ENV_VAR}={self.max_rss_mb:.0f} MB",
+            stage=stage,
+            peak_rss_mb=self._peak_rss_mb,
+            max_rss_mb=self.max_rss_mb,
         )
 
     @contextmanager

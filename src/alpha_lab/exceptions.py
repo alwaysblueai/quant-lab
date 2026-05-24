@@ -63,6 +63,19 @@ class AlphaLabMemoryError(AlphaLabError, MemoryError):
     Inherits from ``MemoryError`` so generic memory handlers still match.
     """
 
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        stage: str | None = None,
+        peak_rss_mb: float | None = None,
+        max_rss_mb: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.peak_rss_mb = peak_rss_mb
+        self.max_rss_mb = max_rss_mb
+
 
 class VaultWriteError(AlphaLabError, PermissionError):
     """Raised when a vault write would land outside the authorized root.

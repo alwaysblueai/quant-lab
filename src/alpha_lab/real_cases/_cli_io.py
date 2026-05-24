@@ -19,6 +19,7 @@ from alpha_lab.backend_run_contract import (
     BackendRunWorkflow,
     detect_research_draft_run,
     finalize_backend_contract,
+    finalize_backend_contract_failure,
 )
 from alpha_lab.exceptions import AlphaLabDataError
 from alpha_lab.reporting.renderers import write_case_report
@@ -127,6 +128,38 @@ def finalize_contract_if_research_draft(
         validation_payload=validation_payload,
     )
     return 0 if str(receipt.get("status") or "") == "success" else 1
+
+
+def finalize_memory_failure_contract_if_research_draft(
+    *,
+    output_dir: Path,
+    workflow: BackendRunWorkflow,
+    draft_source_path: str | Path | None,
+    case_spec_path: str | Path,
+    evaluation_profile: str,
+    error: BaseException,
+    command: Sequence[str] = (),
+) -> dict[str, object] | None:
+    """Write a failed backend-contract receipt for an incomplete draft run."""
+
+    if draft_source_path is None:
+        return None
+    details: dict[str, object] = {}
+    for attr in ("stage", "peak_rss_mb", "max_rss_mb"):
+        value = getattr(error, attr, None)
+        if value is not None:
+            details[attr] = value
+    return finalize_backend_contract_failure(
+        output_dir,
+        workflow=workflow,
+        draft_source_path=draft_source_path,
+        case_spec_path=case_spec_path,
+        evaluation_profile=evaluation_profile,
+        failure_code="memory_budget_exceeded",
+        failure_message=str(error) or "run memory budget exceeded",
+        failure_details=details,
+        command=command,
+    )
 
 
 def export_to_vault_after_contract(

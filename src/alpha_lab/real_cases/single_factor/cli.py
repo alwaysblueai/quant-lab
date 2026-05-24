@@ -4,13 +4,16 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
-from alpha_lab.exceptions import AlphaLabDataError
+from alpha_lab.custom_factors import find_custom_factor_workspace_root, get_custom_factor_source
+from alpha_lab.exceptions import AlphaLabDataError, AlphaLabMemoryError
 from alpha_lab.real_cases._cli_io import (
     export_to_vault_after_contract,
     finalize_contract_if_research_draft,
+    finalize_memory_failure_contract_if_research_draft,
     render_case_report,
     update_run_manifest,
 )
@@ -20,7 +23,7 @@ from alpha_lab.research_evaluation_config import (
 )
 
 from .pipeline import run_single_factor_case
-from .spec import load_single_factor_case_spec
+from .spec import SingleFactorCaseSpec, load_single_factor_case_spec
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     # The spec stays profile-agnostic; this only supplies a default so a case YAML
     # that declares evaluation_profile is honored by a bare CLI run.
     try:
-        spec_profile = load_single_factor_case_spec(Path(args.spec_path)).evaluation_profile
+        spec = load_single_factor_case_spec(Path(args.spec_path))
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
+    spec_profile = spec.evaluation_profile
     evaluation_profile = (
         args.evaluation_profile
         or spec_profile
@@ -119,6 +123,30 @@ def main(argv: list[str] | None = None) -> int:
             vault_export_mode=args.vault_export_mode,
             defer_vault_export=True,
         )
+    except AlphaLabMemoryError as exc:
+        output_dir = _output_dir_for_spec(spec, output_root_dir=args.output_root_dir)
+        receipt = finalize_memory_failure_contract_if_research_draft(
+            output_dir=output_dir,
+            workflow="single_factor",
+            draft_source_path=_draft_factor_path_for_contract(
+                spec,
+                spec_path=Path(args.spec_path),
+            ),
+            case_spec_path=args.spec_path,
+            evaluation_profile=evaluation_profile,
+            error=exc,
+            command=tuple(sys.argv),
+        )
+        if receipt is not None:
+            print("")
+            print("  Workflow : real-case-single-factor")
+            print("  Status   : memory_budget_exceeded")
+            print(f"  Case     : {spec.name}")
+            print(f"  Output   : {output_dir}")
+            print(f"  Receipt  : {output_dir / 'backend_run_receipt.json'}")
+            return 1
+        print(str(exc), file=sys.stderr)
+        return 1
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
 
@@ -197,6 +225,48 @@ def main(argv: list[str] | None = None) -> int:
 def _fmt_text(value: object) -> str:
     text = str(value).strip() if value is not None else ""
     return text if text else "N/A"
+
+
+def _output_dir_for_spec(
+    spec: SingleFactorCaseSpec,
+    *,
+    output_root_dir: str | None,
+) -> Path:
+    root_dir = (
+        Path(output_root_dir).resolve()
+        if output_root_dir is not None
+        else Path(spec.output.root_dir)
+    )
+    return (root_dir.resolve() / spec.name).resolve()
+
+
+def _draft_factor_path_for_contract(
+    spec: SingleFactorCaseSpec,
+    *,
+    spec_path: Path,
+) -> Path | None:
+    factor_path = Path(spec.factor_path).expanduser().resolve()
+    if factor_path.exists() and "custom_factors/research/" in factor_path.as_posix():
+        return factor_path
+
+    factor_input = spec.factor_input
+    recipe = factor_input.recipe if factor_input is not None else None
+    method = None
+    if isinstance(recipe, Mapping):
+        base = recipe.get("base")
+        if isinstance(base, Mapping):
+            raw_method = base.get("method")
+            if isinstance(raw_method, str) and raw_method.strip():
+                method = raw_method.strip()
+    if not method:
+        return None
+    workspace_root = find_custom_factor_workspace_root(spec_path)
+    source = get_custom_factor_source(
+        method,
+        workspace_root=workspace_root,
+        scopes=("research",),
+    )
+    return source.path if source is not None else None
 
 
 if __name__ == "__main__":
