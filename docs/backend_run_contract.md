@@ -138,6 +138,16 @@ draft"，而不是 silently 跑过。
 - model 的 `draft_model_source` 与 `model_candidate.json` hash 不一致。
 - `case_report.md`、`comparison_summary.json` 或 `backend_run_receipt.json` 缺失。
 
+## 允许的非失败提示
+
+以下 warning 不代表契约失败：
+
+- 非 promoted draft 因子默认不跑完整 Level 2 portfolio validation；只要稳定
+  Level 2 artifact 仍按合同写出，contract audit 可以继续通过。
+- 当本地或 CI 没有 Playwright/Chromium 时，`research_tearsheet.pdf` 会使用
+  matplotlib fallback 生成。它满足 artifact contract；需要高保真 PDF 时再安装
+  Playwright/Chromium。
+
 ## 与前端关系
 
 前端不承担探索期试错。前端只展示已完成标准后端运行、通过 artifact audit、

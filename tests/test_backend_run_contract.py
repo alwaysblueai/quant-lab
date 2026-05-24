@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 from alpha_lab.backend_run_contract import (
@@ -34,6 +35,15 @@ from alpha_lab.custom_factors import read_custom_factor_source
 from alpha_lab.custom_models import read_draft_model_source
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
+
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore:Level 2 portfolio validation suppressed:UserWarning"
+    ),
+    pytest.mark.filterwarnings(
+        "ignore:research_tearsheet PDF fallback:UserWarning"
+    ),
+]
 
 _FACTOR_CODE = (
     "def build_factor(frame):\n"
