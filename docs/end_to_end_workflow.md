@@ -13,9 +13,10 @@
 5. Stage 5 — 晋升 + 前端完整报告（仅通过审核的候选）                → 前端
 ```
 
-**前端只做两件事**：
+**前端只做三件事**：
 
 - 输入模糊想法 + 复制 / 预览 Stage 0 产出文件
+- 接收网页 GPT 的 Stage 2 YAML，保存到 `ideas/<idea_id>/`，并生成 Codex GUI Stage 3 开场指令
 - 展示已通过审核的因子/模型的完整可视化报告
 
 其他全部在后端，每个 Stage 只产出**确定数量**的文件，不允许散落写。
@@ -108,7 +109,12 @@ mechanism_1:
 | 步骤 | 输入 | 输出 | 写入 |
 |---|---|---|---|
 | 2.1 reconcile | `stage1_claude.md` + `stage1_codex.md` + `retrieval_pack.md` | `stage1_reconcile_payload`（YAML） | `ideas/<idea_id>/stage1_reconcile.yaml` |
-| 2.2 candidate | reconcile payload + 用户取舍 | `factor_json_payload` 或 `model_candidate_payload`（含 provenance） | `ideas/<idea_id>/stage2_payload_v<n>.json` |
+| 2.2 candidate | reconcile payload + 用户取舍 | `factor_json_payload` 或 `model_candidate_payload`（含 provenance） | `ideas/<idea_id>/stage2_payload_v<n>.yaml` |
+
+单因子网页前端提供 Stage 2 intake 面板：用户把 `stage1_reconcile.yaml`
+和 `stage2_payload_v1.yaml` 粘贴进去，后端校验 `contract_version` /
+`stage` / `idea_id` 一致性，保存到对应 `ideas/<idea_id>/`，并返回固定
+Codex GUI Stage 3 指令。该面板只做交接规范化，不写 factor/model、不跑实验。
 
 ### Stage 2.1 综合规则
 
@@ -124,7 +130,7 @@ mechanism_1:
 
 ### 迭代回灌
 
-Stage 3 跑完之后，把后端实验摘要（见 Stage 3）**直接粘回**同一个 GPT 项目 → GPT 出 `stage2_payload_v<n+1>.json`。`idea_id` 不变，`stage2_payload_sha256` 更新。这是网页 GPT 的"正向迭代"路径，**不需要额外文件做中转**。
+Stage 3 跑完之后，把后端实验摘要（见 Stage 3）**直接粘回**同一个 GPT 项目 → GPT 出 `stage2_payload_v<n+1>.yaml`。`idea_id` 不变，`stage2_payload_sha256` 更新。这是网页 GPT 的"正向迭代"路径，**不需要额外文件做中转**。
 
 ## Stage 3 — 后端快速迭代
 
@@ -235,7 +241,7 @@ export_experiment_card(
 
 ### Stage 4 写完即清理（**避免知识库膨胀的关键**）
 
-- 删除 `ideas/<idea_id>/stage1_*.md` / `stage2_payload_v*.json` / `prompt_*.md` / `retrieval_pack.md` / `stage2_input.md`（信息已沉淀在 `experiment_card.md` + vault）
+- 删除 `ideas/<idea_id>/stage1_*.md` / `stage2_payload_v*.yaml` / `prompt_*.md` / `retrieval_pack.md` / `stage2_input.md`（信息已沉淀在 `experiment_card.md` + vault）
 - 保留 `ideas/<idea_id>/manifest.json` + `experiment_card.md`（idea_id 索引最小集）
 - 删除 `custom_factors/research/<f>/` 整个目录（若 outcome=killed/parked），或拷到 promoted 之后删（若 outcome=promoted）
 
@@ -260,8 +266,9 @@ alpha-lab web unified --vault-root /mnt/c/quant/vault/quant-knowledge
 ```
 
 - 首页：模糊想法输入框（→ Stage 0）+ Stage 0 文件预览/复制
+- Stage 2 intake：保存网页 GPT 输出的 YAML + 生成 Codex GUI Stage 3 指令
 - `/model-lab` Draft Candidates 面板：仅对 `promoted/` 候选生成完整 `default_research` 报告 + artifact 可视化
-- 不在前端做 Stage 1-4 任何工作
+- 不在前端做 Stage 1、Stage 3、Stage 4 的研究/实验工作
 
 ## 文件总量约束（一份完整流程跑完）
 

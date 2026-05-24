@@ -2745,6 +2745,38 @@
               <div id="stage0Results" style="margin-top:12px"></div>
             </div>
 
+            <!-- Stage 2: Web GPT YAML Intake -->
+            <div class="panel panel-ai-workspace" id="stage2IntakePanel" style="margin-bottom:18px">
+              <span class="section-tag">Stage 2: Web GPT YAML Intake (single_factor)</span>
+              <h2 style="border:0;padding:0;margin-bottom:4px">Stage2 YAML → Stage3 交接模板</h2>
+              <p class="idea-prompt-hint">把网页版 GPT 输出的 <code>stage1_reconcile.yaml</code> 和 <code>stage2_payload_v1.yaml</code> 粘到这里。后端会保存到 <code>ideas/&lt;idea_id&gt;/</code>，并生成可复制给 Codex GUI 的 Stage3 指令。</p>
+              <div class="row">
+                <div style="grid-column: span 2">
+                  <label>idea_id</label>
+                  <input id="stage2IdeaId" placeholder="20260523T132055Z__example">
+                </div>
+              </div>
+              <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+                <div>
+                  <label>stage1_reconcile.yaml</label>
+                  <textarea id="stage2ReconcileYaml" class="idea-textarea" style="min-height:260px;font-family:var(--mono);font-size:12px" placeholder="粘贴 single_factor_stage1_reconcile_v1 YAML"></textarea>
+                </div>
+                <div>
+                  <label>stage2_payload_v1.yaml</label>
+                  <textarea id="stage2PayloadYaml" class="idea-textarea" style="min-height:260px;font-family:var(--mono);font-size:12px" placeholder="粘贴 single_factor_stage2_candidate_output_v1 YAML"></textarea>
+                </div>
+              </div>
+              <div class="toolbar idea-toolbar" style="margin-top:10px">
+                <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--muted)">
+                  <input id="stage2Overwrite" type="checkbox" style="width:auto"> 覆盖已存在的 Stage2 YAML
+                </label>
+                <button class="action" id="btnSaveStage2Intake">保存 YAML 并生成 Codex 指令</button>
+                <button class="ghost small accent" id="btnCopyStage3Prompt" style="display:none">复制 Codex 指令</button>
+                <span id="stage2IntakeStatus" class="muted" style="font-size:12px"></span>
+              </div>
+              <div id="stage2IntakeResult" style="margin-top:12px"></div>
+            </div>
+
             <!-- Stage 3: Implement + Verify -->
             <div class="panel panel-guardrail">
               <span class="section-tag">Stage 3: Implement + Verify</span>
@@ -13820,6 +13852,80 @@ ${styleText}
           renderStage0Files(data.files || []);
         } catch (err) {
           if (status) status.textContent = "请求异常: " + (err && err.message || err);
+        }
+      });
+
+      let stage2LastCodexPrompt = "";
+      function renderStage2IntakeResult(data) {
+        const target = $("stage2IntakeResult");
+        const copyBtn = $("btnCopyStage3Prompt");
+        if (!target) return;
+        if (!data || !data.ok) {
+          stage2LastCodexPrompt = "";
+          if (copyBtn) copyBtn.style.display = "none";
+          target.innerHTML = "";
+          return;
+        }
+        stage2LastCodexPrompt = data.codex_stage3_prompt || "";
+        if (copyBtn) copyBtn.style.display = stage2LastCodexPrompt ? "" : "none";
+        const paths = data.paths || {};
+        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        const warningHtml = warnings.length
+          ? "<div class=\"muted\" style=\"margin-top:8px;color:var(--warn)\">" + warnings.map((w) => "• " + escHtml(w)).join("<br>") + "</div>"
+          : "";
+        target.innerHTML = [
+          "<details open style=\"border:1px solid var(--border);padding:10px;border-radius:4px\">",
+          "<summary><strong>已保存 Stage2 YAML</strong> <span class=\"muted\">" + escHtml(data.idea_id || "") + " / " + escHtml(data.factor_name || "") + "</span></summary>",
+          "<div style=\"font-family:var(--mono);font-size:12px;margin-top:8px\">",
+          "<div>stage1_reconcile: " + escHtml(paths.stage1_reconcile || "") + "</div>",
+          "<div>stage2_payload: " + escHtml(paths.stage2_payload || "") + "</div>",
+          "</div>",
+          warningHtml,
+          "<label style=\"margin-top:10px\">Codex GUI Stage3 指令</label>",
+          "<textarea id=\"stage2CodexPromptPreview\" class=\"idea-textarea\" readonly style=\"min-height:260px;font-family:var(--mono);font-size:12px\">" + escHtml(stage2LastCodexPrompt) + "</textarea>",
+          "</details>",
+        ].join("");
+      }
+
+      bind("btnSaveStage2Intake", "click", async () => {
+        const status = $("stage2IntakeStatus");
+        const payload = {
+          idea_id: ($("stage2IdeaId") && $("stage2IdeaId").value || "").trim(),
+          stage1_reconcile_yaml: $("stage2ReconcileYaml") && $("stage2ReconcileYaml").value || "",
+          stage2_payload_yaml: $("stage2PayloadYaml") && $("stage2PayloadYaml").value || "",
+          overwrite: Boolean($("stage2Overwrite") && $("stage2Overwrite").checked),
+        };
+        if (!payload.stage1_reconcile_yaml.trim() || !payload.stage2_payload_yaml.trim()) {
+          if (status) status.textContent = "请先粘贴两个 YAML。";
+          return;
+        }
+        if (status) status.textContent = "保存中…";
+        try {
+          const data = await api("/api/vault/single-factor-stage2-intake", "POST", payload);
+          if (!data || !data.ok) {
+            if (status) status.textContent = "失败: " + (data && data.error || "unknown");
+            renderStage2IntakeResult(data);
+            return;
+          }
+          if (status) status.textContent = "已保存并生成 Codex 指令。";
+          renderStage2IntakeResult(data);
+        } catch (err) {
+          if (status) status.textContent = "请求异常: " + (err && err.message || err);
+        }
+      });
+
+      bind("btnCopyStage3Prompt", "click", async () => {
+        const preview = $("stage2CodexPromptPreview");
+        const text = stage2LastCodexPrompt || (preview && preview.value) || "";
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          sidebarMsg("Codex Stage3 指令已复制");
+        } catch (err) {
+          if (preview) {
+            preview.select();
+            document.execCommand("copy");
+          }
         }
       });
 
