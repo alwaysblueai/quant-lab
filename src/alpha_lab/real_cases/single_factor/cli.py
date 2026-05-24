@@ -20,6 +20,7 @@ from alpha_lab.research_evaluation_config import (
 )
 
 from .pipeline import run_single_factor_case
+from .spec import load_single_factor_case_spec
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("spec_path", help="Path to single-factor case YAML/JSON spec.")
     run_parser.add_argument(
         "--evaluation-profile",
-        default=DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name,
+        default=None,
         choices=sorted(AVAILABLE_RESEARCH_EVALUATION_PROFILES),
         help=(
             "Research evaluation profile controlling factor verdict standards, "
             "campaign triage, Level 2 promotion gate thresholds, and Level 2 "
-            "portfolio-validation guardrails."
+            "portfolio-validation guardrails. When omitted, falls back to the "
+            "spec's evaluation_profile, then to "
+            f"{DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name}."
         ),
     )
     run_parser.add_argument(
@@ -94,11 +97,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "run":
         parser.error(f"unsupported command: {args.command!r}")
 
+    # Resolution order: explicit CLI flag -> spec's evaluation_profile -> default.
+    # The spec stays profile-agnostic; this only supplies a default so a case YAML
+    # that declares evaluation_profile is honored by a bare CLI run.
+    try:
+        spec_profile = load_single_factor_case_spec(Path(args.spec_path)).evaluation_profile
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        parser.error(str(exc))
+    evaluation_profile = (
+        args.evaluation_profile
+        or spec_profile
+        or DEFAULT_RESEARCH_EVALUATION_CONFIG.profile_name
+    )
+
     try:
         result = run_single_factor_case(
             Path(args.spec_path),
             output_root_dir=args.output_root_dir,
-            evaluation_profile=args.evaluation_profile,
+            evaluation_profile=evaluation_profile,
             vault_root=args.vault_root,
             vault_export_mode=args.vault_export_mode,
             defer_vault_export=True,
@@ -119,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=result.output_dir,
         workflow="single_factor",
         case_spec_path=args.spec_path,
-        evaluation_profile=args.evaluation_profile,
+        evaluation_profile=evaluation_profile,
         command=tuple(sys.argv),
     )
     export_to_vault_after_contract(
