@@ -109,7 +109,17 @@ def _compute_market_cap_weighted_long_short_return(
     n_quantiles: int,
     cap_col: str,
 ) -> float:
-    working = quantile_assignments_df.merge(
+    if quantile_assignments_df.empty:
+        return float("nan")
+
+    assignments = quantile_assignments_df.loc[
+        quantile_assignments_df["quantile"].isin([1, n_quantiles]),
+        ["date", "asset", "quantile"],
+    ].copy()
+    if assignments.empty:
+        return float("nan")
+
+    working = assignments.merge(
         labels_df[["date", "asset", "value"]].rename(columns={"value": "label_value"}),
         on=["date", "asset"],
         how="inner",
@@ -170,16 +180,24 @@ def _compute_mean_traded_adv(
     adv_frame["adv"] = adv_frame.groupby("asset", sort=False)["amount"].transform(
         lambda series: series.rolling(adv_lookback, min_periods=min_periods).mean()
     )
-    adv_lookup = adv_frame[["date", "asset", "adv"]]
+    adv_frame["asset"] = adv_frame["asset"].astype(str)
+    adv_lookup = (
+        adv_frame.dropna(subset=["adv"])
+        .groupby(["date", "asset"], sort=False)["adv"]
+        .mean()
+    )
 
-    assignments = quantile_assignments_df.copy()
+    assignments = quantile_assignments_df[["date", "asset", "quantile"]].copy()
     assignments["date"] = pd.to_datetime(assignments["date"], errors="coerce")
+    assignments = assignments.dropna(subset=["date", "asset"])
+    assignments["asset"] = assignments["asset"].astype(str)
     assignments = assignments.sort_values(["date", "asset"], kind="mergesort")
     active_dates = (
         assignments["date"].drop_duplicates().sort_values().iloc[:: max(1, rebalance_step)]
     )
     if len(active_dates) < 2:
         return float("nan")
+    assignments = assignments.loc[assignments["quantile"].isin([1, n_quantiles])].copy()
 
     traded_adv_values: list[float] = []
     for prev_date, curr_date in zip(active_dates[:-1], active_dates[1:], strict=False):
@@ -192,10 +210,11 @@ def _compute_mean_traded_adv(
         )
         if not traded_assets:
             continue
-        adv_rows = adv_lookup.loc[
-            (adv_lookup["date"] == curr_date) & (adv_lookup["asset"].isin(traded_assets)),
-            "adv",
-        ].dropna()
+        adv_keys = pd.MultiIndex.from_product(
+            [[curr_date], sorted(traded_assets)],
+            names=["date", "asset"],
+        )
+        adv_rows = adv_lookup.reindex(adv_keys).dropna()
         if len(adv_rows) == 0:
             continue
         traded_adv_values.append(float(adv_rows.mean()))
