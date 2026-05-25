@@ -985,6 +985,94 @@ def test_model_lab_compare_runs_surfaces_backend_contract_when_present(
     assert "backend_contract_validation_error_count" not in plain_row
 
 
+def test_model_lab_compare_runs_surfaces_governance_for_draft_run(
+    tmp_path: Path,
+) -> None:
+    """Compare view must co-locate the three governance signals per run:
+    backend_contract_status, resource_usage (peak RSS vs budget), and which
+    draft candidate produced the run. Plain (non-draft) runs omit them."""
+
+    vault = _build_vault(tmp_path)
+    svc = _make_service(tmp_path, vault)
+
+    _inject_model_lab_run_for_compare(
+        svc=svc,
+        tmp_path=tmp_path,
+        run_id="mrun_draft_gov",
+        case_name="case_draft_gov",
+        factor_name="factor_draft",
+        model_family="ridge",
+        metrics={"mean_ic": 0.02, "ic_ir": 0.4},
+        rank_ic_values=[0.01, 0.02],
+        top_features=["f1", "f2"],
+        integrity={"highest_severity": "pass"},
+    )
+    _inject_model_lab_run_for_compare(
+        svc=svc,
+        tmp_path=tmp_path,
+        run_id="mrun_plain_gov",
+        case_name="case_plain_gov",
+        factor_name="factor_plain",
+        model_family="gbdt",
+        metrics={"mean_ic": 0.01, "ic_ir": 0.2},
+        rank_ic_values=[0.0, 0.01],
+        top_features=["f1", "f3"],
+        integrity={"highest_severity": "pass"},
+    )
+
+    draft_dir = tmp_path / "run-mrun_draft_gov"
+    manifest_path = draft_dir / "run_manifest.json"
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_payload["backend_run_contract"] = {
+        "contract_version": "backend_run_contract_v1",
+        "status": "passed",
+        "issue_count": 0,
+        "artifact_issue_count": 0,
+        "validation_error_count": 0,
+    }
+    manifest_payload["draft_model_source"] = {
+        "name": "pv_turnover_liquidity_light_v1",
+        "path": "custom_models/research/pv_turnover_liquidity_light_v1/model_candidate.json",
+        "candidate_json_sha256": "3070c68111d2033fdd87cbf3778a6ca81772cd43abdf411579fd33cc3aeceee2",
+        "contract_version": "stage2_model_candidate_v1",
+        "implementation_status": "draft_for_stage3",
+    }
+    manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+    (draft_dir / "resource_usage.json").write_text(
+        json.dumps({"peak_rss_mb": 4320.0, "max_rss_mb_budget": 14000.0}),
+        encoding="utf-8",
+    )
+
+    result = svc.compare_model_lab_runs(
+        {"run_ids": ["mrun_draft_gov", "mrun_plain_gov"]}
+    )
+    governance = cast(dict[str, dict[str, object]], result["governance_by_run"])
+    draft_gov = governance["mrun_draft_gov"]
+    plain_gov = governance["mrun_plain_gov"]
+
+    assert draft_gov["backend_contract_status"] == "passed"
+    assert draft_gov["backend_artifact_audit_ok"] is True
+    assert draft_gov["peak_rss_mb"] == 4320.0
+    assert draft_gov["max_rss_mb_budget"] == 14000.0
+    assert draft_gov["peak_rss_within_budget"] is True
+    assert draft_gov["draft_model_candidate_name"] == "pv_turnover_liquidity_light_v1"
+    assert draft_gov["draft_model_candidate_hash"] == "3070c68111d2"
+
+    assert "backend_contract_status" not in plain_gov
+    assert "peak_rss_mb" not in plain_gov
+    assert "draft_model_candidate_name" not in plain_gov
+
+
+def test_model_lab_html_compare_renders_governance_cards() -> None:
+    """Compare view exposes a governance card block reading governance_by_run."""
+    html = _model_lab_html()
+
+    assert "function renderCompareGovernance(" in html
+    assert "payload.governance_by_run" in html
+    assert 'id="compareGovernanceCards"' in html
+    assert "后端契约 / 资源 / 草稿来源" in html
+
+
 def test_model_lab_compare_runs_supports_eight_runs(tmp_path: Path) -> None:
     vault = _build_vault(tmp_path)
     svc = _make_service(tmp_path, vault)

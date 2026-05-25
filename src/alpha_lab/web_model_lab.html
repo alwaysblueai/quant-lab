@@ -4769,6 +4769,52 @@
       </table></div>`;
     }
 
+    // Per-run governance surface for the compare view: backend contract audit
+    // status, peak RSS vs budget, and which draft candidate produced the run.
+    // These live in run_manifest.backend_run_contract / resource_usage.json /
+    // draft_model_source and were previously not shown side-by-side in compare.
+    function renderCompareGovernance(governanceByRun, runIds, labelByRunId) {
+      const ids = Array.isArray(runIds) ? runIds : [];
+      const byRun = governanceByRun && typeof governanceByRun === "object" ? governanceByRun : {};
+      if (!ids.length) {
+        return "<div class='muted'>无 governance 信息。</div>";
+      }
+      const cards = ids.map((runId) => {
+        const g = byRun[runId] || {};
+        const caseLabel = compareRunLabel(runId, labelByRunId);
+        const status = String(g.backend_contract_status || "");
+        const statusChip = status
+          ? `<span class="chip ${status === "passed" ? "good" : "bad"}">${escHtml(status)}</span>`
+          : "<span class='muted'>非 draft run（无契约）</span>";
+        const issueBits = [];
+        if (Number.isFinite(g.backend_contract_issue_count)) issueBits.push(`issue ${g.backend_contract_issue_count}`);
+        if (Number.isFinite(g.backend_contract_validation_error_count)) issueBits.push(`valErr ${g.backend_contract_validation_error_count}`);
+        if (Number.isFinite(g.backend_contract_artifact_issue_count)) issueBits.push(`artIssue ${g.backend_contract_artifact_issue_count}`);
+        const issueText = issueBits.length ? `<span class="muted" style="font-size:11px;">${escHtml(issueBits.join(" / "))}</span>` : "";
+        let resourceHtml = "<span class='muted'>无 resource_usage</span>";
+        if (Number.isFinite(g.peak_rss_mb)) {
+          const budget = Number.isFinite(g.max_rss_mb_budget) ? g.max_rss_mb_budget : null;
+          const withinChip = g.peak_rss_within_budget === false
+            ? "<span class='chip bad'>超预算</span>"
+            : (g.peak_rss_within_budget === true ? "<span class='chip good'>预算内</span>" : "");
+          resourceHtml = `${fmtNum(g.peak_rss_mb)} MB${budget !== null ? ` / 预算 ${fmtNum(budget)} MB` : ""} ${withinChip}`;
+        }
+        const draftName = String(g.draft_model_candidate_name || "").trim();
+        const draftHash = String(g.draft_model_candidate_hash || "").trim();
+        const draftHtml = draftName
+          ? `${escHtml(draftName)}${draftHash ? ` <code>${escHtml(draftHash)}</code>` : ""}`
+          : "<span class='muted'>非 draft 候选</span>";
+        return `
+          <div class="metric-card" style="text-align:left;">
+            <strong>${escHtml(caseLabel)}</strong>
+            <div style="margin-top:4px; font-size:12px;">后端契约：${statusChip} ${issueText}</div>
+            <div style="margin-top:4px; font-size:12px;">peak RSS：${resourceHtml}</div>
+            <div style="margin-top:4px; font-size:12px;">草稿来源：${draftHtml}</div>
+          </div>`;
+      }).join("");
+      return `<div class="meta-grid">${cards}</div>`;
+    }
+
     function buildTopFeatureUnionMatrix(topFeaturesByRun, runIds, labelByRunId = {}) {
       const safeRunIds = Array.isArray(runIds) ? runIds.filter(Boolean).map(String) : [];
       if (safeRunIds.length < 2) {
@@ -8903,6 +8949,8 @@ ${styleText}
         </div>
         <h3 style="margin: 10px 0 6px; font-size: 12px;">指标对比</h3>
         ${renderCompareMetricTable(normalizedRows, orderedColumns, failedRunIdSet)}
+        <h3 style="margin: 12px 0 6px; font-size: 12px;">后端契约 / 资源 / 草稿来源</h3>
+        <div id="compareGovernanceCards">${renderCompareGovernance(payload.governance_by_run, runIds, labelByRunId)}</div>
         <details open style="margin-top:10px;">
           <summary style="cursor:pointer; font-weight:700;">Spec Diff 联动</summary>
           <div style="margin-top:8px;">${renderCompareSpecDiff(payload.spec_diff || null)}</div>

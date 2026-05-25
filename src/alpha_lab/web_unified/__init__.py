@@ -856,6 +856,83 @@ def _load_run_draft_model_source(run: _RunRecord) -> dict[str, object] | None:
     return None
 
 
+def _load_run_resource_usage(run: _RunRecord) -> dict[str, object] | None:
+    """Return ``resource_usage.json`` (peak/stage RSS + budget) for a run.
+
+    Telemetry artifact; absent for runs that predate the memory guard or that
+    never wrote it — callers should treat ``None`` as "no resource surface".
+    """
+
+    payload = _read_json_artifact(
+        _resolve_run_artifact_path(
+            run,
+            artifact_key="resource_usage",
+            fallback_name="resource_usage.json",
+        )
+    )
+    if not isinstance(payload, dict):
+        return None
+    return {str(key): value for key, value in payload.items()}
+
+
+def _build_model_lab_run_governance(run: _RunRecord) -> dict[str, object]:
+    """Compact backend-contract / resource / draft-source surface for one run.
+
+    Single place the compare view reads from so the three governance signals
+    (audit status, peak RSS vs budget, which draft candidate produced the run)
+    are always co-located rather than scattered across per-artifact loaders.
+    """
+
+    governance: dict[str, object] = {"run_id": run.run_id, "case_name": run.case_name}
+
+    contract = _load_run_backend_contract(run)
+    if contract is not None:
+        status = str(contract.get("status") or "")
+        governance["backend_contract_status"] = status
+        governance["backend_artifact_audit_ok"] = status == "passed"
+        for key in (
+            "issue_count",
+            "validation_error_count",
+            "artifact_issue_count",
+        ):
+            value = contract.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                governance[f"backend_contract_{key}"] = value
+
+    resource = _load_run_resource_usage(run)
+    if resource is not None:
+        peak = resource.get("peak_rss_mb")
+        budget = resource.get("max_rss_mb_budget")
+        if isinstance(peak, (int, float)) and not isinstance(peak, bool):
+            governance["peak_rss_mb"] = float(peak)
+        if isinstance(budget, (int, float)) and not isinstance(budget, bool):
+            governance["max_rss_mb_budget"] = float(budget)
+        if (
+            "peak_rss_mb" in governance
+            and "max_rss_mb_budget" in governance
+            and cast(float, governance["max_rss_mb_budget"]) > 0
+        ):
+            governance["peak_rss_within_budget"] = (
+                cast(float, governance["peak_rss_mb"])
+                <= cast(float, governance["max_rss_mb_budget"])
+            )
+
+    draft = _load_run_draft_model_source(run)
+    if draft is not None:
+        governance["draft_model_candidate_name"] = str(draft.get("name") or "")
+        governance["draft_model_candidate_hash"] = str(
+            draft.get("candidate_json_sha256") or ""
+        )[:12]
+        governance["draft_model_source_path"] = str(draft.get("path") or "")
+        governance["draft_model_contract_version"] = str(
+            draft.get("contract_version") or ""
+        )
+        governance["draft_model_implementation_status"] = str(
+            draft.get("implementation_status") or ""
+        )
+    return governance
+
+
 def _read_csv_artifact_rows(path: Path | None) -> list[dict[str, str]]:
     if path is None:
         return []
@@ -1883,6 +1960,7 @@ def _collect_model_lab_run_compare_payload(
         "top_features": _extract_model_factor_top_features(run, top_k=top_k_features),
         "failure_snapshot": _build_run_failure_snapshot(run),
         "metric_row": metric_row,
+        "governance": _build_model_lab_run_governance(run),
         "ic_series": _load_run_rank_ic_timeseries(run),
         "turnover_series": _load_run_turnover_timeseries(run),
         "leakage": _load_model_factor_run_leakage_summary(run),

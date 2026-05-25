@@ -1204,6 +1204,7 @@ class _UnifiedService:
 
         top_features_by_run: dict[str, list[str]] = {}
         metric_rows: list[dict[str, object]] = []
+        governance_by_run: dict[str, dict[str, object]] = {}
         ic_series_by_run: dict[str, dict[str, float]] = {}
         turnover_series_by_run: dict[str, dict[str, float]] = {}
         failure_rows: list[dict[str, object]] = []
@@ -1233,6 +1234,9 @@ class _UnifiedService:
                 cast(dict[str, object], collected["failure_snapshot"])
             )
             metric_rows.append(cast(dict[str, object], collected["metric_row"]))
+            governance_by_run[run.run_id] = cast(
+                dict[str, object], collected["governance"]
+            )
             ic_series_by_run[run.run_id] = cast(
                 dict[str, float], collected["ic_series"]
             )
@@ -1264,6 +1268,7 @@ class _UnifiedService:
             "run_failures": failure_rows,
             "metric_columns": list(_MODEL_LAB_COMPARE_METRIC_KEYS),
             "metric_rows": metric_rows,
+            "governance_by_run": governance_by_run,
             "top_features_by_run": top_features_by_run,
             "feature_stability": comparison,
             "spec_diff": _build_model_lab_run_spec_diff(records),
