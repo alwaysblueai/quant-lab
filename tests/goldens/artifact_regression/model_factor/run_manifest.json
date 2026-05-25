@@ -159,6 +159,32 @@
     "n_pass": 14,
     "n_warn": 3
   },
+  "model_diagnostic_artifacts": {
+    "feature_oos_ic": {
+      "artifact_filename": "feature_oos_ic.csv",
+      "contract_status": "emitted_v1",
+      "emitted": true,
+      "evaluation_profile": "default_research",
+      "reason": "emitted by the model-factor pipeline for this run",
+      "schema_version": "model_diagnostic_artifact_status_v1"
+    },
+    "purged_kfold_fold_daily_ic": {
+      "artifact_filename": "purged_kfold_fold_daily.csv",
+      "contract_status": "emitted_v1",
+      "emitted": true,
+      "evaluation_profile": "default_research",
+      "reason": "emitted by the model-factor pipeline for this run",
+      "schema_version": "model_diagnostic_artifact_status_v1"
+    },
+    "training_metrics": {
+      "artifact_filename": "training_metrics.csv",
+      "contract_status": "emitted_v1",
+      "emitted": true,
+      "evaluation_profile": "default_research",
+      "reason": "emitted by the model-factor pipeline for this run",
+      "schema_version": "model_diagnostic_artifact_status_v1"
+    }
+  },
   "outputs": {
     "backtest_result_json": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/backtest_result.json",
     "coverage": "<OUTPUT_ROOT>/demo_model_alpha_model_factor/coverage.csv",

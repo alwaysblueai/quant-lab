@@ -210,7 +210,9 @@ def test_recipe_projection_falls_back_wide_when_factor_unresolved(
     # No matching custom factor in the workspace -> conservative wide projection.
     monkeypatch.setattr(sf_pipeline, "load_persisted_custom_factors", lambda *a, **k: {})
 
-    optional = set(_resolve_prices_optional_columns(_recipe_spec_with_method(spec, "unknown_method")))
+    optional = set(
+        _resolve_prices_optional_columns(_recipe_spec_with_method(spec, "unknown_method"))
+    )
 
     # Fallback keeps the full intraday set so an unresolved recipe never breaks.
     assert {"ret_morning", "rv_5m", "amount_share_close30"}.issubset(optional)
