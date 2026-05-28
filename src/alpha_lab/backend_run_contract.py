@@ -393,6 +393,88 @@ def finalize_backend_contract(
     return receipt
 
 
+def finalize_backend_contract_failure(
+    output_dir: str | Path,
+    *,
+    workflow: BackendRunWorkflow,
+    draft_source_path: str | Path,
+    case_spec_path: str | Path,
+    evaluation_profile: str,
+    failure_code: str,
+    failure_message: str,
+    failure_details: Mapping[str, object] | None = None,
+    command: Sequence[str] = (),
+) -> dict[str, object]:
+    """Write backend-run failure sidecars for an incomplete research draft run.
+
+    This path is for failures that happen before the normal artifact bundle is
+    exported, such as an opt-in memory-budget breach. It deliberately writes a
+    failed receipt instead of pretending the run produced the full Level 1/2
+    artifact set.
+    """
+
+    run_dir = Path(output_dir).expanduser().resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    source_block = _source_audit_dict_for_workflow(
+        workflow,
+        draft_source_path=draft_source_path,
+    )
+    manifest = _minimal_failure_manifest(
+        run_dir,
+        workflow=workflow,
+        source_block=source_block,
+        failure_code=failure_code,
+        failure_message=failure_message,
+        failure_details=failure_details,
+    )
+    _write_json(run_dir / "run_manifest.json", manifest)
+    comparison_path = _write_failure_comparison_summary(
+        run_dir,
+        workflow=workflow,
+        failure_code=failure_code,
+    )
+    artifact_audit = _build_incomplete_run_artifact_audit(
+        run_dir,
+        workflow=workflow,
+        source_block=source_block,
+        failure_code=failure_code,
+        failure_message=failure_message,
+        failure_details=failure_details,
+    )
+    validation_payload = {
+        "ok": False,
+        "errors": [
+            {
+                "code": failure_code,
+                "message": failure_message,
+                "details": dict(failure_details or {}),
+            }
+        ],
+    }
+    receipt = build_backend_run_receipt(
+        workflow=workflow,
+        output_dir=run_dir,
+        case_spec_path=case_spec_path,
+        draft_source_path=draft_source_path,
+        validation_payload=validation_payload,
+        artifact_audit=artifact_audit,
+        evaluation_profile=evaluation_profile,
+        comparison_summary_path=comparison_path,
+        command=command,
+        contract_ok=False,
+    )
+    receipt_path = write_backend_run_receipt(run_dir, receipt)
+    attach_backend_contract_to_manifest(
+        run_dir,
+        receipt_path=receipt_path,
+        comparison_summary_path=comparison_path,
+        artifact_audit=artifact_audit,
+        contract_ok=False,
+        validation_payload=validation_payload,
+    )
+    return receipt
+
+
 def attach_backend_contract_to_manifest(
     output_dir: str | Path,
     *,
@@ -604,6 +686,148 @@ def _audit_model_source_blocks(
     )
 
 
+def _source_audit_dict_for_workflow(
+    workflow: BackendRunWorkflow,
+    *,
+    draft_source_path: str | Path,
+) -> dict[str, object]:
+    if workflow == "single_factor":
+        return read_custom_factor_source(draft_source_path).to_audit_dict()
+    if workflow == "model_factor":
+        return read_draft_model_source(draft_source_path).to_audit_dict()
+    raise ValueError(f"unsupported backend workflow: {workflow!r}")
+
+
+def _minimal_failure_manifest(
+    run_dir: Path,
+    *,
+    workflow: BackendRunWorkflow,
+    source_block: Mapping[str, object],
+    failure_code: str,
+    failure_message: str,
+    failure_details: Mapping[str, object] | None,
+) -> dict[str, object]:
+    source_key = "custom_factor_source" if workflow == "single_factor" else "draft_model_source"
+    manifest: dict[str, object] = {
+        "schema_version": "1.0.0",
+        "artifact_type": "alpha_lab_run_manifest",
+        "workflow": workflow,
+        "case_name": run_dir.name,
+        "output_dir": str(run_dir),
+        "status": "failed",
+        "failure": {
+            "code": failure_code,
+            "message": failure_message,
+            "details": dict(failure_details or {}),
+        },
+        "inputs": {source_key: dict(source_block)},
+        "outputs": {},
+        source_key: dict(source_block),
+    }
+    return manifest
+
+
+def _write_failure_comparison_summary(
+    run_dir: Path,
+    *,
+    workflow: BackendRunWorkflow,
+    failure_code: str,
+) -> Path:
+    path = run_dir / COMPARISON_SUMMARY_NAME
+    _write_json(
+        path,
+        {
+            "schema_version": "1.0.0",
+            "artifact_type": "alpha_lab_backend_comparison_summary",
+            "contract_version": BACKEND_RUN_CONTRACT_VERSION,
+            "workflow": workflow,
+            "case_name": run_dir.name,
+            "output_dir": str(run_dir),
+            "generated_at_utc": _utc_now(),
+            "status": "not_available",
+            "reason": f"run failed before comparison metrics were available: {failure_code}",
+            "metric_deltas": {},
+        },
+    )
+    return path
+
+
+def _build_incomplete_run_artifact_audit(
+    run_dir: Path,
+    *,
+    workflow: BackendRunWorkflow,
+    source_block: Mapping[str, object],
+    failure_code: str,
+    failure_message: str,
+    failure_details: Mapping[str, object] | None,
+) -> dict[str, object]:
+    required_files = (
+        *_required_files_for_workflow(workflow),
+        "case_report.md",
+        COMPARISON_SUMMARY_NAME,
+    )
+    present_files: list[str] = []
+    missing_files: list[str] = []
+    issues: list[dict[str, object]] = [
+        {
+            "severity": "error",
+            "code": failure_code,
+            "message": failure_message,
+            "artifact": "run",
+            "details": dict(failure_details or {}),
+        }
+    ]
+    for relative in required_files:
+        if (run_dir / relative).exists():
+            present_files.append(relative)
+            continue
+        missing_files.append(relative)
+        issues.append(
+            {
+                "severity": "error",
+                "code": "missing_required_artifact",
+                "message": (
+                    "required artifact is missing because run failed before "
+                    f"export: {relative}"
+                ),
+                "artifact": relative,
+            }
+        )
+
+    source_key = "custom_factor_source" if workflow == "single_factor" else "draft_model_source"
+    return {
+        "contract_version": BACKEND_RUN_CONTRACT_VERSION,
+        "workflow": workflow,
+        "ok": False,
+        "output_dir": str(run_dir),
+        "required_files": list(required_files),
+        "present_files": present_files,
+        "missing_files": missing_files,
+        "artifact_contracts": {},
+        "source_audit": {
+            "audit_key": source_key,
+            "expected_source_path": _text(source_block.get("path")),
+            "locations": {
+                f"run_manifest.{source_key}": {
+                    "ok": True,
+                    "missing_fields": [],
+                    "mismatches": {},
+                },
+                f"run_manifest.inputs.{source_key}": {
+                    "ok": True,
+                    "missing_fields": [],
+                    "mismatches": {},
+                },
+            },
+            "note": (
+                "definition artifacts unavailable because the run failed before "
+                "artifact export"
+            ),
+        },
+        "issues": issues,
+    }
+
+
 def _audit_hash_locations(
     locations: Mapping[str, Mapping[str, object]],
     *,
@@ -758,6 +982,7 @@ __all__ = [
     "build_comparison_summary",
     "detect_research_draft_run",
     "finalize_backend_contract",
+    "finalize_backend_contract_failure",
     "write_backend_run_receipt",
     "write_comparison_summary",
 ]

@@ -73,42 +73,60 @@ def _build_effective_coverage_by_date(
     if prices.empty or not {"date", "asset"}.issubset(prices.columns):
         return pd.DataFrame(columns=columns)
 
+    def _empty_key_index() -> pd.MultiIndex:
+        return pd.MultiIndex.from_arrays([[], []], names=["date", "asset"])
+
     eligible = prices[["date", "asset"]].copy()
     eligible["date"] = pd.to_datetime(eligible["date"], errors="coerce")
-    eligible = eligible.dropna(subset=["date", "asset"]).drop_duplicates()
+    eligible = eligible.dropna(subset=["date", "asset"])
     if eligible.empty:
         return pd.DataFrame(columns=columns)
     eligible["date"] = eligible["date"].dt.normalize()
     eligible["asset"] = eligible["asset"].astype(str)
+    eligible = eligible.drop_duplicates()
+    eligible_index = pd.MultiIndex.from_frame(eligible[["date", "asset"]])
 
-    def _valid_flags(frame: pd.DataFrame, flag_col: str) -> pd.DataFrame:
+    def _valid_key_index(frame: pd.DataFrame) -> pd.MultiIndex:
         if frame.empty or not {"date", "asset", "value"}.issubset(frame.columns):
-            return pd.DataFrame(columns=["date", "asset", flag_col])
+            return _empty_key_index()
         out = frame[["date", "asset", "value"]].copy()
         out["date"] = pd.to_datetime(out["date"], errors="coerce")
         out = out.dropna(subset=["date", "asset"])
         if out.empty:
-            return pd.DataFrame(columns=["date", "asset", flag_col])
+            return _empty_key_index()
         out["date"] = out["date"].dt.normalize()
         out["asset"] = out["asset"].astype(str)
-        out[flag_col] = pd.to_numeric(out["value"], errors="coerce").notna()
-        return out.groupby(["date", "asset"], as_index=False)[flag_col].max().reset_index(drop=True)
+        out = out.loc[pd.to_numeric(out["value"], errors="coerce").notna(), ["date", "asset"]]
+        if out.empty:
+            return _empty_key_index()
+        return pd.MultiIndex.from_frame(out.drop_duplicates())
 
-    score_flags = _valid_flags(factor_df, "has_valid_score")
-    label_flags = _valid_flags(label_df, "has_valid_forward_return")
-    merged = eligible.merge(score_flags, on=["date", "asset"], how="left")
-    merged = merged.merge(label_flags, on=["date", "asset"], how="left")
-    merged["has_valid_score"] = merged["has_valid_score"].fillna(False).astype(bool)
-    merged["has_valid_forward_return"] = (
-        merged["has_valid_forward_return"].fillna(False).astype(bool)
+    def _count_by_date(index: pd.MultiIndex) -> pd.Series:
+        if len(index) == 0:
+            return pd.Series(dtype="int64")
+        frame = index.to_frame(index=False)
+        return frame.groupby("date", sort=True)["asset"].nunique()
+
+    valid_score_index = _valid_key_index(factor_df).intersection(eligible_index)
+    valid_label_index = _valid_key_index(label_df).intersection(eligible_index)
+    valid_sample_index = valid_score_index.intersection(valid_label_index)
+
+    summary = pd.DataFrame(
+        {
+            "eligible_count": eligible.groupby("date", sort=True)["asset"].nunique(),
+        }
     )
-    merged["has_valid_sample"] = merged["has_valid_score"] & merged["has_valid_forward_return"]
-
-    summary = merged.groupby("date", sort=True).agg(
-        eligible_count=("asset", "nunique"),
-        valid_score_count=("has_valid_score", "sum"),
-        valid_forward_return_count=("has_valid_forward_return", "sum"),
-        valid_sample_count=("has_valid_sample", "sum"),
+    summary["valid_score_count"] = _count_by_date(valid_score_index).reindex(
+        summary.index,
+        fill_value=0,
+    )
+    summary["valid_forward_return_count"] = _count_by_date(valid_label_index).reindex(
+        summary.index,
+        fill_value=0,
+    )
+    summary["valid_sample_count"] = _count_by_date(valid_sample_index).reindex(
+        summary.index,
+        fill_value=0,
     )
     count_cols = [
         "eligible_count",

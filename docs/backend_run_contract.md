@@ -55,6 +55,31 @@ draft 到 artifact audit 都有固定路径、固定命令、固定产物和固�
 - `comparison_summary.json`
 - `backend_run_receipt.json`
 
+`run_manifest.json.artifact_tiers` 对重型明细产物使用结构化对象，至少说明
+`tier`、`is_complete`、`row_count`、`source_row_count`、`omitted_row_count`、
+`sampling_policy` 和 `reason`。前端必须据此区分完整产物与
+`exploratory_screening` 下的采样产物，不能把 sampled holdings/weights 当作
+完整 holdings/weights 展示。
+
+### `artifact_tiers` vs `model_diagnostic_artifacts`（两条线不共用同一机制）
+
+这两个 manifest 块解决的是不同问题，**不要混用**，前端必须按 `workflow` 选对块读：
+
+| 维度 | `artifact_tiers`（single-factor 线） | `model_diagnostic_artifacts`（model-factor 线） |
+| --- | --- | --- |
+| 解决的问题 | 重型明细产物被**行采样** | profile 是否**跳过**某诊断产物的计算 |
+| 典型产物 | holdings / weights（`sampled_extreme_quantiles` / `sampled_nonzero_weights`） | `feature_oos_ic`（`exploratory_screening` 下 `compute_feature_oos_ic=False`） |
+| 条目语义 | `tier` / `is_complete` / `row_count` / `sampling_policy` | `contract_status`（`emitted_v1` / `not_emitted_v1`）/ `emitted` / `evaluation_profile` / `reason` |
+| 前端误读风险 | 把 sampled 行当完整行展示 | 把 profile 抑制的空文件当作"零 IC / 零信号" |
+| 由谁写 | `real_cases/single_factor/artifacts.py` | `artifact_contracts.build_model_diagnostic_artifact_status`（`real_cases/model_factor/artifacts/core.py`） |
+
+判定规则：
+
+- **model-factor 默认不产 `artifact_tiers`**。model 线的评估明细（IC、turnover、group returns、coverage 等）都是**完整、非行采样**产物，没有 holdings/weights 行采样语义，所以 manifest 不会出现 `artifact_tiers` 块——这是符合契约的缺失，不是 bug。model 线统一用 `model_diagnostic_artifacts` 表达"哪些诊断被 profile 抑制"。
+- **single-factor 才用 `artifact_tiers`**，因为它会在 `exploratory_screening` 下对 holdings/weights 做行采样。
+- 只有当 model 线将来真的产出**被行采样的重型明细产物**（例如某条 model 候选触发了会采样 holdings/weights 的 Level 2 组合验证）时，才需要为 model 线补 `artifact_tiers`；在此之前，`model_diagnostic_artifacts` 即可承载全部需求。
+- 前端读取建议：`workflow=single_factor` → 读 `artifact_tiers`；`workflow=model_factor` → 读 `model_diagnostic_artifacts`，并对 `contract_status=not_emitted_v1` 的诊断显示"该 profile 未计算"，而非数值 0。
+
 single-factor 额外必有：
 
 - `factor_definition.json`
@@ -137,6 +162,40 @@ draft"，而不是 silently 跑过。
 - factor 的 `custom_factor_source` 与 `factor.json` hash 不一致。
 - model 的 `draft_model_source` 与 `model_candidate.json` hash 不一致。
 - `case_report.md`、`comparison_summary.json` 或 `backend_run_receipt.json` 缺失。
+
+## 允许的非失败提示
+
+以下 warning 不代表契约失败：
+
+- 非 promoted draft 因子默认不跑完整 Level 2 portfolio validation；只要稳定
+  Level 2 artifact 仍按合同写出，contract audit 可以继续通过。
+- 当本地或 CI 没有 Playwright/Chromium 时，`research_tearsheet.pdf` 会使用
+  matplotlib fallback 生成。它满足 artifact contract；需要高保真 PDF 时再安装
+  Playwright/Chromium。
+
+## 内存预算与 resource_usage.json
+
+`real-case` pipeline 内置一个**软**内存 guard（`RunMemoryMonitor`）：在阶段边界
+（`run_start` / `load_inputs` / `evaluate` / `artifacts_exported`）采样进程 RSS，
+当 `ALPHA_LAB_MAX_RSS_MB` 设了预算且 peak 超预算时抛
+`AlphaLabMemoryError`，让 run 以可审计、可归因的方式失败，而不是被 OS OOM-killer
+静默杀掉。
+
+- **成功 run**：在 `artifacts_exported` 阶段写出 `resource_usage.json`
+  （`peak_rss_mb`、按阶段的 `stage_rss_mb`、`max_rss_mb_budget`）。
+- **预算失败 run**：run 在导出阶段前中止，但 CLI 的失败收尾仍会写出标准 sidecar
+  （`backend_run_receipt.json` status=`failed` + `validation.errors` 含
+  `memory_budget_exceeded`、`comparison_summary.json`、`run_manifest.json` 的
+  `backend_run_contract.status=failed`），并以非零退出码返回。此时同样写出
+  `resource_usage.json`（快照从 `AlphaLabMemoryError` 中恢复），使前端无论 run
+  成功还是因预算失败，都能在同一个文件里读取 peak/stage RSS。
+- `resource_usage.json` 是**遥测**产物：RSS 读数非确定，不属于必有/golden 比较
+  artifact，audit 不因其缺失而失败。
+
+**软 guard 边界**：采样发生在阶段边界，单个阶段内的瞬时大分配仍可能在下一次采样
+前冲破 OS 硬限并被 OOM-killer 杀掉——这种情况下不会有 receipt。因此预算应设在
+宿主硬限之下（例如 ~18-19GB 的 WSL 机器设 14000-15000），并对 intraday 宽表
+采用更保守的预算。诊断硬 OOM 见 `docs/runtime_stability_runbook.md`。
 
 ## 与前端关系
 

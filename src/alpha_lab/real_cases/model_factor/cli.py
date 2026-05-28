@@ -8,9 +8,11 @@ import sys
 from pathlib import Path
 
 from alpha_lab.artifact_contracts import validate_level12_artifact_payload
+from alpha_lab.exceptions import AlphaLabMemoryError
 from alpha_lab.real_cases._cli_io import (
     export_to_vault_after_contract,
     finalize_contract_if_research_draft,
+    finalize_memory_failure_contract_if_research_draft,
     render_case_report,
     update_run_manifest,
 )
@@ -21,6 +23,7 @@ from alpha_lab.research_evaluation_config import (
 
 from .benchmark import ModelFactorBenchmarkOptions, run_model_factor_benchmark
 from .pipeline import ModelFactorCaseRunResult, run_model_factor_case
+from .spec import ModelFactorCaseSpec, load_model_factor_case_spec
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +390,33 @@ def _run_one(
             draft_model_source=draft_model_source,
             defer_vault_export=True,
         )
+    except AlphaLabMemoryError as exc:
+        try:
+            spec = load_model_factor_case_spec(spec_path)
+        except (ValueError, FileNotFoundError, RuntimeError) as spec_exc:
+            parser.error(str(spec_exc))
+        output_dir = _output_dir_for_spec(spec, output_root_dir=args.output_root_dir)
+        receipt = finalize_memory_failure_contract_if_research_draft(
+            output_dir=output_dir,
+            workflow="model_factor",
+            draft_source_path=(
+                draft_model_source.path if draft_model_source is not None else None
+            ),
+            case_spec_path=spec_path,
+            evaluation_profile=args.evaluation_profile,
+            error=exc,
+            command=tuple(sys.argv),
+        )
+        if receipt is not None:
+            print("")
+            print("  Workflow : real-case-model-factor")
+            print("  Status   : memory_budget_exceeded")
+            print(f"  Case     : {spec.name}")
+            print(f"  Output   : {output_dir}")
+            print(f"  Receipt  : {output_dir / 'backend_run_receipt.json'}")
+            raise SystemExit(1) from exc
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
 
@@ -464,6 +494,19 @@ def _print_single_success(
     print(f"  Vault Export Mode   : {vault_meta.get('mode')}")
     print(f"  Report Render Status: {manifest_payload.get('render_status')}")
     print(f"  Report Path         : {manifest_payload.get('rendered_report_path')}")
+
+
+def _output_dir_for_spec(
+    spec: ModelFactorCaseSpec,
+    *,
+    output_root_dir: str | None,
+) -> Path:
+    root_dir = (
+        Path(output_root_dir).resolve()
+        if output_root_dir is not None
+        else Path(spec.output.root_dir)
+    )
+    return (root_dir.resolve() / spec.name).resolve()
 
 
 def _run_benchmark(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:

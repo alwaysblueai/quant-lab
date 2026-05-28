@@ -245,7 +245,7 @@ def evaluate_single_factor_case(
     report_row: pd.Series | None = row
     is_result: ExperimentResult | None = None
     is_row: pd.Series | None = None
-    if split_contract is not None:
+    if split_contract is not None and diagnostics_cfg.run_dual_scope_report_path:
         with _stage("core_backtest_full_report_path"):
             report_result = _run_with_stage_heartbeat(
                 stage_message="生成双口径报告路径",
@@ -274,6 +274,7 @@ def evaluate_single_factor_case(
                 evaluation_config=evaluation_config,
             )
             report_row = report_summary_df.iloc[0]
+    if split_contract is not None and diagnostics_cfg.run_is_report_path:
         with _stage("core_backtest_is_report_path"):
             is_end = pd.Timestamp(split_contract.is_end)
             is_factor_df = core_factor_df.loc[
@@ -1095,6 +1096,8 @@ def _sample_diagnostic_frame(
 
 def _skipped_single_factor_diagnostics(diagnostics_cfg: object) -> list[str]:
     mapping = {
+        "dual_scope_report_path": getattr(diagnostics_cfg, "run_dual_scope_report_path", True),
+        "is_report_path": getattr(diagnostics_cfg, "run_is_report_path", True),
         "neutralization_raw_comparison": getattr(
             diagnostics_cfg, "run_neutralization_raw_comparison", True
         ),

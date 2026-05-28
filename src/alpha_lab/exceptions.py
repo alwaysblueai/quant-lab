@@ -50,6 +50,39 @@ class AlphaLabExperimentError(AlphaLabError, RuntimeError):
     """
 
 
+class AlphaLabMemoryError(AlphaLabError, MemoryError):
+    """Raised when a run's resident memory exceeds its configured budget.
+
+    This is a *soft* guard: a :class:`RunMemoryMonitor` samples RSS at stage
+    boundaries and raises this when the peak exceeds ``ALPHA_LAB_MAX_RSS_MB``, so
+    a run fails with an auditable, attributable error instead of being silently
+    killed by the OS OOM-killer. Because sampling is periodic, a single large
+    allocation between samples can still trip the OS limit first; the budget
+    should therefore be set below the host's hard memory limit.
+
+    Inherits from ``MemoryError`` so generic memory handlers still match.
+    """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        stage: str | None = None,
+        peak_rss_mb: float | None = None,
+        max_rss_mb: float | None = None,
+        resource_usage: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.peak_rss_mb = peak_rss_mb
+        self.max_rss_mb = max_rss_mb
+        # Full resource-usage snapshot (per-stage RSS breakdown) captured at the
+        # moment the budget tripped, so the failure handler can still emit a
+        # resource_usage.json artifact even though the run aborted before the
+        # normal artifact-export stage.
+        self.resource_usage = resource_usage
+
+
 class VaultWriteError(AlphaLabError, PermissionError):
     """Raised when a vault write would land outside the authorized root.
 

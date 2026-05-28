@@ -19,6 +19,7 @@ from alpha_lab.real_cases.common_spec import (
     resolve_optional_path,
     resolve_required_path,
 )
+from alpha_lab.research_evaluation_config import AVAILABLE_RESEARCH_EVALUATION_PROFILES
 
 Direction = Literal["long", "short"]
 Standardization = Literal["zscore", "rank", "none"]
@@ -101,6 +102,11 @@ class SingleFactorCaseSpec:
     transaction_cost: TransactionCostSpec
     output: OutputSpec
     archive_identity: str | None = None
+    # Recommended evaluation profile for this case. The spec stays
+    # profile-agnostic (campaign comparison runs one spec under several
+    # profiles); this is only a default a runner may fall back to when no
+    # profile is supplied explicitly.
+    evaluation_profile: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -117,6 +123,13 @@ class SingleFactorCaseSpec:
             raise AlphaLabConfigError("rebalance_frequency must be non-empty")
         if self.n_quantiles < 2:
             raise AlphaLabConfigError("n_quantiles must be >= 2")
+        if self.evaluation_profile is not None:
+            if self.evaluation_profile not in AVAILABLE_RESEARCH_EVALUATION_PROFILES:
+                raise AlphaLabConfigError(
+                    "evaluation_profile must be one of "
+                    f"{list(AVAILABLE_RESEARCH_EVALUATION_PROFILES)}; "
+                    f"got {self.evaluation_profile!r}"
+                )
 
 
 def load_single_factor_case_spec(path: str | Path) -> SingleFactorCaseSpec:
@@ -138,6 +151,7 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
     name = required_str(data, "name")
     factor_name = required_str(data, "factor_name")
     archive_identity = _optional_text(data.get("archive_identity"))
+    evaluation_profile = _optional_text(data.get("evaluation_profile"))
     factor_path = required_str(data, "factor_path")
     prices_path = required_str(data, "prices_path")
     rebalance_frequency = required_str(data, "rebalance_frequency")
@@ -165,6 +179,7 @@ def single_factor_case_spec_from_mapping(data: Mapping[str, object]) -> SingleFa
         name=name,
         factor_name=factor_name,
         archive_identity=archive_identity,
+        evaluation_profile=evaluation_profile,
         factor_path=factor_path,
         prices_path=prices_path,
         factor_input=factor_input,

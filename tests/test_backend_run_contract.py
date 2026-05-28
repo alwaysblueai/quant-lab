@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 from alpha_lab.backend_run_contract import (
@@ -27,13 +28,24 @@ from alpha_lab.backend_run_contract import (
     build_comparison_summary,
     detect_research_draft_run,
     finalize_backend_contract,
+    finalize_backend_contract_failure,
     write_backend_run_receipt,
     write_comparison_summary,
 )
 from alpha_lab.custom_factors import read_custom_factor_source
 from alpha_lab.custom_models import read_draft_model_source
+from alpha_lab.exceptions import AlphaLabMemoryError
 from tests.model_factor_case_helpers import write_demo_model_factor_case
 from tests.single_factor_case_helpers import write_demo_single_factor_case
+
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore:Level 2 portfolio validation suppressed:UserWarning"
+    ),
+    pytest.mark.filterwarnings(
+        "ignore:research_tearsheet PDF fallback:UserWarning"
+    ),
+]
 
 _FACTOR_CODE = (
     "def build_factor(frame):\n"
@@ -676,6 +688,51 @@ def test_finalize_marks_failure_when_required_artifact_missing(tmp_path: Path) -
     assert contract["validation_error_count"] == 0
 
 
+def test_finalize_backend_contract_failure_writes_memory_receipt(
+    tmp_path: Path,
+) -> None:
+    factor_json = _write_factor_draft(tmp_path)
+    run_dir = tmp_path / "outputs" / "memory_failed_case"
+
+    receipt = finalize_backend_contract_failure(
+        run_dir,
+        workflow="single_factor",
+        draft_source_path=factor_json,
+        case_spec_path=tmp_path / "case.yaml",
+        evaluation_profile="exploratory_screening",
+        failure_code="memory_budget_exceeded",
+        failure_message="run memory budget exceeded",
+        failure_details={
+            "stage": "load_inputs",
+            "peak_rss_mb": 18000.0,
+            "max_rss_mb": 15000.0,
+        },
+        command=("alpha-lab", "real-case", "single-factor", "run"),
+    )
+
+    assert receipt["status"] == "failed"
+    assert (run_dir / BACKEND_RUN_RECEIPT_NAME).exists()
+    assert (run_dir / COMPARISON_SUMMARY_NAME).exists()
+    comparison = _read_json(run_dir / COMPARISON_SUMMARY_NAME)
+    assert comparison["status"] == "not_available"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is False
+    assert "metrics.json" in audit["missing_files"]
+    assert COMPARISON_SUMMARY_NAME in audit["present_files"]
+    manifest = _read_json(run_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    assert int(cast(int, contract["validation_error_count"])) == 1
+    assert int(cast(int, contract["artifact_issue_count"])) >= 1
+    assert detect_research_draft_run(run_dir, workflow="single_factor") == factor_json
+
+
 def test_finalize_marks_failure_when_only_validator_fails(tmp_path: Path) -> None:
     """Validator-only failure must surface non-zero ``issue_count`` so the Web
     compare summary does not show 'failed with 0 issues'."""
@@ -925,6 +982,67 @@ def test_real_case_single_factor_cli_fails_contract_when_validator_rejects_draft
     )
 
 
+def test_real_case_single_factor_cli_writes_failed_receipt_on_memory_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import alpha_lab.real_cases.single_factor.cli as sf_cli
+
+    factor_name = "e2e_memory_factor"
+    _write_research_factor(tmp_path, factor_name)
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+    _patch_case_to_use_custom_factor(spec_path, factor_name)
+
+    def _raise_memory_error(*_: object, **__: object) -> object:
+        raise AlphaLabMemoryError(
+            "run memory budget exceeded at stage 'load_inputs'",
+            stage="load_inputs",
+            peak_rss_mb=18000.0,
+            max_rss_mb=15000.0,
+            resource_usage={
+                "schema_version": "1.0.0",
+                "artifact_type": "alpha_lab_resource_usage",
+                "monitor_available": True,
+                "max_rss_mb_budget": 15000.0,
+                "peak_rss_mb": 18000.0,
+                "stage_rss_mb": {"run_start": 200.0, "load_inputs": 18000.0},
+                "note": "soft guard",
+            },
+        )
+
+    monkeypatch.setattr(sf_cli, "run_single_factor_case", _raise_memory_error)
+
+    rc = sf_cli.main(
+        ["run", str(spec_path), "--evaluation-profile", "exploratory_screening"]
+    )
+
+    assert rc == 1
+    output_dir = tmp_path / "outputs" / f"e2e_{factor_name}_contract_case"
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["status"] == "failed"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    details = cast(Mapping[str, object], errors[0]["details"])
+    assert details["stage"] == "load_inputs"
+    assert details["peak_rss_mb"] == 18000.0
+    audit = receipt["artifact_audit"]
+    assert isinstance(audit, dict)
+    assert audit["ok"] is False
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    assert int(cast(int, contract["validation_error_count"])) == 1
+    # P2(a): the budget-failed run aborts before artifact export, but the failure
+    # handler still emits resource_usage.json (snapshot recovered from the error)
+    # so the frontend reads peak/stage RSS from one place for success and failure.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert resource_usage["peak_rss_mb"] == 18000.0
+    assert resource_usage["stage_rss_mb"]["load_inputs"] == 18000.0
+
+
 def test_real_case_single_factor_cli_exports_contract_sidecars_to_vault(
     tmp_path: Path,
 ) -> None:
@@ -1073,3 +1191,161 @@ def test_real_case_model_factor_cli_finalizes_contract_for_research_draft(
     contract = manifest["backend_run_contract"]
     assert isinstance(contract, dict)
     assert contract["status"] == "passed"
+
+
+def test_real_case_model_factor_cli_writes_failed_receipt_on_memory_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0: a model-factor draft run that trips the RSS budget writes the standard
+    memory_budget_exceeded failed receipt (mirrors the single-factor path)."""
+    import alpha_lab.real_cases.model_factor.cli as mf_cli
+
+    candidate_name = "e2e_model_memory_candidate"
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name=candidate_name)
+    payload = _model_candidate_payload(spec_path, candidate_name)
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    def _raise_memory_error(*_: object, **__: object) -> object:
+        raise AlphaLabMemoryError(
+            "run memory budget exceeded at stage 'train_model'",
+            stage="train_model",
+            peak_rss_mb=18000.0,
+            max_rss_mb=15000.0,
+            resource_usage={
+                "schema_version": "1.0.0",
+                "artifact_type": "alpha_lab_resource_usage",
+                "monitor_available": True,
+                "max_rss_mb_budget": 15000.0,
+                "peak_rss_mb": 18000.0,
+                "stage_rss_mb": {"run_start": 200.0, "train_model": 18000.0},
+                "note": "soft guard",
+            },
+        )
+
+    monkeypatch.setattr(mf_cli, "run_model_factor_case", _raise_memory_error)
+
+    with pytest.raises(SystemExit) as excinfo:
+        mf_cli.main(
+            [
+                "run",
+                str(spec_path),
+                "--draft-model-candidate",
+                str(candidate_json),
+                "--evaluation-profile",
+                "exploratory_screening",
+            ]
+        )
+    assert excinfo.value.code == 1
+
+    output_dir = tmp_path / "outputs" / f"demo_{candidate_name}_model_factor"
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "model_factor"
+    assert receipt["status"] == "failed"
+    validation = receipt["validation"]
+    assert isinstance(validation, dict)
+    errors = cast(list[Mapping[str, object]], validation["errors"])
+    assert errors[0]["code"] == "memory_budget_exceeded"
+    details = cast(Mapping[str, object], errors[0]["details"])
+    assert details["stage"] == "train_model"
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = manifest["backend_run_contract"]
+    assert isinstance(contract, dict)
+    assert contract["status"] == "failed"
+    # The snapshot carried by the error also lands as resource_usage.json.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert resource_usage["stage_rss_mb"]["train_model"] == 18000.0
+
+
+def test_model_factor_draft_backend_contract_e2e(tmp_path: Path) -> None:
+    """P1-C: lock the full model-factor draft lifecycle in one place — validate ->
+    standard run -> receipt + manifest contract + source-hash audit (3 hashes in
+    every location) + model_definition / feature_manifest draft_model_source +
+    resource_usage.json + readable diagnostic-artifact status."""
+    from alpha_lab.draft_model_validation import validate_draft_model_file
+    from alpha_lab.real_cases.model_factor.cli import main as mf_main
+
+    candidate_name = "e2e_model_contract_full"
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name=candidate_name)
+    payload = _model_candidate_payload(spec_path, candidate_name)
+    candidate_dir = tmp_path / "custom_models" / "research" / candidate_name
+    candidate_dir.mkdir(parents=True)
+    candidate_json = candidate_dir / "model_candidate.json"
+    candidate_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 1) validate-draft-model gate passes and yields the three source hashes.
+    validation = validate_draft_model_file(candidate_json)
+    assert validation.ok
+    assert validation.candidate_json_sha256
+    assert validation.case_spec_sha256
+    assert validation.feature_contract_sha256
+
+    # 2) standard run through the CLI.
+    rc = mf_main(
+        [
+            "run",
+            str(spec_path),
+            "--draft-model-candidate",
+            str(candidate_json),
+            "--evaluation-profile",
+            "exploratory_screening",
+            "--screening-retrain-every-n-dates",
+            "40",
+        ]
+    )
+    assert rc == 0
+    output_dir = tmp_path / "outputs" / f"demo_{candidate_name}_model_factor"
+
+    # 3) receipt + comparison + manifest contract all written and passing.
+    receipt = _read_json(output_dir / BACKEND_RUN_RECEIPT_NAME)
+    assert receipt["workflow"] == "model_factor"
+    assert receipt["status"] == "success"
+    assert (output_dir / COMPARISON_SUMMARY_NAME).exists()
+    manifest = _read_json(output_dir / "run_manifest.json")
+    contract = cast(Mapping[str, object], manifest["backend_run_contract"])
+    assert contract["status"] == "passed"
+    assert contract["issue_count"] == 0
+
+    # 4) source-hash audit covers all draft_model_source locations.
+    audit = cast(Mapping[str, object], receipt["artifact_audit"])
+    source_audit = cast(Mapping[str, object], audit["source_audit"])
+    assert source_audit["audit_key"] == "draft_model_source"
+    locations = cast(Mapping[str, Mapping[str, object]], source_audit["locations"])
+    for loc in (
+        "model_definition.draft_model_source",
+        "feature_manifest.draft_model_source",
+        "run_manifest.draft_model_source",
+    ):
+        assert locations[loc]["ok"] is True
+
+    # 5) the 3 model source hashes are present in model_definition + feature_manifest.
+    for artifact in ("model_definition.json", "feature_manifest.json"):
+        src = cast(Mapping[str, object], _read_json(output_dir / artifact)["draft_model_source"])
+        for key in ("candidate_json_sha256", "case_spec_sha256", "feature_contract_sha256"):
+            assert _is_non_empty_string_value(src.get(key))
+
+    # 6) resource_usage.json (P0 telemetry) is present with per-stage RSS.
+    resource_usage = _read_json(output_dir / "resource_usage.json")
+    assert "peak_rss_mb" in resource_usage
+    assert "max_rss_mb_budget" in resource_usage
+    assert isinstance(resource_usage["stage_rss_mb"], dict)
+
+    # 7) readable diagnostic-artifact status (P1-B): feature_oos_ic suppressed by
+    # exploratory profile is flagged not_emitted_v1 rather than read as zero IC.
+    diagnostics_status = cast(
+        Mapping[str, Mapping[str, object]], manifest["model_diagnostic_artifacts"]
+    )
+    feature_oos_ic = diagnostics_status["feature_oos_ic"]
+    assert feature_oos_ic["contract_status"] == "not_emitted_v1"
+    assert feature_oos_ic["emitted"] is False
+
+
+def _is_non_empty_string_value(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())

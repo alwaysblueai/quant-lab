@@ -248,11 +248,19 @@ def validate_draft_factor_file(
     if pit_assumption is None:
         errors.append(_error("pit_assumption_missing", "pit_assumption must be non-empty"))
 
-    code = _optional_text(payload.get("code"))
+    raw_code = payload.get("code")
+    code = _optional_text(raw_code)
     if code is None:
         errors.append(_error("code_missing", "code must be a non-empty string"))
     else:
-        code_sha256 = sha256_text(code)
+        # Hash the *raw* code string exactly as the registry loader does in
+        # alpha_lab.custom_factors.read_custom_factor_source, so this
+        # validator-reported code_sha256 matches the custom_factor_source
+        # code_sha256 that propagates into run_manifest / factor_definition /
+        # backend_run_receipt. _optional_text strips surrounding whitespace for
+        # the contract checks below only; stripping must not change the audited
+        # content hash (otherwise the two recorded hashes silently diverge).
+        code_sha256 = sha256_text(str(raw_code or ""))
         _validate_code_contract(
             code,
             required_columns=required_columns,

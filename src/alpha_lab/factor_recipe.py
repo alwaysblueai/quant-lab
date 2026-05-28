@@ -77,7 +77,14 @@ factor_registry.register("low_volatility", low_volatility)
 factor_registry.register("amplitude", amplitude)
 factor_registry.register("downside_volatility", downside_volatility)
 
-_PRICE_RECIPE_OPTIONAL_COLUMNS = (
+# Daily price/volume + market-status columns. These are the only optional price
+# columns the single-factor backtest + diagnostics can read (close/open/vwap for
+# labels and execution modes, amount for capacity ADV, the rest for tradability
+# and index-membership conditioning). A file-mode (precomputed) factor never needs
+# the intraday block below, so projecting prices to this daily subset is what keeps
+# wide intraday panels from being loaded whole. See _resolve_prices_optional_columns
+# in real_cases/single_factor/pipeline.py.
+_PRICE_DAILY_OPTIONAL_COLUMNS = (
     "open",
     "high",
     "low",
@@ -98,9 +105,12 @@ _PRICE_RECIPE_OPTIONAL_COLUMNS = (
     "is_zz500",
     "is_zz1000",
     "is_sz50",
-    # Intraday-derived daily columns (one row per (date, asset), built strictly from
-    # same-day 09:30-15:00 minute bars by scripts/etl/build_intraday_features.py).
-    # PIT-safe at end-of-day t. See docs/intraday_etl_contract.md for definitions.
+)
+# Intraday-derived daily columns (one row per (date, asset), built strictly from
+# same-day 09:30-15:00 minute bars by scripts/etl/build_intraday_features.py).
+# PIT-safe at end-of-day t. See docs/intraday_etl_contract.md for definitions.
+# Only recipe-mode factors (which may reference these as inputs) need them loaded.
+_PRICE_INTRADAY_OPTIONAL_COLUMNS = (
     "ret_intraday",
     "ret_morning",
     "ret_afternoon",
@@ -171,6 +181,10 @@ _PRICE_RECIPE_OPTIONAL_COLUMNS = (
     "amt_unreliable",
     "n_minutes_traded",
     "n_minutes_zero_volume",
+)
+# Full set of price columns a recipe may reference as inputs (daily + intraday).
+_PRICE_RECIPE_OPTIONAL_COLUMNS = (
+    _PRICE_DAILY_OPTIONAL_COLUMNS + _PRICE_INTRADAY_OPTIONAL_COLUMNS
 )
 _BASE_BUILDER_RESERVED_KEYS = frozenset(
     {

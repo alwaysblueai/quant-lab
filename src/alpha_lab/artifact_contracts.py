@@ -97,6 +97,44 @@ MODEL_FACTOR_DEFERRED_DIAGNOSTIC_CONTRACTS: tuple[dict[str, object], ...] = tupl
     if contract.get("contract_status") == "not_emitted_v1"
 )
 
+
+def build_model_diagnostic_artifact_status(
+    evaluation_profile: str,
+) -> dict[str, dict[str, object]]:
+    """Readable per-diagnostic emission status for one model-factor run.
+
+    model-factor emits complete (non-row-sampled) evaluation artifacts, so it does
+    not use the single-factor ``artifact_tiers`` mechanism (whose tiers are the
+    holdings/weights sampling policies ``sampled_extreme_quantiles`` /
+    ``sampled_nonzero_weights``). The one profile-gated diagnostic is
+    ``feature_oos_ic``: ``exploratory_screening`` skips per-feature OOS IC
+    (``compute_feature_oos_ic=False``), so an empty ``feature_oos_ic.csv`` means
+    "suppressed by profile", not "zero OOS IC". This block makes that distinction
+    explicit so the frontend never reads a profile-suppressed diagnostic as a real
+    zero-signal result.
+    """
+
+    is_exploratory = evaluation_profile == "exploratory_screening"
+    status: dict[str, dict[str, object]] = {}
+    for contract in MODEL_FACTOR_DIAGNOSTIC_ARTIFACT_CONTRACTS:
+        artifact_filename = str(contract["artifact_name"])
+        role = str(contract.get("lineage_role") or artifact_filename)
+        suppressed = role == "feature_oos_ic" and is_exploratory
+        status[role] = {
+            "schema_version": "model_diagnostic_artifact_status_v1",
+            "artifact_filename": artifact_filename,
+            "contract_status": "not_emitted_v1" if suppressed else "emitted_v1",
+            "emitted": not suppressed,
+            "evaluation_profile": evaluation_profile,
+            "reason": (
+                "exploratory_screening does not compute per-feature OOS IC; rerun "
+                "under default_research for a populated feature_oos_ic.csv"
+                if suppressed
+                else "emitted by the model-factor pipeline for this run"
+            ),
+        }
+    return status
+
 _KNOWN_RUN_ARTIFACT_TYPES: frozenset[str] = frozenset(
     {
         "real_case_single_factor_bundle",
@@ -186,6 +224,77 @@ def validate_run_manifest_payload(
         f"{label}.evaluation_standard",
     )
     _validate_split_contract_if_present(payload, "split_contract", label)
+    _validate_artifact_tiers_if_present(payload, label=label)
+    _validate_model_diagnostic_artifacts_if_present(payload, label=label)
+
+
+def _validate_artifact_tiers_if_present(
+    payload: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    if "artifact_tiers" not in payload:
+        return
+    tiers = _require_object(payload, "artifact_tiers", label)
+    allowed_tiers = {"full", "sampled_extreme_quantiles", "sampled_nonzero_weights"}
+    for artifact_name, raw_entry in tiers.items():
+        if not _is_non_empty_string(artifact_name):
+            _raise(f"{label}.artifact_tiers", "keys must be non-empty strings")
+        entry_label = f"{label}.artifact_tiers[{artifact_name!r}]"
+        if not isinstance(raw_entry, Mapping):
+            _raise(entry_label, "must be an object")
+        entry = cast(Mapping[str, object], raw_entry)
+        _require_non_empty_string(entry, "schema_version", entry_label)
+        _require_non_empty_string(entry, "artifact_filename", entry_label)
+        tier = _require_non_empty_string(entry, "tier", entry_label)
+        if tier not in allowed_tiers:
+            _raise(f"{entry_label}.tier", f"must be one of {sorted(allowed_tiers)}")
+        _require_bool(entry, "is_complete", entry_label)
+        for key in ("row_count", "source_row_count", "omitted_row_count"):
+            value = _require_int(entry, key, entry_label)
+            if value < 0:
+                _raise(f"{entry_label}.{key}", "must be non-negative")
+        sample_fraction = entry.get("sample_fraction")
+        if sample_fraction is not None:
+            if isinstance(sample_fraction, bool) or not isinstance(
+                sample_fraction,
+                (int, float),
+            ):
+                _raise(f"{entry_label}.sample_fraction", "must be a number or null")
+            if not 0.0 <= float(sample_fraction) <= 1.0:
+                _raise(f"{entry_label}.sample_fraction", "must be within [0, 1]")
+        _require_non_empty_string(entry, "sampling_policy", entry_label)
+        _require_non_empty_string(entry, "reason", entry_label)
+        _require_non_empty_string(entry, "evaluation_profile", entry_label)
+
+
+def _validate_model_diagnostic_artifacts_if_present(
+    payload: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    if "model_diagnostic_artifacts" not in payload:
+        return
+    block = _require_object(payload, "model_diagnostic_artifacts", label)
+    allowed_status = {"emitted_v1", "not_emitted_v1"}
+    for artifact_name, raw_entry in block.items():
+        if not _is_non_empty_string(artifact_name):
+            _raise(f"{label}.model_diagnostic_artifacts", "keys must be non-empty strings")
+        entry_label = f"{label}.model_diagnostic_artifacts[{artifact_name!r}]"
+        if not isinstance(raw_entry, Mapping):
+            _raise(entry_label, "must be an object")
+        entry = cast(Mapping[str, object], raw_entry)
+        _require_non_empty_string(entry, "schema_version", entry_label)
+        _require_non_empty_string(entry, "artifact_filename", entry_label)
+        contract_status = _require_non_empty_string(entry, "contract_status", entry_label)
+        if contract_status not in allowed_status:
+            _raise(
+                f"{entry_label}.contract_status",
+                f"must be one of {sorted(allowed_status)}",
+            )
+        _require_bool(entry, "emitted", entry_label)
+        _require_non_empty_string(entry, "reason", entry_label)
+        _require_non_empty_string(entry, "evaluation_profile", entry_label)
 
 
 def validate_metrics_payload(

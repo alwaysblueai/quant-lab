@@ -88,6 +88,12 @@ dmesg -T | grep -Ei 'oom|out of memory|killed process|invoked oom-killer' | tail
 3. 检查 `outputs/.../_web_run_logs/<run_id>/status.json` 的 `peak_rss_kb`。
 4. 仍不够时再提高 WSL memory/swap。
 
+预防：给 `real-case` run 设 `ALPHA_LAB_MAX_RSS_MB`（宿主硬限之下，例如 ~18-19GB
+WSL 设 14000-15000）。软 guard 在阶段边界采样，超预算会写出标准失败 receipt
++ `resource_usage.json`（status=`failed`、`memory_budget_exceeded`）而非被静默
+OOM-kill；但单阶段内的瞬时尖峰仍可能逃逸到 OS OOM-killer（届时无 receipt），故对
+intraday 宽表用更保守预算。契约细节见 `docs/backend_run_contract.md`。
+
 如果没有 OOM，但 Codex/Claude 或 API 请求失败，优先检查：
 
 ```bash

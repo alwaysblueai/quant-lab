@@ -382,6 +382,12 @@ class _UnifiedRequestHandler(BaseHTTPRequestHandler):
                     )
                 )
                 return
+            if parsed.path == "/api/vault/single-factor-stage2-intake":
+                self._send_json(self.svc.save_single_factor_stage2_intake(payload))
+                return
+            if parsed.path == "/api/vault/model-factor-stage2-intake":
+                self._send_json(self.svc.save_model_factor_stage2_intake(payload))
+                return
             if parsed.path == "/api/vault/writeback-drafts":
                 self._send_json(
                     self.svc.create_writeback_draft(payload),

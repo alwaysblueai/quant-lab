@@ -97,6 +97,24 @@ Codex GUI 自行猜测如何 merge。
 validator 会做形态校验，artifact 审计块会把 `provenance.idea_id` 复制进
 `draft_model_source.provenance`。
 
+### `stage2_payload_sha256` 物化约定（Stage 2 placeholder → Stage 3 真实 sha）
+
+Stage 2 网页 GPT 无法自引用它正在书写的 payload 的哈希，所以
+`provenance.stage2_payload_sha256` 在 Stage2 产物里是 **placeholder**
+（例如 `PENDING_STAGE3_MATERIALIZE`）。Stage 3 materialize 时**必须**按以下唯一
+约定把它替换成真实 64 位 hex sha，否则 `validate-draft-model` 会以
+`provenance_payload_sha256`（非 64 位 hex）报错：
+
+1. 取 `model_candidate_payload`，把 `provenance.stage2_payload_sha256` 置为空串 `""`。
+2. `json.dumps(payload, ensure_ascii=False, sort_keys=True)` 得到 canonical JSON。
+3. 对其 UTF-8 字节取 `sha256` 的 hexdigest，写回 `provenance.stage2_payload_sha256`。
+
+该约定的可执行规范见
+`tests/test_draft_model_validation.py::test_stage2_payload_sha_materialization_is_deterministic_and_hex`
+与 `::test_materialized_candidate_passes_validator_but_placeholder_fails`。所有
+执行端（Codex GUI / Web Model-Lab / Claude Code）必须用同一约定，保证同一 payload
+产出同一 sha。
+
 ## Codex GUI 执行流
 
 1. 使用 `docs/templates/codex_gui_model_stage3_execution_envelope.md` 作为任务入口。
@@ -260,6 +278,43 @@ candidate），但所有走 `alpha-lab model-idea distribute` 流的候选必须
   `feature_preprocess`、`model.family`、`training.window_type` /
   `train_window_n_dates` / `retrain_every_n_dates`、`target.horizon`、
   `feature_availability` 等。
+
+## Stage0 → Stage3 验收清单
+
+一轮 model-lab 后端草稿实验**通过**当且仅当下列各项全部满足（任一不满足即本轮失败，
+按对应阶段停下并报告，不在合同外改写）：
+
+**Stage 0（idea 分发）**
+- [ ] `alpha-lab model-idea distribute` 产出 `ideas/<idea_id>/` 下 5 个文件：
+      `manifest.json`、`retrieval_pack.md`、`prompt_claude.md`、`prompt_codex.md`、`stage2_input.md`。
+- [ ] `manifest.json::idea_id` 与 `retrieval_pack.md` 中 idea_id 一致。
+
+**Stage 1（双引擎对称输出）**
+- [ ] `stage1_claude.md` / `stage1_codex.md` 各含 4 行 header + Part A 机制候选 + Part B 可执行性评审。
+- [ ] 每条机制有 `implementation_status` 与 `required_columns_present/missing`、`validator_blockers`。
+- [ ] 未注册 feature/column 不作为 v1 required input；`needs_extension` 仅作上下文。
+
+**Stage 2（reconcile + candidate）**
+- [ ] `stage1_reconcile.yaml` = `model_stage1_reconcile_v1`；`stage2_payload_v1.yaml` = `model_stage2_candidate_output_v1`。
+- [ ] `model_candidate_payload` 内层 `stage2_model_candidate_v1` + `draft_for_stage3` + `spec_variant` + 完整 `case_spec_payload`。
+- [ ] 三处 `provenance.idea_id`（stage1 / stage2 / candidate）与 `manifest.json::idea_id` 一致。
+- [ ] `save_model_factor_stage2_intake` 返回 `ok=True`（placeholder sha 仅 warning）。
+
+**Stage 3（materialize + validate + run）**
+- [ ] 只写 `custom_models/research/<cand>/model_candidate.json`、`research_log.md`、`configs/real_cases/model_factor/<cand>_v1.yaml`。
+- [ ] `stage2_payload_sha256` 已按上文约定物化成真实 64 位 hex。
+- [ ] `validate-draft-model` 通过，输出 `candidate_json_sha256` / `case_spec_sha256` / `feature_contract_sha256`。
+- [ ] `real-case model-factor run … --draft-model-candidate …` 退出码 0（或预算失败时写出标准 failed receipt）。
+
+**收尾审计**
+- [ ] `backend_run_receipt.json` status=`success`、`run_manifest.json.backend_run_contract.status=passed`、`comparison_summary.json` 写出。
+- [ ] `draft_model_source` 在 `run_manifest.json` / `model_definition.json` / `feature_manifest.json` 三处齐全，且三处 hash 与 validator 输出一致。
+- [ ] `resource_usage.json` 含 `peak_rss_mb` / `stage_rss_mb` / `max_rss_mb_budget`。
+- [ ] model-factor 全部额外必有 artifact 写出（见 `docs/backend_run_contract.md`）；model 线默认**不**产 `artifact_tiers`，由 `model_diagnostic_artifacts` 承载。
+
+该清单的端到端固化测试是
+`tests/test_backend_run_contract.py::test_model_factor_draft_backend_contract_e2e`
+与 `tests/test_draft_model_validation.py` 中的 Stage2→Stage3 seam 测试。
 
 ## 晋升边界
 

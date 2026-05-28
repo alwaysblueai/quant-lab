@@ -1021,3 +1021,25 @@ def test_model_factor_artifacts_export_cheap_feature_importance_ledger_for_gbdt(
                 str(item.get("artifact")) == "feature_importance.csv"
                 for item in details
             )
+
+
+def test_run_model_factor_case_writes_resource_usage(tmp_path: Path) -> None:
+    """P0: the model-factor pipeline emits resource_usage.json on a successful run,
+    mirroring the single-factor memory contract (telemetry only)."""
+    spec_path = write_demo_model_factor_case(tmp_path, factor_name="ml_score")
+    output_root = tmp_path / "out"
+
+    result = run_model_factor_case(spec_path, output_root_dir=output_root)
+
+    resource_path = result.output_dir / "resource_usage.json"
+    assert resource_path.exists()
+    snapshot = json.loads(resource_path.read_text(encoding="utf-8"))
+    assert snapshot["artifact_type"] == "alpha_lab_resource_usage"
+    for field in ("peak_rss_mb", "stage_rss_mb", "max_rss_mb_budget"):
+        assert field in snapshot
+    stage_rss = snapshot["stage_rss_mb"]
+    assert isinstance(stage_rss, dict)
+    # Stage keys only populate when RSS sampling is available (psutil present).
+    if snapshot["monitor_available"]:
+        assert "run_start" in stage_rss
+        assert "artifacts_exported" in stage_rss

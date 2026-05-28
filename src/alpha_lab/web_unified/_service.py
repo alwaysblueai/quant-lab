@@ -165,6 +165,11 @@ from alpha_lab.web_unified._utils import (
 
 _BACKEND_SINGLE_FACTOR_CASE_ROOT = Path("configs") / "real_cases" / "single_factor"
 _CLAIMED_BACKEND_CASES_FILENAME = "claimed_backend_cases.json"
+_STAGE1_RECONCILE_CONTRACT_VERSION = "single_factor_stage1_reconcile_v1"
+_STAGE2_CANDIDATE_CONTRACT_VERSION = "single_factor_stage2_candidate_output_v1"
+_MODEL_STAGE1_RECONCILE_CONTRACT_VERSION = "model_stage1_reconcile_v1"
+_MODEL_STAGE2_CANDIDATE_CONTRACT_VERSION = "model_stage2_candidate_output_v1"
+_IDEA_ID_RE = re.compile(r"^[A-Za-z0-9_.@=+:-]{3,160}$")
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -185,6 +190,129 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _strip_yaml_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) >= 2 and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def _load_yaml_mapping(text: str, *, label: str) -> dict[str, object]:
+    import yaml  # type: ignore[import-untyped]
+
+    normalized = _strip_yaml_code_fence(text)
+    try:
+        parsed = yaml.safe_load(normalized)
+    except Exception as exc:
+        raise ValueError(f"{label} is not valid YAML: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{label} must be a YAML mapping")
+    return cast(dict[str, object], parsed)
+
+
+def _mapping_value(payload: Mapping[str, object], key: str) -> dict[str, object]:
+    value = payload.get(key)
+    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+
+def _single_factor_stage3_prompt(
+    *,
+    idea_id: str,
+    stage1_reconcile_path: Path,
+    stage2_payload_path: Path,
+    factor_name: str,
+) -> str:
+    return f"""请执行 Stage3 backend draft-factor run。
+
+idea_id:
+{idea_id}
+
+输入文件：
+{stage1_reconcile_path}
+{stage2_payload_path}
+
+机器事实：
+以 stage2_payload_v1.yaml 里的 factor_json_payload 为准。
+stage1_reconcile.yaml 只作为 research_log 和机制背景，不作为实现入口。
+
+目标因子：
+{factor_name}
+
+要求：
+1. 只写 AGENTS.md 允许的 Stage3 research 路径：
+   - custom_factors/research/{factor_name}/factor.json
+   - custom_factors/research/{factor_name}/research_log.md
+   - configs/real_cases/single_factor/{factor_name}_v1.yaml
+2. 不写一次性脚本、notebook、promoted factor、前端注册。
+3. 如果 stage2_payload_sha256 是 placeholder，请在 materialize 时计算真实 64 位 sha256，
+   并写入 factor.json。
+4. 使用标准后端流程：
+   - validate-draft-factor
+   - real-case single-factor run
+   - backend contract audit
+5. 跑完后检查：
+   - backend_run_receipt.json
+   - run_manifest.json.backend_run_contract
+   - factor_definition.json
+   - metrics
+   - research_tearsheet.pdf
+   - comparison_summary.json
+6. 如果 validator、required columns、source hash、artifact audit 任一失败，停止并报告，
+   不要绕过契约。
+"""
+
+
+def _model_factor_stage3_prompt(
+    *,
+    idea_id: str,
+    stage1_reconcile_path: Path,
+    stage2_payload_path: Path,
+    candidate_name: str,
+) -> str:
+    return f"""请执行 Stage3 backend draft-model run（spec_variant，不写自定义代码）。
+
+idea_id:
+{idea_id}
+
+输入文件：
+{stage1_reconcile_path}
+{stage2_payload_path}
+
+机器事实：
+以 stage2_payload_v1.yaml 里的 model_candidate_payload（含 case_spec_payload）为准。
+stage1_reconcile.yaml 只作为 research_log 和机制背景，不作为实现入口。
+
+目标候选：
+{candidate_name}
+
+要求：
+1. 只写 AGENTS.md 允许的 Stage3 research 路径：
+   - custom_models/research/{candidate_name}/model_candidate.json
+   - custom_models/research/{candidate_name}/research_log.md
+   - configs/real_cases/model_factor/{candidate_name}_v1.yaml
+2. 不写一次性脚本、notebook、promoted candidate、前端注册、自定义 feature/estimator code。
+   v1 只支持 spec_variant 候选。
+3. 如果 stage2_payload_sha256 是 placeholder，请在 materialize 时计算真实 64 位 sha256，
+   并写入 model_candidate.json。
+4. 使用标准后端流程：
+   - validate-draft-model
+   - real-case model-factor run --draft-model-candidate
+   - backend contract audit
+5. 跑完后检查：
+   - backend_run_receipt.json
+   - run_manifest.json.backend_run_contract
+   - model_definition.json
+   - feature_manifest.json
+   - resource_usage.json
+   - comparison_summary.json
+6. 如果 validator、feature 列可用性、PIT、source hash、artifact audit 任一失败，停止并报告，
+   不要绕过契约。
+"""
 
 
 def _case_row_updated_at_epoch(row: Mapping[str, object]) -> float:
@@ -1076,6 +1204,7 @@ class _UnifiedService:
 
         top_features_by_run: dict[str, list[str]] = {}
         metric_rows: list[dict[str, object]] = []
+        governance_by_run: dict[str, dict[str, object]] = {}
         ic_series_by_run: dict[str, dict[str, float]] = {}
         turnover_series_by_run: dict[str, dict[str, float]] = {}
         failure_rows: list[dict[str, object]] = []
@@ -1105,6 +1234,9 @@ class _UnifiedService:
                 cast(dict[str, object], collected["failure_snapshot"])
             )
             metric_rows.append(cast(dict[str, object], collected["metric_row"]))
+            governance_by_run[run.run_id] = cast(
+                dict[str, object], collected["governance"]
+            )
             ic_series_by_run[run.run_id] = cast(
                 dict[str, float], collected["ic_series"]
             )
@@ -1136,6 +1268,7 @@ class _UnifiedService:
             "run_failures": failure_rows,
             "metric_columns": list(_MODEL_LAB_COMPARE_METRIC_KEYS),
             "metric_rows": metric_rows,
+            "governance_by_run": governance_by_run,
             "top_features_by_run": top_features_by_run,
             "feature_stability": comparison,
             "spec_diff": _build_model_lab_run_spec_diff(records),
@@ -1635,6 +1768,274 @@ class _UnifiedService:
         payload["ok"] = True
         payload["files"] = files
         return payload
+
+    def save_single_factor_stage2_intake(
+        self,
+        payload: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Persist Web GPT Stage2 YAML outputs and build a Stage3 handoff prompt."""
+
+        idea_id_raw = _clean_text(payload.get("idea_id"))
+        stage1_text = _clean_text(payload.get("stage1_reconcile_yaml"))
+        stage2_text = _clean_text(payload.get("stage2_payload_yaml"))
+        overwrite = bool(payload.get("overwrite", False))
+        if not stage1_text:
+            return {"ok": False, "error": "stage1_reconcile_yaml must be non-empty"}
+        if not stage2_text:
+            return {"ok": False, "error": "stage2_payload_yaml must be non-empty"}
+
+        try:
+            stage1 = _load_yaml_mapping(stage1_text, label="stage1_reconcile_yaml")
+            stage2 = _load_yaml_mapping(stage2_text, label="stage2_payload_yaml")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        errors: list[str] = []
+        warnings: list[str] = []
+        if stage1.get("contract_version") != _STAGE1_RECONCILE_CONTRACT_VERSION:
+            errors.append(
+                "stage1_reconcile_yaml.contract_version must be "
+                f"{_STAGE1_RECONCILE_CONTRACT_VERSION!r}"
+            )
+        if stage2.get("contract_version") != _STAGE2_CANDIDATE_CONTRACT_VERSION:
+            errors.append(
+                "stage2_payload_yaml.contract_version must be "
+                f"{_STAGE2_CANDIDATE_CONTRACT_VERSION!r}"
+            )
+        if stage1.get("stage") != "stage1_reconcile":
+            errors.append("stage1_reconcile_yaml.stage must be 'stage1_reconcile'")
+        if stage2.get("stage") != "stage2_candidate":
+            errors.append("stage2_payload_yaml.stage must be 'stage2_candidate'")
+
+        stage1_provenance = _mapping_value(stage1, "provenance")
+        stage2_provenance = _mapping_value(stage2, "provenance")
+        factor_payload = _mapping_value(stage2, "factor_json_payload")
+        factor_provenance = _mapping_value(factor_payload, "provenance")
+        factor_name = _clean_text(factor_payload.get("name"))
+        if not factor_payload:
+            errors.append("stage2_payload_yaml.factor_json_payload must be present")
+        if not factor_name:
+            errors.append("stage2_payload_yaml.factor_json_payload.name must be non-empty")
+
+        idea_candidates = [
+            idea_id_raw,
+            _clean_text(stage1_provenance.get("idea_id")),
+            _clean_text(stage2_provenance.get("idea_id")),
+            _clean_text(factor_provenance.get("idea_id")),
+        ]
+        non_empty_idea_ids = [candidate for candidate in idea_candidates if candidate]
+        if not non_empty_idea_ids:
+            errors.append("idea_id must be provided by request or YAML provenance")
+            idea_id = ""
+        else:
+            idea_id = non_empty_idea_ids[0]
+            mismatches = sorted(
+                {candidate for candidate in non_empty_idea_ids if candidate != idea_id}
+            )
+            if mismatches:
+                errors.append(
+                    "idea_id mismatch across request/provenance: "
+                    + ", ".join([idea_id, *mismatches])
+                )
+        if idea_id and not _IDEA_ID_RE.match(idea_id):
+            errors.append("idea_id contains path separators or unsupported characters")
+
+        if errors:
+            return {"ok": False, "error": "; ".join(errors), "warnings": warnings}
+
+        idea_dir = (self.workspace_root / "ideas" / idea_id).resolve()
+        ideas_root = (self.workspace_root / "ideas").resolve()
+        if not _is_relative_to(idea_dir, ideas_root):
+            return {"ok": False, "error": "resolved idea directory is outside workspace ideas/"}
+        if not idea_dir.exists():
+            return {
+                "ok": False,
+                "error": f"idea directory does not exist: {idea_dir}",
+                "warnings": warnings,
+            }
+
+        stage1_path = idea_dir / "stage1_reconcile.yaml"
+        stage2_path = idea_dir / "stage2_payload_v1.yaml"
+        existing = [str(path) for path in (stage1_path, stage2_path) if path.exists()]
+        if existing and not overwrite:
+            return {
+                "ok": False,
+                "error": "target file exists; set overwrite=true to replace it",
+                "existing": existing,
+                "warnings": warnings,
+            }
+
+        stage1_normalized = _strip_yaml_code_fence(stage1_text).rstrip() + "\n"
+        stage2_normalized = _strip_yaml_code_fence(stage2_text).rstrip() + "\n"
+        stage1_path.write_text(stage1_normalized, encoding="utf-8", newline="\n")
+        stage2_path.write_text(stage2_normalized, encoding="utf-8", newline="\n")
+
+        stage2_payload_sha = _clean_text(stage2_provenance.get("stage2_payload_sha256"))
+        factor_payload_sha = _clean_text(factor_provenance.get("stage2_payload_sha256"))
+        for label, value in (
+            ("provenance.stage2_payload_sha256", stage2_payload_sha),
+            ("factor_json_payload.provenance.stage2_payload_sha256", factor_payload_sha),
+        ):
+            if value and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+                warnings.append(f"{label} is not a 64-char hex sha256; Stage3 must recompute it")
+
+        return {
+            "ok": True,
+            "idea_id": idea_id,
+            "factor_name": factor_name,
+            "paths": {
+                "stage1_reconcile": str(stage1_path),
+                "stage2_payload": str(stage2_path),
+            },
+            "warnings": warnings,
+            "codex_stage3_prompt": _single_factor_stage3_prompt(
+                idea_id=idea_id,
+                stage1_reconcile_path=stage1_path,
+                stage2_payload_path=stage2_path,
+                factor_name=factor_name,
+            ),
+        }
+
+    def save_model_factor_stage2_intake(
+        self,
+        payload: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Persist Web GPT model-factor Stage2 YAML outputs and build a Stage3 prompt.
+
+        Mirrors :meth:`save_single_factor_stage2_intake` but for the model-lab
+        contract (``model_stage1_reconcile_v1`` / ``model_stage2_candidate_output_v1``
+        with a ``model_candidate_payload`` carrying the embedded ``case_spec_payload``).
+        It only writes the two YAML files under ``ideas/<idea_id>/`` and returns a
+        Stage3 draft-model handoff prompt; it does not run an experiment or register
+        a frontend candidate.
+        """
+
+        idea_id_raw = _clean_text(payload.get("idea_id"))
+        stage1_text = _clean_text(payload.get("stage1_reconcile_yaml"))
+        stage2_text = _clean_text(payload.get("stage2_payload_yaml"))
+        overwrite = bool(payload.get("overwrite", False))
+        if not stage1_text:
+            return {"ok": False, "error": "stage1_reconcile_yaml must be non-empty"}
+        if not stage2_text:
+            return {"ok": False, "error": "stage2_payload_yaml must be non-empty"}
+
+        try:
+            stage1 = _load_yaml_mapping(stage1_text, label="stage1_reconcile_yaml")
+            stage2 = _load_yaml_mapping(stage2_text, label="stage2_payload_yaml")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        errors: list[str] = []
+        warnings: list[str] = []
+        if stage1.get("contract_version") != _MODEL_STAGE1_RECONCILE_CONTRACT_VERSION:
+            errors.append(
+                "stage1_reconcile_yaml.contract_version must be "
+                f"{_MODEL_STAGE1_RECONCILE_CONTRACT_VERSION!r}"
+            )
+        if stage2.get("contract_version") != _MODEL_STAGE2_CANDIDATE_CONTRACT_VERSION:
+            errors.append(
+                "stage2_payload_yaml.contract_version must be "
+                f"{_MODEL_STAGE2_CANDIDATE_CONTRACT_VERSION!r}"
+            )
+        if stage1.get("stage") != "stage1_reconcile":
+            errors.append("stage1_reconcile_yaml.stage must be 'stage1_reconcile'")
+        if stage2.get("stage") != "stage2_candidate":
+            errors.append("stage2_payload_yaml.stage must be 'stage2_candidate'")
+
+        stage1_provenance = _mapping_value(stage1, "provenance")
+        stage2_provenance = _mapping_value(stage2, "provenance")
+        candidate_payload = _mapping_value(stage2, "model_candidate_payload")
+        candidate_provenance = _mapping_value(candidate_payload, "provenance")
+        candidate_name = _clean_text(candidate_payload.get("candidate_name"))
+        if not candidate_payload:
+            errors.append("stage2_payload_yaml.model_candidate_payload must be present")
+        if not candidate_name:
+            errors.append(
+                "stage2_payload_yaml.model_candidate_payload.candidate_name must be non-empty"
+            )
+        if candidate_payload and not _mapping_value(candidate_payload, "case_spec_payload"):
+            errors.append(
+                "stage2_payload_yaml.model_candidate_payload.case_spec_payload must be present"
+            )
+
+        idea_candidates = [
+            idea_id_raw,
+            _clean_text(stage1_provenance.get("idea_id")),
+            _clean_text(stage2_provenance.get("idea_id")),
+            _clean_text(candidate_provenance.get("idea_id")),
+        ]
+        non_empty_idea_ids = [candidate for candidate in idea_candidates if candidate]
+        if not non_empty_idea_ids:
+            errors.append("idea_id must be provided by request or YAML provenance")
+            idea_id = ""
+        else:
+            idea_id = non_empty_idea_ids[0]
+            mismatches = sorted(
+                {candidate for candidate in non_empty_idea_ids if candidate != idea_id}
+            )
+            if mismatches:
+                errors.append(
+                    "idea_id mismatch across request/provenance: "
+                    + ", ".join([idea_id, *mismatches])
+                )
+        if idea_id and not _IDEA_ID_RE.match(idea_id):
+            errors.append("idea_id contains path separators or unsupported characters")
+
+        if errors:
+            return {"ok": False, "error": "; ".join(errors), "warnings": warnings}
+
+        idea_dir = (self.workspace_root / "ideas" / idea_id).resolve()
+        ideas_root = (self.workspace_root / "ideas").resolve()
+        if not _is_relative_to(idea_dir, ideas_root):
+            return {"ok": False, "error": "resolved idea directory is outside workspace ideas/"}
+        if not idea_dir.exists():
+            return {
+                "ok": False,
+                "error": f"idea directory does not exist: {idea_dir}",
+                "warnings": warnings,
+            }
+
+        stage1_path = idea_dir / "stage1_reconcile.yaml"
+        stage2_path = idea_dir / "stage2_payload_v1.yaml"
+        existing = [str(path) for path in (stage1_path, stage2_path) if path.exists()]
+        if existing and not overwrite:
+            return {
+                "ok": False,
+                "error": "target file exists; set overwrite=true to replace it",
+                "existing": existing,
+                "warnings": warnings,
+            }
+
+        stage1_normalized = _strip_yaml_code_fence(stage1_text).rstrip() + "\n"
+        stage2_normalized = _strip_yaml_code_fence(stage2_text).rstrip() + "\n"
+        stage1_path.write_text(stage1_normalized, encoding="utf-8", newline="\n")
+        stage2_path.write_text(stage2_normalized, encoding="utf-8", newline="\n")
+
+        stage2_payload_sha = _clean_text(stage2_provenance.get("stage2_payload_sha256"))
+        candidate_payload_sha = _clean_text(candidate_provenance.get("stage2_payload_sha256"))
+        for label, value in (
+            ("provenance.stage2_payload_sha256", stage2_payload_sha),
+            ("model_candidate_payload.provenance.stage2_payload_sha256", candidate_payload_sha),
+        ):
+            if value and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+                warnings.append(f"{label} is not a 64-char hex sha256; Stage3 must recompute it")
+
+        return {
+            "ok": True,
+            "idea_id": idea_id,
+            "candidate_name": candidate_name,
+            "paths": {
+                "stage1_reconcile": str(stage1_path),
+                "stage2_payload": str(stage2_path),
+            },
+            "warnings": warnings,
+            "codex_stage3_prompt": _model_factor_stage3_prompt(
+                idea_id=idea_id,
+                stage1_reconcile_path=stage1_path,
+                stage2_payload_path=stage2_path,
+                candidate_name=candidate_name,
+            ),
+        }
 
     # ---- Graph / Preflight ------------------------------------------------
 

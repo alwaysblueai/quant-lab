@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -17,7 +18,12 @@ from alpha_lab.custom_factors import (
     load_persisted_custom_factors,
 )
 from alpha_lab.exceptions import AlphaLabConfigError, AlphaLabDataError
-from alpha_lab.factor_recipe import FactorRecipeError, build_factor_from_recipe_mapping
+from alpha_lab.factor_recipe import (
+    _PRICE_DAILY_OPTIONAL_COLUMNS,
+    _PRICE_RECIPE_OPTIONAL_COLUMNS,
+    FactorRecipeError,
+    build_factor_from_recipe_mapping,
+)
 from alpha_lab.interfaces import validate_factor_output
 from alpha_lab.labels import ExecutionPriceMode, forward_return
 from alpha_lab.neutralization import neutralize_signal
@@ -40,6 +46,7 @@ from alpha_lab.research_integrity.leakage_checks import (
     check_no_future_dates_in_input,
 )
 from alpha_lab.research_integrity.reporting import build_integrity_report
+from alpha_lab.run_memory import RunMemoryMonitor
 from alpha_lab.signal_transforms import (
     apply_min_coverage_gate,
     rank_cross_section,
@@ -57,7 +64,7 @@ from .evaluate import SingleFactorEvaluationResult, evaluate_single_factor_case
 from .spec import FactorInputSpec, SingleFactorCaseSpec, load_single_factor_case_spec
 
 FactorLoader = Callable[[SingleFactorCaseSpec], pd.DataFrame]
-InputBundleKey = tuple[str, str | None, str, str]
+InputBundleKey = tuple[str, str | None, str, str, tuple[str, ...]]
 BatchParallelMode = Literal["serial", "thread", "process"]
 
 
@@ -96,6 +103,7 @@ class SingleFactorInputBundle:
     max_price_date: pd.Timestamp
     base_feature_cache: SingleFactorBaseFeatureCache
     execution_price_mode: ExecutionPriceMode = "close"
+    prices_optional_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -135,6 +143,106 @@ class SingleFactorBatchDefinition:
             raise AlphaLabConfigError("batch factor definition case_name must be non-empty")
         if self.factor_path is not None and not self.factor_path.strip():
             raise AlphaLabConfigError("batch factor definition factor_path must be non-empty")
+
+
+# Market-cap column names capacity estimation probes for (see
+# evaluate/capacity.py:_resolve_market_cap_col). Projected alongside the price
+# columns so capacity diagnostics keep working under a column-pruned load.
+_MARKET_CAP_OPTIONAL_COLUMNS: tuple[str, ...] = ("market_cap", "circ_mv", "total_mv", "value")
+
+# Daily columns the backtest + diagnostics always read regardless of the factor:
+# execution price (``open``/``vwap``) and ``amount`` for capacity ADV. ``close`` is
+# auto-required by ``load_prices``. Used as the floor for a recipe whose factor
+# columns are resolved precisely from its custom-draft ``factor.json``.
+_PRICE_BACKTEST_DAILY_COLUMNS: tuple[str, ...] = ("open", "vwap", "amount")
+
+
+def _resolve_recipe_required_columns(spec: SingleFactorCaseSpec) -> tuple[str, ...] | None:
+    """Price columns a recipe's base custom-draft factor declares it reads.
+
+    Resolves the recipe ``base.method`` against the persisted custom-factor
+    workspace and returns the union of its ``required_columns`` and
+    ``optional_columns`` (possibly empty). Returns ``None`` when the spec is not a
+    recipe, has no base method, or the custom factor cannot be resolved — the
+    caller then falls back to the conservative wide recipe projection.
+    """
+    factor_input = spec.factor_input
+    if factor_input is None or factor_input.mode != "recipe":
+        return None
+    method = _recipe_base_method(spec)
+    if not method:
+        return None
+    try:
+        workspace_root = find_custom_factor_workspace_root(None)
+        sources = load_persisted_custom_factors(workspace_root, ignore_errors=True)
+    except Exception:  # pragma: no cover - workspace IO is best-effort here
+        return None
+    source = sources.get(method.strip().lower())
+    if source is None:
+        return None
+    return (*source.required_columns, *source.optional_columns)
+
+
+def _warn_if_recipe_projection_fell_back(spec: SingleFactorCaseSpec) -> None:
+    """Warn when a recipe could not be projected precisely from a factor.json.
+
+    Falling back to the wide projection is safe but loads the whole price panel,
+    which defeats column pruning on wide intraday inputs. Surfacing it nudges the
+    author to declare ``required_columns`` for the custom-draft factor.
+    """
+    factor_input = spec.factor_input
+    if factor_input is None or factor_input.mode != "recipe":
+        return
+    method = _recipe_base_method(spec)
+    if not method or _resolve_recipe_required_columns(spec) is not None:
+        return
+    warnings.warn(
+        f"recipe factor {spec.factor_name!r} (base method {method!r}): could not "
+        "resolve declared price columns from a custom-factor factor.json; falling "
+        "back to the full daily+intraday price projection. Register the factor "
+        "under custom_factors with required_columns to enable precise column "
+        "pruning on wide price panels.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
+def _resolve_prices_optional_columns(spec: SingleFactorCaseSpec) -> tuple[str, ...]:
+    """Optional price columns to project when loading a price panel.
+
+    ``load_prices`` always requires ``date``/``asset``/``close``; everything else
+    is opt-in. The single-factor backtest only ever reads the execution-price
+    column (``open``/``vwap``), ``amount`` plus a market-cap column for capacity,
+    and — in recipe mode — whatever input columns the factor references. A wide
+    intraday panel carries dozens of feature columns none of those touch, so
+    projecting to this set is what keeps the whole panel from being loaded.
+
+    - file mode (precomputed factor): daily price/volume columns only.
+    - recipe mode, custom draft resolved: backtest daily columns + the factor's
+      declared ``required_columns``/``optional_columns`` (precise projection).
+    - recipe mode, unresolved: full daily + intraday set (conservative fallback).
+
+    Missing columns are dropped by ``load_prices`` (optional = read-if-present), so
+    over-listing here is harmless.
+    """
+    factor_input = spec.factor_input
+    is_recipe = factor_input is not None and factor_input.mode == "recipe"
+    if not is_recipe:
+        base: tuple[str, ...] = _PRICE_DAILY_OPTIONAL_COLUMNS
+    else:
+        recipe_columns = _resolve_recipe_required_columns(spec)
+        base = (
+            _PRICE_RECIPE_OPTIONAL_COLUMNS
+            if recipe_columns is None
+            else (*_PRICE_BACKTEST_DAILY_COLUMNS, *recipe_columns)
+        )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for column in (*base, *_MARKET_CAP_OPTIONAL_COLUMNS):
+        if column not in seen:
+            seen.add(column)
+            ordered.append(column)
+    return tuple(ordered)
 
 
 def prepare_base_features(
@@ -179,8 +287,21 @@ def prepare_base_features(
 
 def load_standard_inputs(
     spec_or_path: SingleFactorCaseSpec | str | Path,
+    *,
+    evaluation_profile: str = "default_research",
 ) -> SingleFactorInputBundle:
-    """Load and standardize prices/universe once for multi-factor reuse."""
+    """Load and standardize prices/universe once for multi-factor reuse.
+
+    The price panel is column-projected to the set the backtest and diagnostics
+    actually read (see :func:`_resolve_prices_optional_columns`), so a wide
+    intraday panel is not loaded whole for a precomputed (file-mode) factor.
+
+    ``evaluation_profile`` controls how much is precomputed: the fast
+    ``exploratory_screening`` profile skips the trailing-return columns (which
+    the single-factor evaluation does not consume) to keep wide-panel memory
+    low. Forward-return labels are always precomputed for the full decay-horizon
+    set because IC-decay diagnostics run under every profile.
+    """
     spec = _resolve_single_factor_spec(spec_or_path)
     resolved_prices_path = str(resolve_tabular_frame_path(spec.prices_path, object_name="prices"))
     resolved_universe_path: str | None = None
@@ -197,15 +318,31 @@ def load_standard_inputs(
         )
         universe_mask["in_universe"] = universe_mask["in_universe"].astype(bool)
 
-    prices_all = load_prices(resolved_prices_path)
+    prices_optional_columns = _resolve_prices_optional_columns(spec)
+    _warn_if_recipe_projection_fell_back(spec)
+    prices_all = load_prices(
+        resolved_prices_path,
+        optional_columns=prices_optional_columns,
+    )
+    max_price_date = pd.Timestamp(prices_all["date"].max())
     prices_panel = (
         apply_universe_to_prices(prices_all, universe_mask)
         if universe_mask is not None
         else prices_all
     )
+    # prices_all is only consulted afterwards for two input-integrity checks
+    # (no-future-dates and universe as-of), so keep just its (date, asset) index
+    # rather than carrying a second full-history panel alongside prices_panel.
+    prices_all_index = prices_all[["date", "asset"]].copy()
+    del prices_all
+
+    profile_name = (evaluation_profile or "default_research").strip().lower()
+    trailing_return_horizons: tuple[int, ...] = (
+        () if profile_name == "exploratory_screening" else (1, 5, 10, 20, 60)
+    )
     base_feature_cache = prepare_base_features(
         prices_panel,
-        trailing_return_horizons=(1, 5, 10, 20, 60),
+        trailing_return_horizons=trailing_return_horizons,
         forward_label_horizons=tuple(sorted({1, 2, 3, 5, 10, 20, int(spec.target.horizon)})),
         execution_price_mode=spec.target.execution_price_mode,
     )
@@ -215,12 +352,13 @@ def load_standard_inputs(
         prices_path=resolved_prices_path,
         universe_path=resolved_universe_path,
         universe_in_column=spec.universe.in_universe_column,
-        prices_all=prices_all,
+        prices_all=prices_all_index,
         prices_panel=prices_panel_enriched,
         universe_mask=universe_mask,
-        max_price_date=pd.Timestamp(prices_all["date"].max()),
+        max_price_date=max_price_date,
         base_feature_cache=base_feature_cache,
         execution_price_mode=spec.target.execution_price_mode,
+        prices_optional_columns=prices_optional_columns,
     )
 
 
@@ -341,7 +479,7 @@ def _run_single_factor_cases_serial(
         key = _input_bundle_key(spec)
         bundle = bundles.get(key)
         if bundle is None:
-            bundle = load_standard_inputs(spec)
+            bundle = load_standard_inputs(spec, evaluation_profile=evaluation_profile)
             bundles[key] = bundle
         result = run_single_factor_case(
             spec,
@@ -409,7 +547,9 @@ def _run_single_factor_cases_threaded(
     if reuse_input_bundle:
         for key, indexed_specs in grouped_specs.items():
             if indexed_specs:
-                bundles[key] = load_standard_inputs(indexed_specs[0][1])
+                bundles[key] = load_standard_inputs(
+                    indexed_specs[0][1], evaluation_profile=evaluation_profile
+                )
 
     tasks: list[
         tuple[tuple[int, ...], tuple[SingleFactorCaseSpec, ...], SingleFactorInputBundle | None]
@@ -625,7 +765,7 @@ def _run_single_factor_case_chunk_process(
     if reuse_input_bundle:
         if not specs:
             return []
-        bundle = load_standard_inputs(specs[0])
+        bundle = load_standard_inputs(specs[0], evaluation_profile=evaluation_profile)
         for spec in specs[1:]:
             _ensure_bundle_compatible(bundle, spec=spec)
 
@@ -864,8 +1004,16 @@ def run_single_factor_case(
     evaluation_config = get_research_evaluation_config(evaluation_profile)
     _emit_progress("实验合同与评估配置已加载", 10)
 
+    memory_monitor = RunMemoryMonitor.from_env(label=spec.name)
+    memory_monitor.sample("run_start")
+
     _emit_progress("加载行情与可选股票池", 15)
-    bundle = input_bundle if input_bundle is not None else load_standard_inputs(spec)
+    with memory_monitor.stage("load_inputs"):
+        bundle = (
+            input_bundle
+            if input_bundle is not None
+            else load_standard_inputs(spec, evaluation_profile=evaluation_profile)
+        )
     _ensure_bundle_compatible(bundle, spec=spec)
     universe_mask = bundle.universe_mask
     prices_all = bundle.prices_all
@@ -939,7 +1087,15 @@ def run_single_factor_case(
     if universe_mask is not None:
         factor_df = apply_universe_to_factor(factor_df, universe_mask)
 
-    raw_factor_df = factor_df.copy()
+    # The pre-neutralization snapshot is only consumed by the raw-vs-neutralized
+    # comparison backtest, which runs only when that diagnostic is enabled
+    # and neutralization is actually applied. Skip the full-factor copy otherwise
+    # (e.g. exploratory_screening, or cases without neutralization).
+    needs_raw_comparison = (
+        evaluation_config.single_factor_diagnostics.run_neutralization_raw_comparison
+        and spec.neutralization.enabled
+    )
+    raw_factor_df = factor_df.copy() if needs_raw_comparison else None
     _emit_progress("处理中性化与覆盖率检查", 52)
     factor_df, neutral_diag = _maybe_neutralize_factor(
         factor_df,
@@ -962,21 +1118,22 @@ def run_single_factor_case(
     )
 
     _emit_progress("运行评估与完整性检查", 68)
-    evaluation_result = evaluate_single_factor_case(
-        prices=prices,
-        factor_df=factor_df,
-        raw_factor_df=raw_factor_df,
-        spec=spec,
-        coverage_by_date=coverage_by_date,
-        neutralization_summary=neutral_diag,
-        precomputed_forward_labels=bundle.base_feature_cache.forward_labels_by_horizon,
-        evaluation_config=evaluation_config,
-        split_contract=split_contract,
-        progress_callback=lambda message, percent: _emit_progress(
-            message,
-            min(83, 68 + max(0, min(int(percent), 100)) * 15 // 100),
-        ),
-    )
+    with memory_monitor.stage("evaluate"):
+        evaluation_result = evaluate_single_factor_case(
+            prices=prices,
+            factor_df=factor_df,
+            raw_factor_df=raw_factor_df,
+            spec=spec,
+            coverage_by_date=coverage_by_date,
+            neutralization_summary=neutral_diag,
+            precomputed_forward_labels=bundle.base_feature_cache.forward_labels_by_horizon,
+            evaluation_config=evaluation_config,
+            split_contract=split_contract,
+            progress_callback=lambda message, percent: _emit_progress(
+                message,
+                min(83, 68 + max(0, min(int(percent), 100)) * 15 // 100),
+            ),
+        )
     for check in evaluation_result.experiment_result.integrity_checks:
         _record_integrity(check)
     _record_integrity(
@@ -1025,6 +1182,9 @@ def run_single_factor_case(
         defer_vault_export=defer_vault_export,
     )
     _emit_progress("实验产物导出完成", 90)
+
+    memory_monitor.sample("artifacts_exported")
+    memory_monitor.write_resource_usage(output_dir)
 
     if fast_screen_artifact_root is not None:
         try:
@@ -1104,6 +1264,7 @@ def _ensure_bundle_compatible(
         expected_universe_path,
         expected_universe_col,
         expected_execution_price_mode,
+        expected_optional_columns,
     ) = _resolved_input_bundle_key(spec)
     if bundle.prices_path != expected_prices_path:
         raise AlphaLabConfigError("input_bundle.prices_path does not match spec.prices_path")
@@ -1118,6 +1279,12 @@ def _ensure_bundle_compatible(
             "input_bundle.execution_price_mode does not match "
             "spec.target.execution_price_mode"
         )
+    if not set(expected_optional_columns).issubset(set(bundle.prices_optional_columns)):
+        raise AlphaLabConfigError(
+            "input_bundle.prices_optional_columns does not cover the price columns "
+            "required by spec.factor_input; the bundle was loaded with a narrower "
+            "column projection (e.g. a file-mode bundle reused for a recipe spec)"
+        )
 
 
 def _resolved_input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
@@ -1130,6 +1297,7 @@ def _resolved_input_bundle_key(spec: SingleFactorCaseSpec) -> InputBundleKey:
         universe_path,
         spec.universe.in_universe_column,
         spec.target.execution_price_mode,
+        _resolve_prices_optional_columns(spec),
     )
 
 

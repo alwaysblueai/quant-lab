@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -718,7 +719,7 @@ def test_single_factor_case_rejects_too_short_strict_split_before_artifacts(
     "profile",
     ["exploratory_screening", "default_research", "stricter_research"],
 )
-def test_single_factor_dual_scope_report_outputs_all_profiles(
+def test_single_factor_dual_scope_report_path_respects_profile(
     tmp_path: Path,
     profile: str,
 ) -> None:
@@ -734,33 +735,144 @@ def test_single_factor_dual_scope_report_outputs_all_profiles(
     split_contract = metrics["split_contract"]
 
     assert metrics["research_evaluation_profile"] == profile
+    # Headline metrics are OOS-gated under every profile (a split contract exists).
     assert metrics["metric_scope"] == "oos"
-    assert metrics["report_metric_scope"] == "full_sample_with_oos_parentheses"
-    assert "mean_rank_ic_full" in metrics
-    assert "mean_rank_ic_is" in metrics
-    assert "mean_rank_ic_oos" in metrics
-    assert "mean_rank_ic_oos_decay_ratio" in metrics
-    assert metrics["mean_rank_ic_oos"] == pytest.approx(metrics["mean_rank_ic"])
-    assert "eval_coverage_ratio_mean" in metrics
-    assert "eval_coverage_ratio_mean_full" in metrics
-    assert "eval_coverage_ratio_mean_is" in metrics
-    assert "eval_coverage_ratio_mean_oos" in metrics
-    assert "eval_coverage_ratio_min" in metrics
-    assert "eval_coverage_ratio_min_full" in metrics
-    assert "eval_coverage_ratio_min_is" in metrics
-    assert "eval_coverage_ratio_min_oos" in metrics
     assert metrics["split_semantics"] == "factor_time_series_holdout"
-    if profile == "exploratory_screening":
-        assert metrics["random_baseline_n_permutations"] > 0
-    if profile == "stricter_research":
-        assert metrics["uncertainty_method"] == "block_bootstrap"
-        assert metrics["strict_research_evidence"] == "enabled"
-        assert "strict_bootstrap_rank_ic_ir_ci_lower" in metrics
-        assert "strict_subsample_rank_ic_first_half_mean" in metrics
-        assert "strict_post_split_rank_ic_gap_5_mean" in metrics
+    assert "mean_rank_ic" in metrics
+    assert "eval_coverage_ratio_mean" in metrics
 
     ic_timeseries = pd.read_csv(output_dir / "ic_timeseries.csv")
-    assert {"IS", "OOS"}.issubset(set(ic_timeseries["split_phase"]))
-    assert pd.to_datetime(ic_timeseries["date"]).min() < pd.Timestamp(
-        split_contract["oos_start"]
+
+    if profile == "exploratory_screening":
+        # Fast screening suppresses the full-sample + IS report paths: the headline
+        # stays OOS, the full/IS scoped companions are dropped, and the IC timeseries
+        # covers OOS only (no extra full-sample backtest).
+        assert metrics["report_metric_scope"] == "suppressed_by_profile"
+        assert metrics["report_timeseries_scope"] == "oos"
+        for key in (
+            "mean_rank_ic_full",
+            "mean_rank_ic_is",
+            "mean_rank_ic_oos",
+            "eval_coverage_ratio_mean_full",
+            "eval_coverage_ratio_mean_is",
+            "eval_coverage_ratio_mean_oos",
+        ):
+            assert key not in metrics
+        assert set(ic_timeseries["split_phase"].dropna().unique()) == {"OOS"}
+        assert metrics["random_baseline_n_permutations"] > 0
+    else:
+        # default_research / stricter_research keep the full dual-scope contract.
+        assert metrics["report_metric_scope"] == "full_sample_with_oos_parentheses"
+        assert "mean_rank_ic_full" in metrics
+        assert "mean_rank_ic_is" in metrics
+        assert "mean_rank_ic_oos" in metrics
+        assert "mean_rank_ic_oos_decay_ratio" in metrics
+        assert metrics["mean_rank_ic_oos"] == pytest.approx(metrics["mean_rank_ic"])
+        assert "eval_coverage_ratio_mean_full" in metrics
+        assert "eval_coverage_ratio_mean_is" in metrics
+        assert "eval_coverage_ratio_mean_oos" in metrics
+        assert "eval_coverage_ratio_min_full" in metrics
+        assert "eval_coverage_ratio_min_is" in metrics
+        assert "eval_coverage_ratio_min_oos" in metrics
+        assert metrics["report_timeseries_scope"] == "full_path_split_by_phase"
+        assert {"IS", "OOS"}.issubset(set(ic_timeseries["split_phase"]))
+        assert pd.to_datetime(ic_timeseries["date"]).min() < pd.Timestamp(
+            split_contract["oos_start"]
+        )
+        if profile == "stricter_research":
+            assert metrics["uncertainty_method"] == "block_bootstrap"
+            assert metrics["strict_research_evidence"] == "enabled"
+            assert "strict_bootstrap_rank_ic_ir_ci_lower" in metrics
+            assert "strict_subsample_rank_ic_first_half_mean" in metrics
+            assert "strict_post_split_rank_ic_gap_5_mean" in metrics
+
+
+def test_membership_artifacts_tiered_by_profile(tmp_path: Path) -> None:
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="bp")
+
+    default_run = run_single_factor_case(
+        spec_path,
+        evaluation_profile="default_research",
+        output_root_dir=tmp_path / "default_out",
     )
+    exploratory_run = run_single_factor_case(
+        spec_path,
+        evaluation_profile="exploratory_screening",
+        output_root_dir=tmp_path / "explore_out",
+    )
+
+    def _membership(run: object) -> pd.DataFrame:
+        return pd.read_csv(run.output_dir / "quantile_membership.csv")  # type: ignore[attr-defined]
+
+    def _tiers(run: object) -> dict:
+        manifest = json.loads(
+            (run.output_dir / "run_manifest.json").read_text(encoding="utf-8")  # type: ignore[attr-defined]
+        )
+        return manifest["artifact_tiers"]
+
+    full_mem = _membership(default_run)
+    sampled_mem = _membership(exploratory_run)
+
+    default_tiers = _tiers(default_run)
+    exploratory_tiers = _tiers(exploratory_run)
+
+    # default_research keeps the full cross-section (all quantiles), tagged full.
+    default_membership_tier = default_tiers["quantile_membership"]
+    assert default_membership_tier["tier"] == "full"
+    assert default_membership_tier["is_complete"] is True
+    assert default_membership_tier["row_count"] == len(full_mem)
+    assert default_membership_tier["source_row_count"] == len(full_mem)
+    assert default_membership_tier["omitted_row_count"] == 0
+    assert default_membership_tier["sampling_policy"] == "none"
+    assert set(full_mem["quantile"].unique()) == {1, 2, 3, 4, 5}
+
+    # exploratory_screening keeps only the tradeable extremes, fewer rows, tagged.
+    exploratory_membership_tier = exploratory_tiers["quantile_membership"]
+    assert exploratory_membership_tier["tier"] == "sampled_extreme_quantiles"
+    assert exploratory_membership_tier["is_complete"] is False
+    assert exploratory_membership_tier["row_count"] == len(sampled_mem)
+    assert exploratory_membership_tier["source_row_count"] == len(full_mem)
+    assert exploratory_membership_tier["omitted_row_count"] == len(full_mem) - len(sampled_mem)
+    assert exploratory_membership_tier["sampling_policy"] == "extreme_quantiles"
+    assert "reason" in exploratory_membership_tier
+    assert exploratory_tiers["quantile_equal_weights"]["tier"] == "sampled_extreme_quantiles"
+    assert exploratory_tiers["portfolio_weights"]["tier"] in {
+        "full",
+        "sampled_nonzero_weights",
+    }
+    assert set(sampled_mem["quantile"].unique()) == {1, 5}
+    assert len(sampled_mem) < len(full_mem)
+
+
+def test_exploratory_screening_runs_single_core_backtest(tmp_path: Path) -> None:
+    """exploratory_screening must not run the full-sample / IS report backtests."""
+    import alpha_lab.real_cases.single_factor.evaluate.core as sf_core
+
+    spec_path = write_demo_single_factor_case(tmp_path, factor_name="single_backtest")
+
+    original = sf_core.run_factor_experiment
+    calls = {"n": 0}
+
+    def _counting(*args: object, **kwargs: object):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    with patch.object(sf_core, "run_factor_experiment", _counting):
+        exploratory_result = run_single_factor_case(
+            spec_path, evaluation_profile="exploratory_screening"
+        )
+    exploratory_calls = calls["n"]
+
+    # The suppression is registered for downstream contract/audit consumers.
+    skipped = exploratory_result.evaluation_result.metrics["single_factor_skipped_diagnostics"]
+    assert "dual_scope_report_path" in skipped
+    assert "is_report_path" in skipped
+
+    calls["n"] = 0
+    with patch.object(sf_core, "run_factor_experiment", _counting):
+        run_single_factor_case(spec_path, evaluation_profile="default_research")
+    default_calls = calls["n"]
+
+    # Core backtest only under exploratory; default keeps core + full-sample + IS.
+    assert exploratory_calls == 1
+    assert default_calls == 3

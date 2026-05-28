@@ -1,4 +1,45 @@
 {
+  "artifact_tiers": {
+    "portfolio_weights": {
+      "artifact_filename": "portfolio_weights.csv",
+      "evaluation_profile": "default_research",
+      "is_complete": true,
+      "omitted_row_count": 0,
+      "reason": "complete artifact written by research profile",
+      "row_count": 0,
+      "sample_fraction": null,
+      "sampling_policy": "none",
+      "schema_version": "artifact_tier_v1",
+      "source_row_count": 0,
+      "tier": "full"
+    },
+    "quantile_equal_weights": {
+      "artifact_filename": "quantile_equal_weights.csv",
+      "evaluation_profile": "default_research",
+      "is_complete": true,
+      "omitted_row_count": 0,
+      "reason": "complete artifact written by research profile",
+      "row_count": 780,
+      "sample_fraction": 1.0,
+      "sampling_policy": "none",
+      "schema_version": "artifact_tier_v1",
+      "source_row_count": 780,
+      "tier": "full"
+    },
+    "quantile_membership": {
+      "artifact_filename": "quantile_membership.csv",
+      "evaluation_profile": "default_research",
+      "is_complete": true,
+      "omitted_row_count": 0,
+      "reason": "complete artifact written by research profile",
+      "row_count": 780,
+      "sample_fraction": 1.0,
+      "sampling_policy": "none",
+      "schema_version": "artifact_tier_v1",
+      "source_row_count": 780,
+      "tier": "full"
+    }
+  },
   "artifact_type": "real_case_single_factor_bundle",
   "case_name": "demo_bp_single_factor",
   "evaluation_standard": {
@@ -78,13 +119,16 @@
         "diagnostic_max_dates": null,
         "diagnostic_sample_mode": "latest",
         "run_baseline_comparison": true,
+        "run_dual_scope_report_path": true,
         "run_execution_price_sensitivity": true,
+        "run_is_report_path": true,
         "run_lag_sensitivity": true,
         "run_marginal_contribution": true,
         "run_neutralization_raw_comparison": true,
         "run_param_sensitivity": true,
         "run_random_baseline": true,
-        "run_tradability_checks": true
+        "run_tradability_checks": true,
+        "write_full_membership_artifacts": true
       },
       "uncertainty": {
         "block_bootstrap_block_length": 5,
