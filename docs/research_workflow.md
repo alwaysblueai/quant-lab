@@ -22,8 +22,9 @@
 | 0 分发 | **alpha-lab `(model-)idea distribute`（Claude API）** | 单一 | 检索 vault + 代码库，产出 5 个文件（manifest + retrieval_pack + 2 份对称 prompt + stage2_input），不调用 Stage 1 引擎 |
 | 1 生成+评审 | **Claude Code + Codex GUI** 并行 | 任务**相同**（generator + reviewer 合一）；互不可见 | 两份输出由网页 GPT 在 Stage 2 综合 |
 | 2 合同化 | **网页版 GPT** | 单一 | 综合两引擎输出取长补短，输出唯一 `factor_json_payload` / `model_candidate_payload`，含 provenance |
+| 2.5 vault-refine | **Claude Desktop** | 单一、可选加固 | 在 vault 约束下改写 Stage 2 两份 YAML；不跑实验、不写 draft factor/model 或 case YAML |
 | 3 实现+验证 | **单一**（Codex GUI 或 Claude Code 任一） | 单一 | 代码只该有一份，KILL 由评估管线数据 |
-| 4 经验归档 | **后端 CLI + 用户手工** | 单一 | `alpha-lab idea experiment-card`，再由用户导出到 vault |
+| 4 经验归档 | **三源总结 + 用户审批** | 单一 | 网页 GPT 机制侧总结 + Codex GUI artifact 事实 + Claude Desktop 合并，先入 `50_writeback_drafts/`，审批后写回 vault |
 | 5 上线报告 | **前端 web unified** | 单一 | 仅展示 promoted 候选的完整可视化报告 |
 
 ### Stage 1 双引擎纪律
@@ -111,7 +112,12 @@ Part B 只负责"在 v1 schema 内能不能执行"；不否决、不淘汰、不
 
 ## Model-lab 对齐
 
-三段流水线对称镜像；研究对象从"因子机制"换成"模型改进机制"（loss / regularization / feature interaction / target construction / sample weighting / training window / model selection）。`transferable_moves` / `operative_claims` 字段语义同；ledger schema 同；两引擎对称协议同（Part B 评审 ModelFactorCaseSpec 可执行性而不是 factor.json）。
+流水线对称镜像；研究对象从"因子机制"换成"模型改进机制"（loss / regularization / feature interaction / target construction / sample weighting / training window / model selection）。`transferable_moves` / `operative_claims` 字段语义同；ledger schema 同；两引擎对称协议同（Part B 评审 ModelFactorCaseSpec 可执行性而不是 factor.json）。
+
+Stage 2.5 与 Stage 4 也保持镜像：single-factor 的 vault-refine 加固 `factor_json_payload.code`，
+model-lab 的 vault-refine 加固 `model_candidate_payload.case_spec_payload`；single-factor 的
+writeback 写因子机制经验，model-lab 的 writeback 写模型改进动作、训练稳定性、feature importance
+集中度、过拟合与资源证据。两侧都不得引入 Level 3 / execution / replay 语义。
 
 ## 代码入口
 
@@ -120,7 +126,9 @@ Part B 只负责"在 v1 schema 内能不能执行"；不否决、不淘汰、不
 | Stage 0 入口 | `service.py::distribute_idea` / `model_idea.py::distribute_model_idea` |
 | Symmetric prompt builder | `engine_prompts.py::build_prompt(engine, ctx)` |
 | 代码库索引 | `codebase_index.py::build_codebase_snapshot` |
+| Stage 2.5 vault-refine 模板 | `docs/templates/stage2_vault_refine_prompt.md` / `docs/templates/model_stage2_vault_refine_prompt.md` |
 | Stage 4 card scaffold + cleanup | `experiment_card.py::scaffold_experiment_card` |
+| Stage 4 三源 writeback 模板 | `docs/templates/web_gpt_*_iteration_summary_prompt.md` / `docs/templates/codex_gui_*_experiment_summary_prompt.md` / `docs/templates/claude_desktop_*_writeback_merge_prompt.md` |
 | `transferable_moves` / `operative_claims` 提取 | `service.py::_extract_frontmatter_field_items` / `model_idea.py::_read_card_frontmatter_field_items` |
 | `available_data` 自动推断 | `scoring.py::infer_available_data_from_frequency` |
 | Retrieval 多分量评分 | `scoring.py::score_card` + `service.py::_score_candidates` |
@@ -134,3 +142,5 @@ Part B 只负责"在 v1 schema 内能不能执行"；不否决、不淘汰、不
 - `docs/backend_draft_factor_workflow.md` / `docs/backend_draft_model_workflow.md` — Stage 3 后端细节。
 - `docs/factor_promotion_checklist.md` — Stage 5 晋升清单。
 - `docs/templates/<lab>_stage{1_reconcile,2_candidate}_contract.md` — 网页 GPT 项目"sources"模板。
+- `docs/templates/stage2_vault_refine_prompt.md` / `docs/templates/model_stage2_vault_refine_prompt.md` — Stage 2.5 vault-refine 模板。
+- `docs/templates/*_iteration_writeback_template.md` 与对应 `web_gpt_*` / `codex_gui_*` / `claude_desktop_*` prompts — Stage 4 三源 writeback 模板。

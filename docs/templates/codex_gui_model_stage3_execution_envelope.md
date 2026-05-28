@@ -39,7 +39,7 @@
 4. 运行 validate-draft-model
 5. 运行标准 model-factor backend experiment
 6. 检查 artifact draft_model_source 审计字段（candidate_json_sha256、case_spec_sha256、feature_contract_sha256、source path、provenance.idea_id）
-7. 输出结果摘要和下一轮 case_spec_payload 字段修改建议
+7. 追加一行 trail 到 research_log.md，并按 model_lab_stage3_backend_draft_prompt.md「输出要求」固定 schema 输出 model_factor_stage3_feedback_v1 反馈包（供网页版 GPT 迭代下一版 case_spec_payload）
 
 forbidden_actions（Stage 3 执行者硬约束，违反任一即视为本轮失败）：
 - 自行补全 Stage2 payload 中缺失的字段（缺什么停下来回写 research_log 的 deferred 段）

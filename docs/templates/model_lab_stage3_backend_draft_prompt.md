@@ -204,18 +204,86 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case model-f
 
 ## 输出要求
 
-最终用中文输出：
+Stage3 的最终交付物是**一份固定 schema 的迭代反馈包**，供网页版 GPT 在同一个
+候选模型项目里生成下一版 Stage2 `case_spec_payload`。它有两个落点：
 
-1. 写入了哪些文件（candidate JSON、research_log.md、case YAML）。
-2. 实际运行的 validator 命令和实验命令。
-3. 实验成功或失败，artifact 输出路径。
-4. 是否确认 `candidate_json_sha256`、`case_spec_sha256`、`feature_contract_sha256`、
-   source path、feature columns、feature availability、model family、PIT 假设。
-5. 初筛结果摘要：coverage、IC / rank IC、ic_decay、turnover、训练通过率、
-   model_selection 状态、portfolio validation status。
-6. 主要失败点或脆弱点（机制不兼容、特征覆盖率低、训练样本不足、PIT 风险等）。
-7. 下一轮 1-3 个具体修改方向（仅限 `case_spec_payload` 字段调整：feature_columns、
-   feature_preprocess、model.family、training、target.horizon 等）。
+**(a) durable trail —— 追加一行到 `research_log.md`**（≤ 80 字符，只写流水、不写
+决策文档）：
+
+```text
+2026-05-26  v1 ridge baseline  case=pv_turnover_v1_v1.yaml  art=outputs/.../pv_turnover_v1_v1  RankIC=0.012 IR=0.18  verdict=keep-iterating
+```
+
+**(b) feedback pack —— 作为本轮 Stage3 的最终结构化输出（贴进网页版 GPT 的就是
+这一块）**。固定 schema 如下；prose 字段用中文，专有名词/代码符号保留英文：
+
+```yaml
+model_stage3_feedback_version: model_factor_stage3_feedback_v1
+idea_id: <从 model_candidate.json provenance 原样带出>
+candidate_name: <candidate_name>
+iteration: <本次评估的 payload 版本，如 v1>
+model_thesis: <一句话机制假设，逐字保留、除非用户显式重审>
+base_case_spec_path: <case_spec_payload.base_case_spec_path>
+run_output_dir: <artifact 输出目录>
+
+contract:                       # 工程契约一行带过，不展开审计细节
+  validator: passed             # validate-draft-model 结果
+  source_hash_audit: ok         # candidate_json / case_spec / feature_contract sha256 + source path
+  artifact_audit: ok            # run_manifest + model_definition + feature_manifest draft_model_source
+  provenance_idea_id: present
+
+verdict:
+  campaign_triage: <如 "Drop for now" / "Keep iterating">
+  promotion_tier_L: <pass / blocked>   # 共享指标门槛见 factor_promotion_checklist.md Tier L
+  one_line: <一句话定性，如 "契约全过；rank_ic 偏低、训练通过率不稳">
+
+scorecard:                      # 共享指标门槛取 factor_promotion_checklist.md Tier L
+  rank_ic_mean:   {value: <num>, gate: ">=0.01", pass: <bool>}
+  rank_ic_ir:     {value: <num>, gate: ">=0.15", pass: <bool>}
+  cost_ir_5bps:   {value: <num>, gate: ">=0.05", pass: <bool>}
+  coverage_mean:  {value: <num>, gate: ">=0.65", pass: <bool>}
+  # model 专属诊断（无硬门槛，给值供判断）：
+  training_pass_rate:       <num>
+  ic_decay_rebalance_ratio: <num>
+  model_selection:          <status>
+  portfolio_validation:     <status>
+  core_gap: <一句话：距 Tier C 核心档还差什么；不到 Tier L 就写 "未到准入档">
+
+blockers:                       # 真正卡住准入的 1-3 条现象（不是动作）
+  - <如 特征覆盖率低 / 训练样本不足 / 机制不兼容 / rolling 不稳>
+
+codex_assessment:               # Codex 自主研判：advisory，网页版 GPT 可推翻
+  read: |                       # 自由文本，≤ ~150 字：本轮结果说明了什么、为何强/弱
+    <训练稳定性 / feature importance 分布 / 过拟合 / 失败模式 / 有效之处；不复述 scorecard 数字>
+  recommended_directions:       # ranked，最多 4 条，每条一句理由
+    - {move: <如 train_window 拉到 24 个月>, rationale: <为何>, confidence: high}
+  lead_pick: <如果只能改一处 case_spec 字段先改哪个 + 一句为什么>
+
+iteration_request:
+  preserve: [idea_id, model_thesis, feature_availability PIT 合同, base_case_spec_path, "spec_variant only（不引入自定义 code）"]
+  do_not: [新增未注册 feature 列, 自定义 feature builder/estimator code, needs_extension 机制, Level3/portfolio/execution 语义, 换数据/绕 validator]
+  try_next:                     # codex_assessment 的 lead_pick + top directions 蒸馏成 case_spec 改动，≤3 条
+    - <如 feature_columns 增减 / feature_preprocess / model.family / training.train_window / target.horizon>
+
+resource: <一行；如 "oom: not_triggered, peak_rss vs budget ok"；触发或逼近预算才展开>
+
+history:                        # 读取 research_log.md 重建，保证贴最新块也不丢轨迹
+  - {v: v1, change: <一句话>, rank_ic: <num>, verdict: <如 keep-iterating>}
+```
+
+规则：
+
+- scorecard 共享指标行的 `gate` 值必须与 `docs/factor_promotion_checklist.md`
+  的 **Tier L** 保持一致；改了 checklist 就同步改这里。model 专属诊断行不设硬门槛。
+- 填不出可靠值的字段**直接省略**，不要用 `<value>` / `<未知>` 占位凑格式。
+- `idea_id`、`model_thesis`、`base_case_spec_path` 必须逐字延续，这是网页版 GPT
+  识别"在迭代同一个候选模型"的对齐锚。
+- `codex_assessment` 是 advisory，网页版 GPT 可推翻；它**不改** `preserve` /
+  `do_not` 硬约束，且 `recommended_directions` 必须全部落在 `do_not` 之外（不准
+  建议新增未注册 feature 列 / 自定义 code / `needs_extension` / Level3 / 换数据绕
+  validator）。
+- `try_next` 必须是 `codex_assessment` 的蒸馏，二者不得矛盾；只能是 `case_spec_payload`
+  字段调整，v1 不接受自定义 code。探索阶段不 KILL，最重只能 "drop for now"。
 
 禁止输出：
 
