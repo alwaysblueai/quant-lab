@@ -1,0 +1,142 @@
+{
+  "base_case_spec_path": "configs/real_cases/model_factor/stock_ridge_safe_bfq.yaml",
+  "candidate_name": "pv_turnover_liquidity_light_v1",
+  "case_spec_payload": {
+    "direction": "long",
+    "factor_name": "pv_turnover_liquidity_light_v1",
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp"
+    },
+    "feature_columns": [
+      "turnover_rate",
+      "turnover_rate_f",
+      "volume_ratio",
+      "circ_mv",
+      "free_share",
+      "atr_bfq",
+      "bias1_bfq",
+      "rsi_bfq_6",
+      "mtm_bfq",
+      "wr_bfq",
+      "vr_bfq",
+      "mfi_bfq"
+    ],
+    "feature_importance": {
+      "enabled": true,
+      "method": "auto",
+      "mode": "every_fit",
+      "save_ledger": true
+    },
+    "feature_preprocess": {
+      "cross_sectional_group_scope": "date",
+      "cross_sectional_transform": "winsorize_zscore",
+      "missing_policy": "median_impute",
+      "scale_features": "auto"
+    },
+    "features_path": "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet",
+    "model": {
+      "family": "ridge",
+      "params": {
+        "alpha": 1.0
+      }
+    },
+    "model_selection": {
+      "enabled": false
+    },
+    "n_quantiles": 5,
+    "name": "pv_turnover_liquidity_light_v1",
+    "neutralization": {
+      "enabled": false
+    },
+    "output": {
+      "root_dir": "../../../outputs/real_cases"
+    },
+    "prices_path": "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet",
+    "rebalance_frequency": "W",
+    "target": {
+      "horizon": 5,
+      "kind": "forward_return",
+      "max_abs_forward_return": 1.0,
+      "price_column": "close_qfq"
+    },
+    "training": {
+      "min_score_assets": 2000,
+      "min_train_dates": 60,
+      "min_train_rows": 50000,
+      "retrain_every_n_dates": 40,
+      "train_window_n_dates": 120,
+      "window_type": "rolling"
+    },
+    "transaction_cost": {
+      "one_way_rate": 0.001
+    },
+    "universe": {
+      "name": "default"
+    }
+  },
+  "contract_version": "stage2_model_candidate_v1",
+  "data_contract": {
+    "feature_availability": {
+      "column": "known_at",
+      "mode": "required_timestamp",
+      "safety_lag_days": null
+    },
+    "feature_optional_columns": [],
+    "feature_required_columns": [
+      "turnover_rate",
+      "turnover_rate_f",
+      "volume_ratio",
+      "circ_mv",
+      "free_share",
+      "atr_bfq",
+      "bias1_bfq",
+      "rsi_bfq_6",
+      "mtm_bfq",
+      "wr_bfq",
+      "vr_bfq",
+      "mfi_bfq"
+    ],
+    "prices_required_columns": [
+      "date",
+      "asset",
+      "close_qfq"
+    ]
+  },
+  "expected_horizon": "t_plus_1_or_later",
+  "implementation_status": "draft_for_stage3",
+  "implementation_type": "spec_variant",
+  "provenance": {
+    "audience_chain": [
+      "claude",
+      "codex",
+      "web_gpt_stage2"
+    ],
+    "idea_id": "20260525T115846Z__idea-f3ca571d",
+    "stage2_payload_sha256": "3ef2e85af9f3debc3da65818cb9cdfcc6d433e08c7c26373f04a8b15c8110d35"
+  },
+  "risk_controls": {
+    "feature_availability_pit": "全部 12 列为日频收盘后可得技术/换手/流动性特征，无 as-reported 基本面列（pe_ttm/pb/ps_ttm 已排除）；用 required_timestamp + known_at 锚定，feature value at t 仅用 <= t 信息。",
+    "feature_instability": "横截面 winsorize+zscore 控制极端值与量纲；circ_mv/free_share 大量纲列经标准化后再入模型。",
+    "label_leakage": "target=forward_return(5d) 与 feature 分离；feature 不含任何 forward/future/label token。",
+    "overfit_complexity": "低自由度 ridge（单一 alpha=1.0），12 特征，model_selection 关闭，降低样本内过拟合。",
+    "split_regime_fragility": "rolling 120 日窗口 + 每 40 日 retrain；min_train_dates/min_train_rows 兜底，避免 regime 切换处样本不足。",
+    "turnover_cost": "transaction_cost.one_way_rate=0.001；turnover-penalized selection 留作下一轮（M3）。"
+  },
+  "run_controls": {
+    "evaluation_profile": "exploratory_screening",
+    "screening_retrain_every_n_dates": 40,
+    "vault_export_mode": "skip"
+  },
+  "source_mechanisms": [
+    "M1",
+    "M2"
+  ],
+  "stage3_validation_focus": [
+    "确认 12 特征在 features_safe_bfq_35 表头齐全、known_at PIT 检查通过。",
+    "exploratory_screening 下检查 coverage / mean rank IC / decay / turnover 是否支持继续。",
+    "确认 model_selection 关闭、单 ridge alpha 的训练通过率与样本量。",
+    "下一轮候选：启用 M3 换手惩罚 model_selection（用 base spec 证据确认 rank_ic_minus_turnover_penalty 行为）。",
+    "feature 重要性是否被某个高量纲流动性列（circ_mv/free_share）主导。"
+  ]
+}

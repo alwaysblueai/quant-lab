@@ -1,0 +1,365 @@
+{
+  "type": "alpha_lab_idea_distribute",
+  "created_at_utc": "2026-05-25T11:58:46.994491+00:00",
+  "idea": "用价格、换手率与流动性相关的安全技术特征，对未来短期（约一周）横截面收益排序做轻量预测；偏好低复杂度线性族、成交活跃但波动不过热的股票更可信",
+  "idea_id": "20260525T115846Z__idea-f3ca571d",
+  "lab": "model_factor",
+  "mode": "start",
+  "stage": "mechanism_discovery",
+  "engines": [
+    "claude",
+    "codex"
+  ],
+  "retrieval_pack_path": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/retrieval_pack.md",
+  "engine_prompt_paths": {
+    "claude": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/prompt_claude.md",
+    "codex": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/prompt_codex.md"
+  },
+  "engine_output_paths": {
+    "claude": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/stage1_claude.md",
+    "codex": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/stage1_codex.md"
+  },
+  "stage2_input_path": "/home/yukun_zhao/quant/projects/alpha-lab/ideas/20260525T115846Z__idea-f3ca571d/stage2_input.md",
+  "retrieval_diagnostics": {
+    "mode": "start",
+    "stage": "mechanism_discovery",
+    "recommended_next_stage": "signal_mapping",
+    "score_components_by_name": {
+      "Avramov He 2026 Cross-Asset Spillover SDF": {
+        "semantic": 0.09486433863639832,
+        "metadata": 1.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.2948643386363983
+      },
+      "Haitong Factor Series 24 Goodness-of-Fit Volatility-Adjusted Factor Premium": {
+        "semantic": 0.09406950324773788,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.09406950324773788
+      },
+      "Conditional Mean-Variance Multifactor Portfolio with Volatility Management": {
+        "semantic": 0.09058752655982971,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.09058752655982971
+      },
+      "Factor Research Operating Manual": {
+        "semantic": 0.08634500950574875,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.08634500950574875
+      },
+      "Tie-Handling in Cross-Sectional Ranking": {
+        "semantic": 0.08543063700199127,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.08543063700199127
+      },
+      "Volatility-Stratified Single-Name Deviation Constraints for Index Enhancement (A-share)": {
+        "semantic": 0.07606766372919083,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.07606766372919083
+      },
+      "Z-Score Normalization and Aggregation": {
+        "semantic": 0.07373300194740295,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.07373300194740295
+      },
+      "Caitong Q-Factor A-Share Empirical Improvement 2020": {
+        "semantic": 0.06893642246723175,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.06893642246723175
+      },
+      "Hierarchical Risk Parity (HRP)": {
+        "semantic": 0.061041105538606644,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.061041105538606644
+      },
+      "Factor Crowding & Capacity Decay": {
+        "semantic": 0.05986151844263077,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05986151844263077
+      },
+      "Multi-Agent LLM Stock Selection (Concept & Macro)": {
+        "semantic": 0.059786856174468994,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.059786856174468994
+      },
+      "Momentum-integrated Multi-task Stock Recommendation with Converge-based Optimization": {
+        "semantic": 0.059133924543857574,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.059133924543857574
+      },
+      "EM Algorithm for Covariance Estimation": {
+        "semantic": 0.058856528252363205,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.058856528252363205
+      },
+      "单因子到多因子检验清单": {
+        "semantic": 0.05683211237192154,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05683211237192154
+      },
+      "Price-Path Convexity and Short-Horizon Return Predictability": {
+        "semantic": 0.054326556622982025,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.054326556622982025
+      },
+      "Haitong Factor Series 18 - Price Pattern OHLC Stock Selection": {
+        "semantic": 0.05340711027383804,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05340711027383804
+      },
+      "GF Multi-Factor Series 3 Valuation Momentum Composite Stock Selection 2010": {
+        "semantic": 0.05181460827589035,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05181460827589035
+      },
+      "The Seven Tenets of QEPM": {
+        "semantic": 0.05145062878727913,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05145062878727913
+      },
+      "仿真与生产一致性审计": {
+        "semantic": 0.05096444487571716,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05096444487571716
+      },
+      "手册增量复核 - 初始基线": {
+        "semantic": 0.05029319226741791,
+        "metadata": 0.0,
+        "mechanism": 0.0,
+        "dependency": 1.0,
+        "failure": 0.0,
+        "llm_relevance": 0.0,
+        "aggregate": 0.05029319226741791
+      }
+    },
+    "dropped_cards": [
+      {
+        "name": "A-share Commodity Equity Linkage and Industry-Chain Timing Framework",
+        "reason": "missing_data: basis_spreads, commodity_futures_prices, equity_prices, etf_flows, industry_chain_labels, pmi"
+      },
+      {
+        "name": "De-leveraged Value Factor (去杠杆价值因子)",
+        "reason": "missing_data: balance_sheet, cash_flow_statement, income_statement, market_cap"
+      },
+      {
+        "name": "Price-Path Convexity",
+        "reason": "missing_data: adjusted_daily_close, corporate_action_adjustments, daily_returns"
+      },
+      {
+        "name": "Equity Value Premium",
+        "reason": "missing_data: book_value_as_reported, earnings_as_reported, market_cap, sector_classification"
+      }
+    ],
+    "score_weights": {
+      "semantic": 1.0,
+      "metadata": 0.2,
+      "mechanism": 0.2,
+      "dependency": 0.0,
+      "failure": 0.0,
+      "llm_relevance": 1.0
+    },
+    "llm_rerank": {
+      "enabled": false,
+      "model": "claude-sonnet-4-6",
+      "tokens_input": 0,
+      "tokens_output": 0,
+      "cache_hit_input": 0,
+      "dropped_invalid_names": [],
+      "fallback_reason": "no_api_key"
+    },
+    "query_anchor": {
+      "domain": "macro_cross_asset",
+      "market": "",
+      "mechanism": "",
+      "factor_family": ""
+    },
+    "available_data_provided": true,
+    "available_data_source": "explicit",
+    "parent_session_id": null,
+    "upstream_session_id": null,
+    "upstream_sections_injected": 0,
+    "drift_injected_count": 0
+  },
+  "codebase_snapshot": {
+    "factors": {
+      "promoted": [],
+      "research": [
+        "asym_vol_reversal",
+        "daily_failed_rebound_activity_risk_v1",
+        "downshock_cushion_absorb",
+        "downshock_failed_cushion_risk_v1",
+        "signed_jump_neg_5d"
+      ]
+    },
+    "custom_models": {
+      "promoted": [],
+      "research": [
+        "turnover_conditioned_pv_synthesis_v1",
+        "turnover_technical_ridge_20",
+        "turnover_technical_ridge_20_smoke"
+      ]
+    },
+    "cases": {
+      "single_factor": [
+        "_template_exploration"
+      ],
+      "model_factor": [
+        "frontend_smoke_turnover_conditioned_pv_synthesis_v1",
+        "frontend_smoke_turnover_technical_ridge_20_smoke",
+        "stock_elastic_net_safe_bfq",
+        "stock_elastic_net_smoke",
+        "stock_gbdt_safe_bfq",
+        "stock_gbdt_smoke",
+        "stock_lasso_safe_bfq",
+        "stock_lasso_safe_bfq_20_lean",
+        "stock_lasso_smoke",
+        "stock_lightgbm_safe_bfq",
+        "stock_lightgbm_safe_bfq_20_lean",
+        "stock_lightgbm_smoke",
+        "stock_linear_safe_bfq",
+        "stock_linear_smoke",
+        "stock_mlp_smoke",
+        "stock_ridge_safe_bfq",
+        "stock_ridge_smoke",
+        "stock_xgboost_safe_bfq",
+        "stock_xgboost_smoke",
+        "turnover_conditioned_pv_synthesis_v1_v1",
+        "turnover_conditioned_pv_synthesis_v1_v2",
+        "turnover_conditioned_pv_synthesis_v1_v3",
+        "turnover_technical_ridge_20_smoke_v1",
+        "turnover_technical_ridge_20_v1"
+      ]
+    },
+    "schema": {
+      "factor_json_required_keys": [
+        "name",
+        "description",
+        "required_columns",
+        "optional_columns",
+        "frequency",
+        "unavailable_data_policy",
+        "pit_assumption",
+        "code"
+      ],
+      "model_case_spec_top_keys": [
+        "name",
+        "factor_name",
+        "features_path",
+        "prices_path",
+        "feature_columns",
+        "rebalance_frequency",
+        "n_quantiles",
+        "direction",
+        "universe",
+        "target",
+        "feature_availability",
+        "feature_preprocess",
+        "feature_importance",
+        "model",
+        "model_selection",
+        "training",
+        "neutralization",
+        "transaction_cost",
+        "output"
+      ]
+    },
+    "validator_rules": {
+      "factor": [
+        "name must be snake_case (3-64 chars) and not collide with BUILTIN_FACTOR_NAMES",
+        "frequency must be 'daily'",
+        "code must define build_factor(frame) returning index-aligned pd.Series, or legacy builder(prices, ...)",
+        "forbidden imports: os/pathlib/glob/pickle/shutil/socket/subprocess/urllib/requests/httpx",
+        "forbidden calls: __import__/eval/exec/open/compile/breakpoint/input",
+        "forbidden attr calls: mkdir/read_csv/read_parquet/to_csv/to_parquet/popen/system/run/urlopen/write_text/...",
+        "future-leakage tokens forbidden in identifiers: future_return/forward_return/fwd_return/next_return/label_return/target_return",
+        "shift(-n) and negative pct_change rejected as future leakage",
+        "rolling/expanding must group by 'asset'",
+        "required_columns must be real factor_recipe.py registered names (prices + intraday-derived)"
+      ],
+      "model": [
+        "contract_version must be 'stage2_model_candidate_v1'",
+        "implementation_status must be 'draft_for_stage3'",
+        "implementation_type must be 'spec_variant' (no custom feature/estimator/sample_weight code in v1)",
+        "candidate_name is snake_case (3-64)",
+        "case_spec_payload must parse via model_factor_case_spec_from_mapping (no patch-only)",
+        "feature_columns must all appear in features file header",
+        "fundamental-like features cannot use feature_availability.mode='required_timestamp' with column=null",
+        "payload must not contain Level 3 / execution_replay / fill_simulation / portfolio_construction / live_trading tokens"
+      ]
+    }
+  }
+}

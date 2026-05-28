@@ -1,0 +1,26 @@
+{
+  "name": "tail_drop_volume_knot_v1",
+  "description": "Tail-close liquidity shock reversal candidate. High values occur when a stock sells off in the last 30 minutes, closes below VWAP, has unusually high close-window amount share versus its own recent history, and trades under unusually high intraday impact cost versus its own recent history. The intended direction is positive: higher factor value means more attractive long candidate for next-session or 3-5 day reversal repair, conditional on normal tradability.",
+  "required_columns": [
+    "ret_last30",
+    "amount_share_close30",
+    "amihud_intraday",
+    "vwap_close_dev",
+    "is_limit_down",
+    "is_suspended"
+  ],
+  "optional_columns": [],
+  "frequency": "daily",
+  "unavailable_data_policy": "return_nan",
+  "pit_assumption": "The factor is computed after day-t close and may use same-day final 30-minute return, same-day close/VWAP deviation, same-day close-window amount share, and same-day intraday Amihud because the signal is intended for future trading after the close. Rolling percentiles for amount_share_close30 and amihud_intraday are grouped by asset, use only the current row and prior rows up to t, use no centered window, and contain no negative shift or future return labels.",
+  "code": "def build_factor(frame):\n    \"\"\"Tail-close liquidity shock reversal candidate.\n\n    High value = more attractive long candidate.\n\n    Required columns:\n      - ret_last30\n      - amount_share_close30\n      - amihud_intraday\n      - vwap_close_dev\n      - is_limit_down\n      - is_suspended\n\n    PIT:\n      - Intended to be evaluated after day-t close.\n      - Rolling percentiles are per asset and use only rows up to t.\n      - No future returns, negative shifts, full-sample statistics, files,\n        network access, or execution/portfolio semantics.\n    \"\"\"\n    window = 60\n    min_periods = 20\n\n    def _rolling_pct_by_asset(series):\n        # Assumes frame is already in chronological order within each asset,\n        # as supplied by the factor recipe. The rolling window includes the\n        # current observation and historical observations only.\n        def _last_percentile(x):\n            cur = x.iloc[-1]\n            if cur != cur:\n                return cur\n            return (x <= cur).mean()\n\n        out = (\n            series.astype(float)\n            .groupby(frame[\"asset\"], group_keys=False)\n            .rolling(window=window, min_periods=min_periods)\n            .apply(_last_percentile, raw=False)\n            .reset_index(level=0, drop=True)\n        )\n        return out.reindex(frame.index)\n\n    late_drop = (-frame[\"ret_last30\"].astype(float)).clip(lower=0.0)\n    close_below_vwap = (-frame[\"vwap_close_dev\"].astype(float)).clip(lower=0.0)\n\n    close_volume_concentration = _rolling_pct_by_asset(\n        frame[\"amount_share_close30\"]\n    )\n    liquidity_stress = _rolling_pct_by_asset(\n        frame[\"amihud_intraday\"]\n    )\n\n    value = (\n        late_drop\n        * close_below_vwap\n        * close_volume_concentration\n        * liquidity_stress\n    )\n\n    blocked = (\n        frame[\"is_limit_down\"].fillna(False).astype(bool)\n        | frame[\"is_suspended\"].fillna(False).astype(bool)\n    )\n    value = value.mask(blocked)\n\n    return value\n",
+  "provenance": {
+    "idea_id": "20260523T132055Z__30",
+    "stage2_payload_sha256": "b9d6d7e7cf669e7fc986b7713036f92e2b6ae8c093f3a37f9568e2c7f1a8be09",
+    "audience_chain": [
+      "claude",
+      "codex",
+      "web_gpt_stage2"
+    ]
+  }
+}

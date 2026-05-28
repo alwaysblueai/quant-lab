@@ -1,0 +1,147 @@
+contract_version: "model_stage2_candidate_output_v1"
+stage: "stage2_candidate"
+provenance:
+  idea_id: "20260525T115846Z__idea-f3ca571d"
+  stage2_payload_sha256: "PENDING_STAGE3_MATERIALIZE"
+  audience_chain: ["claude", "codex", "web_gpt_stage2"]
+human_summary:
+  candidate_name: "pv_turnover_liquidity_light_v1"
+  implemented_mechanism_ids: ["M1", "M2"]
+  implementation_summary: "用 12 个价格/换手/流动性安全技术特征 + 横截面 winsorize+zscore 预处理，喂低自由度 ridge 线性模型，预测 5 日 forward return 并取横截面分位排序。纯 ModelFactorCaseSpec 字段变体，无自定义代码。"
+  not_implemented_summary: "换手惩罚 model_selection（M3，partial）留作下一轮；显式 vol×turnover 交互列（M5）、换手样本加权（M6）为 needs_extension；波动率状态组合降权（M7）为 future_enhancement，均不进入 v1。"
+  why_v1_is_spec_variant: "只动 feature_columns / feature_preprocess / model / target / training 等现有字段，不引入 feature builder、estimator、sample_weight 或 target 扩展代码。"
+model_candidate_payload:
+  contract_version: "stage2_model_candidate_v1"
+  candidate_name: "pv_turnover_liquidity_light_v1"
+  implementation_status: "draft_for_stage3"
+  implementation_type: "spec_variant"
+  provenance:
+    idea_id: "20260525T115846Z__idea-f3ca571d"
+    stage2_payload_sha256: "PENDING_STAGE3_MATERIALIZE"
+    audience_chain: ["claude", "codex", "web_gpt_stage2"]
+  source_mechanisms: ["M1", "M2"]
+  base_case_spec_path: "configs/real_cases/model_factor/stock_ridge_safe_bfq.yaml"
+  expected_horizon: "t_plus_1_or_later"
+  data_contract:
+    prices_required_columns: ["date", "asset", "close_qfq"]
+    feature_required_columns:
+      - turnover_rate
+      - turnover_rate_f
+      - volume_ratio
+      - circ_mv
+      - free_share
+      - atr_bfq
+      - bias1_bfq
+      - rsi_bfq_6
+      - mtm_bfq
+      - wr_bfq
+      - vr_bfq
+      - mfi_bfq
+    feature_optional_columns: []
+    feature_availability:
+      mode: "required_timestamp"
+      column: "known_at"
+      safety_lag_days: null
+  risk_controls:
+    feature_availability_pit: "全部 12 列为日频收盘后可得技术/换手/流动性特征，无 as-reported 基本面列（pe_ttm/pb/ps_ttm 已排除）；用 required_timestamp + known_at 锚定，feature value at t 仅用 <= t 信息。"
+    label_leakage: "target=forward_return(5d) 与 feature 分离；feature 不含任何 forward/future/label token。"
+    overfit_complexity: "低自由度 ridge（单一 alpha=1.0），12 特征，model_selection 关闭，降低样本内过拟合。"
+    turnover_cost: "transaction_cost.one_way_rate=0.001；turnover-penalized selection 留作下一轮（M3）。"
+    feature_instability: "横截面 winsorize+zscore 控制极端值与量纲；circ_mv/free_share 大量纲列经标准化后再入模型。"
+    split_regime_fragility: "rolling 120 日窗口 + 每 40 日 retrain；min_train_dates/min_train_rows 兜底，避免 regime 切换处样本不足。"
+  run_controls:
+    evaluation_profile: "exploratory_screening"
+    screening_retrain_every_n_dates: 40
+    vault_export_mode: "skip"
+  case_spec_payload:
+    name: "pv_turnover_liquidity_light_v1"
+    factor_name: "pv_turnover_liquidity_light_v1"
+    features_path: "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/features_safe_bfq_35.parquet"
+    prices_path: "../../../data/processed/stock_factor4model_2016_2026/baseline_inputs/prices_raw.parquet"
+    feature_columns:
+      - turnover_rate
+      - turnover_rate_f
+      - volume_ratio
+      - circ_mv
+      - free_share
+      - atr_bfq
+      - bias1_bfq
+      - rsi_bfq_6
+      - mtm_bfq
+      - wr_bfq
+      - vr_bfq
+      - mfi_bfq
+    rebalance_frequency: "W"
+    n_quantiles: 5
+    direction: "long"
+    universe:
+      name: "default"
+    target:
+      kind: "forward_return"
+      horizon: 5
+      price_column: "close_qfq"
+      max_abs_forward_return: 1.0
+    feature_availability:
+      mode: "required_timestamp"
+      column: "known_at"
+    feature_preprocess:
+      missing_policy: "median_impute"
+      cross_sectional_transform: "winsorize_zscore"
+      cross_sectional_group_scope: "date"
+      scale_features: "auto"
+    feature_importance:
+      enabled: true
+      method: "auto"
+      mode: "every_fit"
+      save_ledger: true
+    model:
+      family: "ridge"
+      params:
+        alpha: 1.0
+    model_selection:
+      enabled: false
+    training:
+      window_type: "rolling"
+      train_window_n_dates: 120
+      min_train_dates: 60
+      min_train_rows: 50000
+      retrain_every_n_dates: 40
+      min_score_assets: 2000
+    neutralization:
+      enabled: false
+    transaction_cost:
+      one_way_rate: 0.001
+    output:
+      root_dir: "../../../outputs/real_cases"
+  stage3_validation_focus:
+    - "确认 12 特征在 features_safe_bfq_35 表头齐全、known_at PIT 检查通过。"
+    - "exploratory_screening 下检查 coverage / mean rank IC / decay / turnover 是否支持继续。"
+    - "确认 model_selection 关闭、单 ridge alpha 的训练通过率与样本量。"
+    - "下一轮候选：启用 M3 换手惩罚 model_selection（用 base spec 证据确认 rank_ic_minus_turnover_penalty 行为）。"
+    - "feature 重要性是否被某个高量纲流动性列（circ_mv/free_share）主导。"
+deferred_mechanisms:
+  - mechanism_id: "M3"
+    status: "needs_extension"
+    reason: "两引擎对 rank_ic_minus_turnover_penalty 完整支持度判断冲突，保守取 partial；本轮不启用，下一轮以 base spec 证据确认后再开 model_selection。"
+  - mechanism_id: "M5"
+    status: "needs_extension"
+    reason: "vol×turnover 显式交互列需 feature builder / 预物化，v1 spec_variant 不允许。"
+  - mechanism_id: "M6"
+    status: "needs_extension"
+    reason: "换手样本加权需 sample_weight 训练 hook，v1 无此入口。"
+  - mechanism_id: "M7"
+    status: "future_enhancement"
+    reason: "波动率状态组合降权属 portfolio construction（Level 2/3 边界），不进入 model-factor 候选。"
+stage3_execution_notes:
+  - "Stage3 materialize 时把 provenance.stage2_payload_sha256 从 placeholder 计算成真实 64 位 sha256（canonical-JSON(model_candidate_payload)，sha 字段先置空再哈希）。"
+  - "case YAML 字段必须与 case_spec_payload 完全一致，写到 configs/real_cases/model_factor/pv_turnover_liquidity_light_v1_v1.yaml。"
+  - "运行命令固定 exploratory_screening + --draft-model-candidate；不改临时数据/路径/模型绕过 OOM。"
+quality_gate:
+  name_only_response: false
+  contains_model_candidate_payload: true
+  contains_complete_case_spec_payload: true
+  implementation_type_is_spec_variant: true
+  feature_columns_are_real_columns: true
+  no_custom_code: true
+  no_portfolio_or_execution_semantics: true
+  blockers: []
