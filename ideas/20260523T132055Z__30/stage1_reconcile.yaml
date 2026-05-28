@@ -1,0 +1,247 @@
+contract_version: "single_factor_stage1_reconcile_v1"
+stage: "stage1_reconcile"
+provenance:
+  idea_id: "20260523T132055Z__30"
+  audience_chain: ["claude", "codex", "claude_code_stage2_vault_refine"]
+  retrieval_pack_sha256: ""
+idea_title: "尾盘流动性冲击反转"
+candidate_slug_hint: "tail_drop_volume_knot_v1"
+input_engines:
+  - engine: "claude"
+    artifact: "ideas/20260523T132055Z__30/stage1_claude.md"
+  - engine: "codex"
+    artifact: "ideas/20260523T132055Z__30/stage1_codex.md"
+code_feasibility_review:
+  factor_json_schema_keys:
+    - name
+    - description
+    - required_columns
+    - optional_columns
+    - frequency
+    - unavailable_data_policy
+    - pit_assumption
+    - code
+    - provenance
+  validator_rules_seen:
+    - "build_factor(frame) must return pd.Series aligned to input index"
+    - "no shift(-n), negative pct_change, future_return, forward_return, next_return"
+    - "no full-sample statistics; cross-sectional rank/demean allowed"
+    - "rolling/expanding must be grouped by asset and use only <= t"
+    - "no file/network/subprocess/eval/exec/open"
+    - "required_columns must be registered real columns"
+  per_mechanism:
+    M1:
+      in_v1_contract: true
+      implementation_status: "in_contract_factor_def"
+      required_columns_missing: []
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_6：把 amount_share_close30 与 amihud_intraday 做 per-asset rolling historical percentile，再与 late_drop 和 close_below_vwap 乘性合成；PIT-safe，要求 groupby('asset') rolling。"
+        codex: "对应 mechanism_1：tail_drop_volume_knot，保留四项耦合假设，但慢变量异常值必须用 asset 历史窗口到 t 为止计算；过滤跌停和停牌。"
+    M2:
+      in_v1_contract: true
+      implementation_status: "in_contract_factor_def"
+      required_columns_missing: []
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_1/5：尾盘下跌为主体，成交集中、冲击成本、VWAP 偏离作为截面门控或交互条件。"
+        codex: "对应 mechanism_2：closing_share_displacement，把成交额集中拆成主变量，amihud 仅弱化为分层或后续检验项。"
+    M3:
+      in_v1_contract: true
+      implementation_status: "in_contract_factor_def"
+      required_columns_missing: []
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_4：close_below_vwap × late_drop 的价格锚定精简版本，可作为低复杂度对照。"
+        codex: "对应 mechanism_3：below_anchor_tail_gap，可加入 OHLC 极端状态过滤；但 v1 若只依赖 manifest 明列字段，应先不强行引入 OHLC guard。"
+    M4:
+      in_v1_contract: true
+      implementation_status: "partial_in_contract"
+      required_columns_missing: []
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_2/3：加性 blend 或成交集中符号待定版本可计算，但更适合作为组件单调性审计。"
+        codex: "对应 mechanism_7：component_coupling_audit 可行，但若同时比较多种组合方式，容易变成研究编排而非单一 factor_json_payload。"
+    M5:
+      in_v1_contract: true
+      implementation_status: "partial_in_contract"
+      required_columns_missing:
+        - "full_day_or_intraday_path_return"
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_7：ret_last30 横截面去均值子形态可行，完整个股日内路径残差化缺少字段。"
+        codex: "无直接同构机制；Codex 的 below_anchor_tail_gap 可作为价格锚定残差方向的弱近邻。"
+    M6:
+      in_v1_contract: false
+      implementation_status: "needs_extension"
+      required_columns_missing:
+        - "intraday_prices_or_minute_bar"
+        - "price_path_curvature"
+        - "return_noise_deformation"
+      validator_blockers:
+        - "当前 manifest 不含日内分钟路径或路径凸性列，不能在 v1 factor.json 中 mock。"
+      reviewer_notes_by_engine:
+        claude: "对应 mechanism_8：path convexity 机制有效但缺少分钟路径。"
+        codex: "对应 mechanism_5：path_curl_tail_break 需要 intraday_maxdrawdown/path curvature/noise deformation。"
+    M7:
+      in_v1_contract: false
+      implementation_status: "needs_extension"
+      required_columns_missing:
+        - "vwpin_like_toxicity"
+        - "order_imbalance_ratio"
+        - "volume_order_imbalance"
+        - "mid_price_basis"
+        - "signed_amount_imbalance"
+      validator_blockers:
+        - "当前 v1 contract 不能构造未注册 order-flow/order-book features。"
+      reviewer_notes_by_engine:
+        claude: "VPIN/VWPIN 与盘口毒性作为尾盘压力的解释分支，当前未进入可执行主机制。"
+        codex: "对应 mechanism_6：toxic_flow_split 作为未来信息性卖压过滤分支保留。"
+mechanisms:
+  - id: "M1"
+    name: "tail_drop_volume_knot"
+    family: "intraday_microstructure"
+    implementation_status: "in_contract_factor_def"
+    stage2_priority: "primary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "尾盘 30 分钟价格下压、尾盘成交额占比相对个股自身历史异常偏高、日内冲击成本相对自身历史异常偏高、且收盘低于 VWAP 同时出现时，更像临近收盘的承接不足或被动卖压堆叠，未来 1-5 日存在修复机会。"
+    engine_data_generating_story: "先用 late_drop 和 close_below_vwap 定义当日尾盘价格锚偏离，再用 amount_share_close30 与 amihud_intraday 的 asset-grouped rolling historical percentile 判断该偏离是否发生在成交挤压和脆弱流动性状态中。"
+    signal_sketch: "late_drop=max(-ret_last30,0); below_vwap=max(-vwap_close_dev,0); close_share_pct=rolling_pct_by_asset(amount_share_close30,W=60,min_periods=20); amihud_pct=rolling_pct_by_asset(amihud_intraday,W=60,min_periods=20); factor=late_drop*below_vwap*close_share_pct*amihud_pct; mask is_limit_down or is_suspended."
+    required_columns: ["ret_last30", "amount_share_close30", "amihud_intraday", "vwap_close_dev", "is_limit_down", "is_suspended"]
+    pit_requirements:
+      - "rolling percentile must be grouped by asset"
+      - "rolling window must use only current and historical rows up to t"
+      - "factor is available after day-t close and intended for next-session or 3-5 day horizon"
+    inspired_by: ["K1", "K2", "K4"]
+    fusion_of: ["own-history anomaly", "close-window sampling", "VWAP-close anchor", "intraday impact cost"]
+    novel_delta: "把原始四项乘积中的两个慢变量改为个股自身历史分位异常，避免 amihud 重尾或股票间永久流动性差异主导信号，同时保留四条件共振的核心假设。"
+    concern: "仍是 AND/乘性结构，覆盖度可能较窄；若尾盘成交集中来自信息性卖出而非被动压力，短期修复逻辑会弱化。"
+  - id: "M2"
+    name: "tail_drop_soft_gate"
+    family: "intraday_microstructure"
+    implementation_status: "in_contract_factor_def"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "尾盘下跌是主信号，成交集中、日内冲击成本和 VWAP 偏离只作为是否像机械性冲击的软门控，而不是全部以原始尺度相乘。"
+    engine_data_generating_story: "把 late_drop 作为主体位移，其他分量做截面 rank 或软权重，降低重尾变量和缺失值对整条信号的破坏。"
+    signal_sketch: "factor=max(-ret_last30,0)*cs_rank(amount_share_close30)*cs_rank(amihud_intraday)*cs_rank(max(-vwap_close_dev,0)); mask is_limit_down/is_suspended."
+    required_columns: ["ret_last30", "amount_share_close30", "amihud_intraday", "vwap_close_dev", "is_limit_down", "is_suspended"]
+    pit_requirements:
+      - "cross-sectional rank is same-date only"
+      - "no future returns or labels"
+    inspired_by: ["K2", "K3", "K4"]
+    fusion_of: ["pressure-first trigger", "cross-sectional soft gates"]
+    novel_delta: "用横截面分位门控替代原始数值乘积，提升尺度稳健性。"
+    concern: "截面 amihud rank 可能隐含小盘/低流动性暴露，且没有解决个股自身异常定义问题。"
+  - id: "M3"
+    name: "below_anchor_tail_gap"
+    family: "anchor_drift"
+    implementation_status: "in_contract_factor_def"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "尾盘下跌并收在 VWAP 下方，表示价格相对日内成交锚短时偏离；该锚定偏离可能比成交额或 amihud 方向更稳定。"
+    engine_data_generating_story: "只保留 late_drop × close_below_vwap 的价格锚定核心，用作低复杂度对照。"
+    signal_sketch: "factor=max(-ret_last30,0)*max(-vwap_close_dev,0); mask is_limit_down/is_suspended."
+    required_columns: ["ret_last30", "vwap_close_dev", "is_limit_down", "is_suspended"]
+    pit_requirements:
+      - "uses same-day close/VWAP-derived fields only after day-t close"
+    inspired_by: ["K4", "K7"]
+    fusion_of: ["VWAP-close shape", "tail displacement"]
+    novel_delta: "有意做减法，检验量/冲击成本分量是否真有增量。"
+    concern: "可能欠拟合联合流动性冲击事件；vwap_close_dev 的符号口径已由 docs/intraday_etl_contract.md:228 核定（正值=收在 VWAP 上方），不再是未决项。"
+  - id: "M4"
+    name: "component_coupling_audit"
+    family: "intraday_microstructure"
+    implementation_status: "partial_in_contract"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "四个子项的方向和组合方式未必都应该乘性耦合，可能需要 capped additive、two-of-four gate 或组件单调性审计。"
+    engine_data_generating_story: "把每个成分作为独立贡献项，先观察边际方向，再决定是否需要强 AND。"
+    signal_sketch: "factor=mean/rank blend of late_drop, close_share, amihud, below_vwap; or late_drop mandatory plus confirmation count."
+    required_columns: ["ret_last30", "amount_share_close30", "amihud_intraday", "vwap_close_dev", "is_limit_down", "is_suspended"]
+    pit_requirements:
+      - "all rolling transforms must be asset-grouped"
+      - "all cross-sectional transforms must be same-date only"
+    inspired_by: ["K2", "K4"]
+    fusion_of: ["component monotonicity before coupling"]
+    novel_delta: "把组合方式本身作为研究对象。"
+    concern: "若在一个 payload 中同时隐含多种组合，会形成后验挑选风险；不作为 v1 primary。"
+  - id: "M5"
+    name: "market_residual_tail_displacement"
+    family: "intraday_microstructure"
+    implementation_status: "partial_in_contract"
+    stage2_priority: "defer"
+    source_engines: ["claude"]
+    hypothesis: "ret_last30 中全市场尾盘漂移应剥离，特异性尾盘下跌更可能是个股层面的被动冲击。"
+    engine_data_generating_story: "以 ret_last30 的同日横截面去均值残差替代原始尾盘收益，再与 close_below_vwap 合成。"
+    signal_sketch: "resid=ret_last30-cs_mean(ret_last30); factor=max(-resid,0)*max(-vwap_close_dev,0)."
+    required_columns: ["ret_last30", "vwap_close_dev", "is_limit_down", "is_suspended"]
+    pit_requirements:
+      - "cross-sectional demean uses same-date universe only"
+    inspired_by: ["K1"]
+    fusion_of: ["structured residualization"]
+    novel_delta: "把全市场尾盘共同移动从压力信号中剥离。"
+    concern: "只剥离市场尾盘漂移，不能剥离个股当日趋势；完整形态需更多字段。"
+  - id: "M6"
+    name: "path_curl_tail_break"
+    family: "other"
+    implementation_status: "needs_extension"
+    stage2_priority: "defer"
+    source_engines: ["claude", "codex"]
+    hypothesis: "同样尾盘跌幅下，后置型加速下杀或路径凸性可能区分可修复冲击与持续信息冲击。"
+    engine_data_generating_story: "需要分钟价格路径、日内最大回撤或收益噪声变形列。"
+    signal_sketch: "combine path curvature / intraday max drawdown / return noise deformation with late_drop and below_vwap."
+    required_columns: ["ret_last30", "vwap_close_dev", "intraday_prices_or_minute_bar"]
+    pit_requirements:
+      - "requires registered intraday path features"
+    inspired_by: ["K2", "K5", "K8"]
+    fusion_of: ["price-path convexity", "return noise deformation"]
+    novel_delta: "从终点收益扩展到完整日内路径形态。"
+    concern: "当前 manifest 缺少路径字段，不进入 v1 payload。"
+  - id: "M7"
+    name: "toxic_flow_split"
+    family: "intraday_microstructure"
+    implementation_status: "needs_extension"
+    stage2_priority: "defer"
+    source_engines: ["codex"]
+    hypothesis: "尾盘下跌和成交集中若伴随订单流毒性或盘口失衡，可能代表信息交易而非被动抛压。"
+    engine_data_generating_story: "用 VWPIN/OIR/VOI/MPB/signed imbalance 区分 passive pressure 与 informed selling。"
+    signal_sketch: "base tail-pressure score gated down by toxicity/order-book imbalance proxies."
+    required_columns: ["ret_last30", "amount_share_close30", "vwap_close_dev", "vwpin_like_toxicity", "order_imbalance_ratio"]
+    pit_requirements:
+      - "requires registered order-flow/order-book features"
+    inspired_by: ["K6", "K7"]
+    fusion_of: ["order-flow toxicity", "close-window pressure"]
+    novel_delta: "把被动压力和信息性卖压拆成两条分支。"
+    concern: "当前字段不足，不能当作 Stage1 kill condition，也不能写进 v1 payload。"
+stage2_entry_recommendation:
+  primary_mechanism_ids: ["M1"]
+  recommended_factor_slug: "tail_drop_volume_knot_v1"
+  reason: "M1 同时吸收了 Claude 的 PIT-safe 自历史异常机制和 Codex 的 tail_drop_volume_knot 主假设，完全使用当前 manifest 字段，满足 asset-grouped rolling、无未来函数、无全样本标准化要求；相比截面 gate 更能表达“相对个股自身历史异常”的原始设计。"
+  must_preserve_mechanisms_as_context: ["M2", "M3", "M4", "M5", "M6", "M7"]
+rejected_as_stage2_primary:
+  - mechanism_id: "M2"
+    reason: "可执行但以截面分位门控为主，amihud 可能混入长期小盘/低流动性暴露；优先级低于自历史异常版本。"
+  - mechanism_id: "M3"
+    reason: "可作为对照，但丢掉成交集中与流动性冲击两个核心假设。"
+  - mechanism_id: "M4"
+    reason: "组合方式审计不是唯一 v1 factor；若作为主 payload 容易变成后验挑选框架。"
+  - mechanism_id: "M5"
+    reason: "只实现市场尾盘漂移去均值，完整个股趋势残差化缺字段。"
+  - mechanism_id: "M6"
+    reason: "缺少分钟路径/路径凸性列。"
+  - mechanism_id: "M7"
+    reason: "缺少订单流毒性和盘口失衡列。"
+unresolved_questions:
+  - "vault_refine[RESOLVED]: vwap_close_dev 符号口径已核定为 (close-day_vwap)/day_vwap（docs/intraday_etl_contract.md:228），正值=收在 VWAP 上方；payload 用 -vwap_close_dev 表示破 VWAP 正确。原 Stage3-首轮核对项关闭。"
+  - "vault_refine: amount_share_close30 的预测力随 regime 衰减——docs/intraday_etl_contract.md:339 记 2024-2025 CS-IC≈+0.014(t=3.8) 但全 2016-2025 样本≈0(t=-0.74)，疑 2021 后量化拥挤。成交集中确认项可能是近期 regime 效应，Stage3 必须做 regime 切分，并将其与 price_core-only 对照。"
+  - "vault_refine: amihud_intraday 重载 illiquidity/小盘暴露（20_methods/signal/Method - Structured Reversal Factor Construction → style_industry_neutralization_gate；30_factors/equity/Factor - Salience-Weighted Panic Reversal 同款）。Stage3 评估须在市值/行业/流动性中性化后判增量，否则可能只是小盘 bet。"
+  - "rolling historical percentile 的窗口：payload v5 使用 W=40/min_periods=10（Stage1 草图曾写 60/20）。属版本迭代固定先验，可在后续版本调整但不能后验挑选。"
+  - "若 amount_share_close30 的异常主要来自指数调仓/收盘集合竞价制度性流量，需在后续 diagnostics 检查日期聚集和行业/市值暴露。"
+quality_gate:
+  name_only_response: false
+  contains_machine_payload: true
+  mechanism_count: 7
+  has_primary_stage2_entry: true
+  has_in_contract_candidate: true
+  preserves_needs_extension_items_as_future: true

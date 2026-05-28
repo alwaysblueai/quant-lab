@@ -1,0 +1,273 @@
+contract_version: "model_stage1_reconcile_v1"
+stage: "stage1_reconcile"
+provenance:
+  idea_id: "20260525T115846Z__idea-f3ca571d"
+  audience_chain: ["claude", "codex"]
+  retrieval_pack_sha256: ""
+idea_title: "价格-换手-流动性技术特征的短期收益排序轻量线性模型"
+candidate_slug_hint: "pv_turnover_liquidity_light_v1"
+base_case_spec_path: "configs/real_cases/model_factor/stock_ridge_safe_bfq.yaml"
+input_engines:
+  - engine: "claude"
+    artifact: "ideas/20260525T115846Z__idea-f3ca571d/stage1_claude.md"
+  - engine: "codex"
+    artifact: "ideas/20260525T115846Z__idea-f3ca571d/stage1_codex.md"
+code_feasibility_review:
+  spec_schema_version: "ModelFactorCaseSpec (model_factor_case_spec_from_mapping)"
+  validator_rules_seen:
+    - "contract_version must be 'stage2_model_candidate_v1'"
+    - "implementation_status must be 'draft_for_stage3'"
+    - "implementation_type must be 'spec_variant'"
+    - "candidate_name snake_case 3-64"
+    - "case_spec_payload must parse via model_factor_case_spec_from_mapping"
+    - "feature_columns must all appear in features file header"
+    - "fundamental-like features cannot use required_timestamp with column=null"
+    - "no Level 3 / execution_replay / fill_simulation / portfolio_construction / live_trading tokens"
+  per_mechanism:
+    M1:
+      in_v1_contract: true
+      implementation_status: "in_contract_spec_variant"
+      required_columns_missing: []
+      spec_fields_touched: ["feature_columns", "model.family", "model.params", "target.horizon", "feature_preprocess", "feature_availability"]
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "12 列全部在 features_safe_bfq_35 表头；无 fundamental-like 列（pe_ttm/pb/ps_ttm 已排除）；required_timestamp+known_at 过 PIT。最干净 v1 主候选。"
+        codex: "circ_mv/free_share 不在 fundamental-like 名单，可直接纳入；known_at PIT 可控。可作 v1 主候选。"
+    M2:
+      in_v1_contract: true
+      implementation_status: "in_contract_spec_variant"
+      required_columns_missing: []
+      spec_fields_touched: ["feature_preprocess.missing_policy", "feature_preprocess.cross_sectional_transform", "feature_preprocess.cross_sectional_group_scope"]
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "纯 feature_preprocess 字段变体，spec parser 已支持 median_impute / winsorize_zscore / scope=date；与 M1 叠加。"
+        codex: "winsorize_zscore + scope=date 受支持；纯 rank tie 语义是否暴露未独立确认，但 winsorize_zscore 足够，不阻断 v1。"
+    M3:
+      in_v1_contract: true
+      implementation_status: "partial_in_contract"
+      required_columns_missing: []
+      spec_fields_touched: ["model_selection.enabled", "model_selection.metric", "model_selection.candidates", "model_selection.n_splits", "model_selection.turnover_penalty_lambda"]
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "rank_ic_minus_turnover_penalty 是现有 spec 已支持的 selection metric（base spec turnover_conditioned_pv_synthesis_v1 已用）；判 in_contract_spec_variant。"
+        codex: "未独立确认该 metric 在 model_selection 实现中的完整行为，保守判 partial_in_contract。"
+      reconcile_note: "两引擎冲突，取更保守（codex=partial）。base spec 存在 repo 证据，但本轮不作为 v1 主候选；留作 stage3_validation_focus 下一轮启用。"
+    M4:
+      in_v1_contract: true
+      implementation_status: "in_contract_spec_variant"
+      required_columns_missing: []
+      spec_fields_touched: ["training.window_type", "training.train_window_n_dates", "training.retrain_every_n_dates", "training.min_train_rows", "training.min_score_assets"]
+      validator_blockers: []
+      reviewer_notes_by_engine:
+        claude: "（claude 未单列此机制；并入 M1 的 training 默认）"
+        codex: "全部是现有 training 字段；exploratory_screening profile 可能覆盖 retrain cadence，需在 run_controls 记录。"
+    M5:
+      in_v1_contract: false
+      implementation_status: "needs_extension"
+      required_columns_missing: ["vol_turnover_interaction（atr_bfq*turnover_rate 派生交互列，features 文件无此列）"]
+      spec_fields_touched: ["feature_columns"]
+      validator_blockers: ["v1 禁止 interaction expression / 自定义 feature builder", "feature_columns 必须是真实表头列"]
+      reviewer_notes_by_engine:
+        claude: "需新增 feature builder 或预物化交互列；v1 spec_variant 不允许。保留为上下文。"
+        codex: "（codex 未单列；同意属合同外扩展）"
+    M6:
+      in_v1_contract: false
+      implementation_status: "needs_extension"
+      required_columns_missing: []
+      spec_fields_touched: ["training.sample_weight（无此字段）"]
+      validator_blockers: ["v1 无 sample_weight 训练入口", "implementation_type 必须 spec_variant，禁自定义训练 hook"]
+      reviewer_notes_by_engine:
+        claude: "样本权重需自定义训练逻辑，超出 spec_variant；M1 特征层已部分代理'活跃股更可信'。"
+        codex: "（codex 未单列；同意属合同外扩展）"
+    M7:
+      in_v1_contract: false
+      implementation_status: "future_enhancement"
+      required_columns_missing: []
+      spec_fields_touched: ["（组合层，非 model-factor case spec 字段）"]
+      validator_blockers: ["payload 不得含 portfolio_construction / 组合优化语义", "model-factor case spec 不表达组合权重"]
+      reviewer_notes_by_engine:
+        claude: "（claude 未单列）"
+        codex: "波动率状态降权属组合构造（Level 2/3 边界），超出预测信号 spec；仅作上下文。"
+mechanisms:
+  - id: "M1"
+    name: "价格-换手-流动性技术特征的低自由度线性收益排序"
+    family: "other"
+    implementation_status: "in_contract_spec_variant"
+    stage2_priority: "primary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "把换手、量比、流动性/规模与少量价格技术特征用低自由度线性模型压成横截面收益排序分数，可在成交活跃且波动适中的子样本里捕捉大部分短期排序增量。"
+    engine_data_generating_story: "活跃成交+适中波动的股票，价格技术信号噪声更低，横截面排序更稳定。"
+    signal_sketch: "ridge 回归 forward_return(5d)，特征横截面 winsorize+zscore，截面排序取分位。"
+    touched_contract_surfaces: ["feature_columns", "model", "target", "feature_preprocess", "feature_availability"]
+    allowed_v1_spec_changes: ["feature_columns", "model.family", "model.params", "feature_preprocess", "target.horizon"]
+    forbidden_v1_changes: ["custom_feature_code", "interaction_expression"]
+    data_needs: ["turnover_rate", "turnover_rate_f", "volume_ratio", "circ_mv", "free_share", "atr_bfq", "bias1_bfq", "rsi_bfq_6", "mtm_bfq", "wr_bfq", "vr_bfq", "mfi_bfq"]
+    pit_requirements: ["feature_availability.mode=required_timestamp", "feature_availability.column=known_at", "无 fundamental-like 列，PIT 干净"]
+    artifact_audit_requirements: ["draft_model_source.candidate_json_sha256", "case_spec_sha256", "feature_contract_sha256"]
+    why_not_parameter_tuning: "不是调参，而是把一组同 owner 的 PV/换手/流动性描述符作为收益排序特征组的结构性选择。"
+    inspired_by: ["K7:low_freedom_linear_score_blend", "K4:preprocess_order_universe_data_quality_gate", "K4:universe_fixed_before_sort"]
+    fusion_of: ["Z-Score Normalization and Aggregation", "Factor Research Operating Manual"]
+    novel_delta: "显式把流动性/规模描述符作为连续条件信息纳入收益预测特征组，而非仅做 universe 过滤。"
+    concern: "高量纲流动性/市值列可能主导线性模型；靠横截面 winsorize+zscore 控制。"
+  - id: "M2"
+    name: "横截面 winsorize+zscore 预处理纪律"
+    family: "other"
+    implementation_status: "in_contract_spec_variant"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "异常值→缺失→标准化的固定顺序与 scope=date 的横截面标准化本身是排序稳定性来源。"
+    engine_data_generating_story: "预处理顺序决定截面分布，进而决定排序质量。"
+    signal_sketch: "missing_policy=median_impute, cross_sectional_transform=winsorize_zscore, group_scope=date。"
+    touched_contract_surfaces: ["feature_preprocess"]
+    allowed_v1_spec_changes: ["feature_preprocess"]
+    forbidden_v1_changes: []
+    data_needs: []
+    pit_requirements: ["横截面 demean/zscore 不引入未来信息"]
+    artifact_audit_requirements: ["feature_contract_sha256 覆盖 feature_preprocess"]
+    why_not_parameter_tuning: "预处理顺序是可审计的方法选择，而非超参搜索。"
+    inspired_by: ["K7:cross_section_winsor_zscore_direction_align", "K5:operator_semantics_catalog_with_domain_signature"]
+    fusion_of: ["Z-Score Normalization and Aggregation", "Tie-Handling in Cross-Sectional Ranking"]
+    novel_delta: "把 tie/标准化语义作为显式可审计选择登记。"
+    concern: "并列值（零成交、涨跌停）会改变 zscore 截面分布；当前用 zscore 而非 rank。"
+  - id: "M3"
+    name: "换手惩罚版模型选择目标"
+    family: "model_selection"
+    implementation_status: "partial_in_contract"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["claude", "codex"]
+    hypothesis: "用 rank IC 减换手惩罚的 selection metric 挑线性超参，使信号偏向低换手可持有。"
+    engine_data_generating_story: "成本/换手意识进入选择阶段，偏好可持有信号。"
+    signal_sketch: "model_selection.metric=rank_ic_minus_turnover_penalty, 候选若干 ridge/lasso alpha。"
+    touched_contract_surfaces: ["model_selection"]
+    allowed_v1_spec_changes: ["model_selection"]
+    forbidden_v1_changes: ["custom_target_code"]
+    data_needs: []
+    pit_requirements: ["selection 的 split 须 purged/embargo，避免泄漏"]
+    artifact_audit_requirements: ["model_selection 配置进 model_definition.json"]
+    why_not_parameter_tuning: "selection metric 的选择是研究假设（偏好低换手），不是单纯调 alpha。"
+    inspired_by: ["K4:broker_factor_research_stage_gate"]
+    fusion_of: []
+    novel_delta: "把'偏好可持有信号'写进 selection metric 而非事后筛。"
+    concern: "两引擎对其完整支持度判断不一；保守取 partial，本轮不作 v1 主候选，留下一轮启用。"
+  - id: "M4"
+    name: "保守 rolling 训练窗口纪律"
+    family: "training_window"
+    implementation_status: "in_contract_spec_variant"
+    stage2_priority: "secondary_candidate"
+    source_engines: ["codex"]
+    hypothesis: "固定保守 rolling 窗口（120 日、每 40 日 retrain）比频繁 refit 更不易过拟合短 horizon 排序。"
+    engine_data_generating_story: "短窗口贴近近端 regime，但需 min_train 兜底。"
+    signal_sketch: "training.window_type=rolling, train_window_n_dates=120, retrain_every_n_dates=40。"
+    touched_contract_surfaces: ["training"]
+    allowed_v1_spec_changes: ["training"]
+    forbidden_v1_changes: []
+    data_needs: []
+    pit_requirements: ["训练窗口仅用 <= t 数据"]
+    artifact_audit_requirements: ["training 配置进 model_definition.json"]
+    why_not_parameter_tuning: "窗口与 retrain cadence 是稳定性结构选择。"
+    inspired_by: ["K4:broker_factor_research_stage_gate"]
+    fusion_of: []
+    novel_delta: "把 training 窗口作为主要调研轴，模型族固定 ridge。"
+    concern: "exploratory_screening profile 可能覆盖 retrain cadence，需在 run_controls 记录。"
+  - id: "M5"
+    name: "显式波动率×换手交互特征"
+    family: "feature_interaction"
+    implementation_status: "needs_extension"
+    stage2_priority: "defer"
+    source_engines: ["claude"]
+    hypothesis: "显式构造 atr_bfq*turnover_rate 交互列比线性隐式学交互更直接表达'活跃但不过热'的条件可信度。"
+    engine_data_generating_story: "条件可信度=波动×换手交互。"
+    signal_sketch: "新增派生交互列（features 文件当前不存在）。"
+    touched_contract_surfaces: ["feature_columns"]
+    allowed_v1_spec_changes: []
+    forbidden_v1_changes: ["explicit_interaction_feature_builder", "custom_feature_code"]
+    data_needs: ["vol_turnover_interaction（未注册派生列）"]
+    pit_requirements: []
+    artifact_audit_requirements: []
+    why_not_parameter_tuning: "需新增特征列，超出 spec_variant。"
+    inspired_by: ["K3:volatility_state_factor_weight_rule"]
+    fusion_of: []
+    novel_delta: "条件可信度做成显式交互特征。"
+    concern: "v1 不允许 interaction expression / feature builder；保留为上下文，不进入 v1 case_spec_payload。"
+  - id: "M6"
+    name: "换手活跃度样本加权训练"
+    family: "sample_weighting"
+    implementation_status: "needs_extension"
+    stage2_priority: "defer"
+    source_engines: ["claude"]
+    hypothesis: "按换手活跃度给训练样本加权，让模型更关注可交易、信息更充分的样本。"
+    engine_data_generating_story: "活跃股样本信息更充分。"
+    signal_sketch: "训练时按 turnover 分桶赋 sample_weight。"
+    touched_contract_surfaces: ["training.sample_weight"]
+    allowed_v1_spec_changes: []
+    forbidden_v1_changes: ["sample_weight_hook", "custom_estimator_code"]
+    data_needs: []
+    pit_requirements: []
+    artifact_audit_requirements: []
+    why_not_parameter_tuning: "需自定义训练 hook，超出 spec_variant。"
+    inspired_by: ["K3:volatility_state_factor_weight_rule"]
+    fusion_of: []
+    novel_delta: "条件可信度落在样本权重而非特征层。"
+    concern: "v1 无 sample_weight 入口；保留为上下文。"
+  - id: "M7"
+    name: "波动率状态条件降权（组合层）"
+    family: "other"
+    implementation_status: "future_enhancement"
+    stage2_priority: "defer"
+    source_engines: ["codex"]
+    hypothesis: "把暴露写成市场波动率状态的仿射函数，高波 regime 系统性降权。"
+    engine_data_generating_story: "高波期系统性收缩暴露改善净收益。"
+    signal_sketch: "组合层按 sigma_t 调整暴露/单名偏离预算。"
+    touched_contract_surfaces: ["（组合构造，非 model-factor case spec）"]
+    allowed_v1_spec_changes: []
+    forbidden_v1_changes: ["portfolio_construction", "execution_replay"]
+    data_needs: []
+    pit_requirements: []
+    artifact_audit_requirements: []
+    why_not_parameter_tuning: "属组合构造语义，超出预测信号 spec 与 Level 1/2 model-factor 边界。"
+    inspired_by: ["K3:volatility_state_factor_weight_rule", "K6:volatility_bucket_deviation_budget_schedule"]
+    fusion_of: ["Conditional Mean-Variance Multifactor Portfolio with Volatility Management"]
+    novel_delta: "波动率状态条件降权。"
+    concern: "Level 2/3 组合构造边界，永久不进入 model-factor 候选 payload。"
+stage2_entry_recommendation:
+  primary_mechanism_ids: ["M1", "M2"]
+  recommended_candidate_slug: "pv_turnover_liquidity_light_v1"
+  recommended_implementation_type: "spec_variant"
+  reason: "M1+M2 是两引擎一致判定的 in_contract_spec_variant，纯 case_spec 字段变体、低复杂度线性、低内存、可快速 exploratory_screening；最贴近 idea 又最易审计。"
+  must_preserve_mechanisms_as_context: ["M3", "M4", "M5", "M6", "M7"]
+  allowed_changes:
+    - "feature_columns"
+    - "feature_preprocess"
+    - "model"
+    - "model_selection"
+    - "training"
+    - "target"
+    - "transaction_cost"
+    - "output"
+  forbidden_changes:
+    - "custom_feature_code"
+    - "custom_estimator_code"
+    - "sample_weight_hook"
+    - "explicit_interaction_feature_builder"
+    - "custom_target_code"
+    - "portfolio_construction"
+    - "execution_replay"
+rejected_as_stage2_primary:
+  - mechanism_id: "M3"
+    reason: "两引擎对完整支持度判断冲突，保守取 partial；本轮不作 v1 主候选，下一轮用 base spec 证据确认后再启用。"
+  - mechanism_id: "M5"
+    reason: "needs_extension：需交互特征 builder，v1 spec_variant 不允许。"
+  - mechanism_id: "M6"
+    reason: "needs_extension：需 sample_weight 训练 hook，v1 不支持。"
+  - mechanism_id: "M7"
+    reason: "future_enhancement：组合构造语义，超出 model-factor 预测信号 spec 与 Level 1/2 边界。"
+unresolved_questions:
+  - "model_selection 的 rank_ic_minus_turnover_penalty 完整行为是否与 base spec 一致——下一轮以 base spec 证据确认后可从 partial 升级。"
+  - "是否需要 rank（而非 winsorize_zscore）transform 来更好处理零成交/涨跌停并列值——取决于 spec 是否暴露 'rank' 选项。"
+quality_gate:
+  name_only_response: false
+  contains_machine_payload: true
+  mechanism_count: 7
+  has_primary_stage2_entry: true
+  has_in_contract_candidate: true
+  preserves_needs_extension_items_as_future: true

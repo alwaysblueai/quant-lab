@@ -1,0 +1,166 @@
+contract_version: "single_factor_stage2_candidate_output_v1"
+stage: "stage2_candidate"
+provenance:
+  idea_id: "20260523T132055Z__30"
+  stage2_payload_sha256: "sha256_pending_compute_after_materialization"
+  audience_chain: ["claude", "codex", "web_gpt_stage2"]
+human_summary:
+  factor_name: "relaxed_price_only_breakdown_risk_v1"
+  implemented_mechanism_ids: ["M_relaxed_price_only_breakdown_risk_v1"]
+  implementation_summary: "本版延续 price-only breakdown risk 路线，只使用 last-30-minute selloff 与 close below VWAP 构造 raw risk_score，并返回 -risk_score 以兼容 high=long。相对 price_only_breakdown_risk_v1，本版降低同日 price-event 门槛：late_rank 从 0.60 降到 0.45，below_rank 从 0.50 降到 0.35，用于检查此前尾部过窄是否导致成本、回撤和 robustness 脆弱。"
+  not_implemented_summary: "本轮不把 amount_share_close30 或 amihud_intraday 加回 risk_score，不新增未注册字段，不引入路径凸性、订单流毒性、盘口数据、Level3/execution 语义；继续按 avoid-long / breakdown-risk filter 解释，而不是 tail-close reversal long thesis。"
+  why_v1_is_in_contract: "只使用已注册字段 ret_last30、vwap_close_dev、is_limit_down、is_suspended；same-date rank、same-date capped raw magnitude 和 relaxed same-date price-event filter 只使用当日横截面；没有 rolling、future label、负向 shift、全样本统计、文件/网络访问或 execution/portfolio 语义。"
+factor_json_payload:
+  name: "relaxed_price_only_breakdown_risk_v1"
+  description: "High=long-compatible inverse relaxed price-only tail-close breakdown-risk factor. The raw risk_score is high when a stock has a last-30-minute selloff and closes below VWAP. Compared with price_only_breakdown_risk_v1, this version lowers the same-date price-event thresholds to reduce over-concentration in the extreme tail and test whether broader avoid-long risk identification improves robustness and cost-aware behavior. The returned factor value is -risk_score: higher factor values mean lower tail-close breakdown risk and are more compatible with long ranking; lower factor values identify avoid-long / short-risk candidates."
+  required_columns:
+    - "ret_last30"
+    - "vwap_close_dev"
+    - "is_limit_down"
+    - "is_suspended"
+  optional_columns: []
+  frequency: "daily"
+  unavailable_data_policy: "return_nan"
+  pit_assumption: "The factor is computed after day-t close and may use same-day final 30-minute return and same-day close/VWAP deviation because the signal is intended for future trading after the close. This price-only version has no rolling transforms. Same-date ranks, same-date capped raw magnitude normalizations, and relaxed same-date price-event filters use only the day-t cross-section. The raw breakdown risk score is sign-inverted before return so the emitted factor remains high=long-compatible."
+  code: |
+    def build_factor(frame):
+        """Relaxed price-only tail-close breakdown risk.
+
+        Economic interpretation:
+          - raw risk_score high = stronger tail-close price breakdown / avoid-long risk.
+          - returned value = -risk_score, so high factor value means lower risk
+            under a default high=long ranking convention.
+
+        Difference versus price_only_breakdown_risk_v1:
+          - late_rank threshold: 0.60 -> 0.45
+          - below_rank threshold: 0.50 -> 0.35
+          - no volume/amihud confirmation terms are added back.
+
+        Required columns:
+          - ret_last30
+          - vwap_close_dev
+          - is_limit_down
+          - is_suspended
+
+        PIT:
+          - Intended to be evaluated after day-t close.
+          - Cross-sectional ranks and capped raw normalizations are same-date only.
+          - No rolling transforms, future returns, negative shifts, full-sample
+            statistics, files, network access, or execution/portfolio semantics.
+        """
+
+        def _cs_positive_rank(series):
+            # Same-date percentile rank of strictly positive observations.
+            # Non-positive observations receive 0, keeping no-event names at
+            # the bottom of the raw risk score.
+            positive = series.where(series > 0.0)
+            ranked = positive.groupby(frame["date"], group_keys=False).rank(pct=True)
+            return ranked.fillna(0.0)
+
+        def _cs_capped_raw_score(series):
+            # Same-date capped raw magnitude score.
+            # Keeps magnitude information while clipping each date at the
+            # positive 95th percentile to reduce outlier domination.
+            positive = series.astype(float).where(series > 0.0)
+            q95 = positive.groupby(frame["date"], group_keys=False).transform(
+                lambda s: s.dropna().quantile(0.95)
+            )
+            denom = q95.where(q95 > 0.0)
+            capped = positive.where(positive <= denom, denom)
+            score = (capped / denom).clip(lower=0.0, upper=1.0)
+            return score.fillna(0.0)
+
+        ret_last30 = frame["ret_last30"].astype(float)
+        vwap_close_dev = frame["vwap_close_dev"].astype(float)
+
+        late_drop = (-ret_last30).clip(lower=0.0)
+        close_below_vwap = (-vwap_close_dev).clip(lower=0.0)
+
+        late_rank = _cs_positive_rank(late_drop)
+        below_rank = _cs_positive_rank(close_below_vwap)
+
+        late_raw_score = _cs_capped_raw_score(late_drop)
+        below_raw_score = _cs_capped_raw_score(close_below_vwap)
+
+        # Raw/rank mixed price breakdown scores. Raw magnitude captures how
+        # severe the tail selloff is; same-date rank keeps cross-sectional
+        # robustness.
+        late_score = 0.70 * late_raw_score + 0.30 * late_rank
+        below_score = 0.70 * below_raw_score + 0.30 * below_rank
+
+        # Price-only breakdown risk requires both a late selloff and a close
+        # below VWAP. The event thresholds are intentionally relaxed versus the
+        # previous price_only_breakdown_risk_v1 to reduce excessive tail
+        # concentration and test avoid-long filter robustness.
+        price_breakdown_core = late_score * below_score
+
+        relaxed_breakdown_event = (
+            (late_drop > 0.0)
+            & (close_below_vwap > 0.0)
+            & (late_rank >= 0.45)
+            & (below_rank >= 0.35)
+        )
+
+        risk_score = price_breakdown_core.where(relaxed_breakdown_event, 0.0)
+
+        # Default factor evaluation is high=long, so invert breakdown risk.
+        value = -risk_score
+
+        missing_required = (
+            ret_last30.isna()
+            | vwap_close_dev.isna()
+        )
+
+        blocked = (
+            frame["is_limit_down"].fillna(False).astype(bool)
+            | frame["is_suspended"].fillna(False).astype(bool)
+        )
+
+        value = value.replace([float("inf"), -float("inf")], float("nan"))
+        value = value.mask(missing_required | blocked)
+
+        return value
+  provenance:
+    idea_id: "20260523T132055Z__30"
+    stage2_payload_sha256: "sha256_pending_compute_after_materialization"
+    audience_chain: ["claude", "codex", "web_gpt_stage2"]
+deferred_mechanisms:
+  - mechanism_id: "M_price_only_breakdown_risk_original_threshold"
+    status: "future_enhancement"
+    reason: "price_only_breakdown_risk_v1 已跑过并 RankIC 过线，但 cost/robustness 不足；本版只放松阈值，用于判断尾部过窄是否是主要问题。"
+  - mechanism_id: "M_v1_product_breakdown_risk"
+    status: "rejected_for_v1"
+    reason: "v1_product_breakdown_risk_v1 已显示 RankIC mean=-0.008144939944745655、IR=-0.0941708799576279，说明 volume/amihud 四项 product 不适合作为 breakdown-risk 确认项。"
+  - mechanism_id: "M_volume_amihud_reintroduction"
+    status: "rejected_for_v1"
+    reason: "当前证据显示 volume/amihud 在 condition-count 或 product 结构中均未改善 risk proxy，下一轮不应把它们重新并入 risk_score，除非另做独立增量诊断。"
+  - mechanism_id: "M_avoid_long_filter_evaluation"
+    status: "future_enhancement"
+    reason: "如果本版 RankIC 继续过线但 long-short/cost-aware 仍弱，应转入 exclusion-filter 诊断，重点观察剔除低分尾部后的组合改善，而不是强求 standalone long alpha。"
+  - mechanism_id: "M_raw_risk_score_short_direction"
+    status: "future_enhancement"
+    reason: "如果后端支持显式 short/risk direction，可输出 raw_risk_score 而不是 -risk_score；当前为了默认 high=long 评估，先采用符号反转。"
+  - mechanism_id: "M_path_or_toxicity_extension"
+    status: "needs_extension"
+    reason: "路径凸性、订单流毒性和盘口失衡仍需要未注册字段，当前版本不引入。"
+stage3_execution_notes:
+  - "Run as relaxed price-only breakdown-risk, not as a tail-close reversal long candidate."
+  - "Compare directly against price_only_breakdown_risk_v1: rank_ic_mean=0.013740249315721561, rank_ic_ir=0.1835880895928115, observed_cost_aware_ir=-0.004625795431521404."
+  - "Compare against v1_product_breakdown_risk_v1: rank_ic_mean=-0.008144939944745655, rank_ic_ir=-0.0941708799576279, observed_cost_aware_ir=-0.16423776272913204."
+  - "Because this payload returns -risk_score, the expected sign under default high=long evaluation remains positive if the relaxed price-only breakdown-risk interpretation is correct."
+  - "Primary question: whether relaxing late_rank/below_rank thresholds improves cost-aware behavior, drawdown, and rolling robustness without destroying RankIC."
+  - "Report relaxed_breakdown_event hit rate and distribution of nonzero negative factor values; compare event hit rate to price_only_breakdown_risk_v1."
+  - "Report whether signal value is bottom-bucket / avoid-long driven rather than top-bucket long-alpha driven."
+  - "If RankIC weakens materially, revert to original price_only threshold and classify the signal as narrow avoid-long risk only."
+  - "If RankIC remains positive and cost-aware improves, keep relaxed threshold as the cleaner risk proxy, still framed primarily as avoid-long filter unless top-bucket long returns become robust."
+  - "Do not promote unless Tier L gates and cost/regime diagnostics are reliably emitted."
+quality_gate:
+  name_only_response: false
+  contains_factor_json_payload: true
+  factor_name_is_snake_case: true
+  required_columns_are_real: true
+  no_future_leakage: true
+  no_full_sample_stats: true
+  no_portfolio_or_execution_semantics: true
+  blockers:
+    - "stage2_payload_sha256 must be recomputed by Codex after exact canonical JSON materialization because the payload contains a self-referential sha field."

@@ -1,0 +1,26 @@
+{
+  "name": "v1_product_breakdown_risk_v1",
+  "description": "High=long-compatible inverse v1-product breakdown-risk factor. The raw risk_score reuses the original four-way product: last-30-minute selloff, close below VWAP, close-window amount-share own-history percentile, and intraday Amihud own-history percentile. Based on Stage3 evidence, this product is interpreted as tail-close breakdown / avoid-long risk rather than reversal alpha. The returned factor value is -risk_score: higher factor values mean lower tail-close breakdown risk and are more compatible with long ranking; lower factor values identify avoid-long / short-risk candidates.",
+  "required_columns": [
+    "ret_last30",
+    "amount_share_close30",
+    "amihud_intraday",
+    "vwap_close_dev",
+    "is_limit_down",
+    "is_suspended"
+  ],
+  "optional_columns": [],
+  "frequency": "daily",
+  "unavailable_data_policy": "return_nan",
+  "pit_assumption": "The factor is computed after day-t close and may use same-day final 30-minute return, same-day close/VWAP deviation, same-day close-window amount share, and same-day intraday Amihud because the signal is intended for future trading after the close. Rolling percentiles for amount_share_close30 and amihud_intraday are grouped by asset, use only the current row and prior rows up to t, use the original v1 window=60 and min_periods=20, contain no centered window, and contain no negative shift or future return labels. The raw breakdown risk score is sign-inverted before return so the emitted factor remains high=long-compatible.",
+  "code": "def build_factor(frame):\n    \"\"\"V1-product tail-close breakdown risk, emitted as high=long-compatible inverse risk.\n\n    Economic interpretation:\n      - raw risk_score high = stronger tail-close breakdown / avoid-long risk.\n      - returned value = -risk_score, so high factor value means lower risk\n        under a default high=long ranking convention.\n\n    This reuses the original v1 four-way product shape:\n      late_drop\n      * close_below_vwap\n      * close_volume_own_history_percentile\n      * liquidity_own_history_percentile\n\n    Required columns:\n      - ret_last30\n      - amount_share_close30\n      - amihud_intraday\n      - vwap_close_dev\n      - is_limit_down\n      - is_suspended\n\n    PIT:\n      - Intended to be evaluated after day-t close.\n      - Rolling percentiles are per asset and use only rows up to t.\n      - No future returns, negative shifts, full-sample statistics, files,\n        network access, or execution/portfolio semantics.\n    \"\"\"\n    window = 60\n    min_periods = 20\n\n    def _rolling_pct_by_asset(series):\n        # Assumes frame is already in chronological order within each asset,\n        # as supplied by the factor recipe. The rolling window includes the\n        # current observation and historical observations only.\n        def _last_percentile(x):\n            cur = x.iloc[-1]\n            if cur != cur:\n                return cur\n            valid = x.dropna()\n            if len(valid) == 0:\n                return float(\"nan\")\n            return (valid <= cur).mean()\n\n        out = (\n            series.astype(float)\n            .groupby(frame[\"asset\"], group_keys=False)\n            .rolling(window=window, min_periods=min_periods)\n            .apply(_last_percentile, raw=False)\n            .reset_index(level=0, drop=True)\n        )\n        return out.reindex(frame.index)\n\n    ret_last30 = frame[\"ret_last30\"].astype(float)\n    vwap_close_dev = frame[\"vwap_close_dev\"].astype(float)\n\n    late_drop = (-ret_last30).clip(lower=0.0)\n    close_below_vwap = (-vwap_close_dev).clip(lower=0.0)\n\n    close_volume_pct = _rolling_pct_by_asset(frame[\"amount_share_close30\"])\n    liquidity_pct = _rolling_pct_by_asset(frame[\"amihud_intraday\"])\n\n    raw_risk_score = (\n        late_drop\n        * close_below_vwap\n        * close_volume_pct\n        * liquidity_pct\n    )\n\n    # Default factor evaluation is high=long, so invert breakdown risk.\n    value = -raw_risk_score\n\n    missing_required = (\n        ret_last30.isna()\n        | vwap_close_dev.isna()\n        | frame[\"amount_share_close30\"].isna()\n        | frame[\"amihud_intraday\"].isna()\n        | close_volume_pct.isna()\n        | liquidity_pct.isna()\n    )\n\n    blocked = (\n        frame[\"is_limit_down\"].fillna(False).astype(bool)\n        | frame[\"is_suspended\"].fillna(False).astype(bool)\n    )\n\n    value = value.replace([float(\"inf\"), -float(\"inf\")], float(\"nan\"))\n    value = value.mask(missing_required | blocked)\n\n    return value\n",
+  "provenance": {
+    "idea_id": "20260523T132055Z__30",
+    "stage2_payload_sha256": "4c218fb222aabcc9fe5e9f19df327ee8f446769b6197349068954528bf3e6596",
+    "audience_chain": [
+      "claude",
+      "codex",
+      "web_gpt_stage2"
+    ]
+  }
+}
