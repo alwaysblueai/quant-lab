@@ -158,15 +158,81 @@ UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --frozen alpha-lab real-case single-
 
 ## 输出要求
 
-最终用中文输出：
+Stage3 的最终交付物是**一份固定 schema 的迭代反馈包**，供网页版 GPT 在同一个
+因子项目里生成下一版 Stage2 payload。它有两个落点：
 
-1. 写入了哪些文件。
-2. 实际运行的 validator 命令和实验命令。
-3. 实验成功或失败，以及 artifact 输出路径。
-4. 是否确认 `code_sha256`、`factor_json_sha256`、source path、required columns、PIT 假设。
-5. 初筛结果摘要：coverage、IC / rank IC、decay、turnover、extreme values、cost-aware 初筛。
-6. 主要失败点或脆弱点。
-7. 下一轮 1-3 个具体修改方向。
+**(a) durable trail —— 追加一行到 `research_log.md`**（≤ 80 字符，遵守 promotion
+checklist 对 research_log 的"只写流水、不写决策文档"约束）：
+
+```text
+2026-05-26  v1 baseline   case=tail_drop_volume_knot_v1_v1.yaml  art=outputs/.../tail_drop_volume_knot_v1_v1  RankIC=0.008 IR=0.13  verdict=fragile
+```
+
+**(b) feedback pack —— 作为本轮 Stage3 的最终结构化输出（贴进网页版 GPT 的就是
+这一块）**。固定 schema 如下；prose 字段用中文，专有名词/代码符号保留英文：
+
+```yaml
+stage3_feedback_version: single_factor_stage3_feedback_v1
+idea_id: <从 factor.json provenance 原样带出>
+factor_name: <factor_name>
+iteration: <本次评估的 payload 版本，如 v1>
+factor_thesis: <一句话经济假设，逐字保留、除非用户显式重审>
+run_output_dir: <artifact 输出目录>
+
+contract:                       # 工程契约一行带过，不展开审计细节
+  validator: passed             # validate-draft-factor 结果
+  source_hash_audit: ok         # code_sha256 / factor_json_sha256 / source path
+  artifact_audit: ok            # run_manifest + factor_definition custom_factor_source
+  provenance_idea_id: present
+
+verdict:
+  campaign_triage: <如 "Drop for now" / "Keep iterating">
+  promotion_tier_L: <pass / blocked>   # 对照 Tier L（library 准入）
+  one_line: <一句话定性，如 "工程契约全过；方向对但覆盖稀疏、rolling 不稳">
+
+scorecard:                      # 指标 vs Tier L 准入门槛；只放决定性的几项
+  rank_ic_mean:   {value: <num>, gate: ">=0.01",  pass: <bool>}
+  rank_ic_ir:     {value: <num>, gate: ">=0.15",  pass: <bool>}
+  cost_ir_5bps:   {value: <num>, gate: ">=0.05",  pass: <bool>}
+  coverage_mean:  {value: <num>, gate: ">=0.65",  pass: <bool>}
+  regime_sign:    {value: <x>/4, gate: ">=2/4",   pass: <bool>}
+  core_gap: <一句话：距 Tier C 核心档还差什么；不到 Tier L 就写 "未到准入档">
+
+blockers:                       # 真正卡住准入的 1-3 条现象（不是动作）
+  - <如 coverage 稀疏/不均>
+  - <如 rolling IC 不稳>
+
+codex_assessment:               # Codex 自主研判：advisory，网页版 GPT 可推翻
+  read: |                       # 自由文本，≤ ~150 字：本轮结果说明了什么、为何强/弱
+    <失败模式 / 有效之处 / 数据层面观察；不复述 scorecard 数字>
+  recommended_directions:       # ranked，最多 4 条，每条一句理由
+    - {move: <方向>, rationale: <为何>, confidence: high}
+  lead_pick: <如果只能改一处先改哪个 + 一句为什么>
+
+iteration_request:
+  preserve: [idea_id, factor_thesis, 已注册数据列, PIT discipline, "high=long"]
+  do_not: [新增未注册字段, needs_extension 机制, Level3/execution 语义, 换数据/绕 validator]
+  try_next:                     # codex_assessment 的 lead_pick + top directions 蒸馏成 payload 改动，≤3 条
+    - <如 "软化 4-way AND：late_drop + close_below_vwap 为核心，其余转 soft 权重">
+
+resource: <一行；如 "oom: not_triggered, headroom ok"；触发或逼近预算才展开>
+
+history:                        # 读取 research_log.md 重建，保证贴最新块也不丢轨迹
+  - {v: v1, change: <一句话>, rank_ic: <num>, verdict: <如 fragile>}
+```
+
+规则：
+
+- scorecard 的 `gate` 值必须与 `docs/factor_promotion_checklist.md` 的 **Tier L**
+  保持一致；改了 checklist 就同步改这里。
+- 填不出可靠值的字段**直接省略**，不要用 `<value>` / `<未知>` 占位凑格式。
+- `idea_id` 与 `factor_thesis` 必须逐字延续，这是网页版 GPT 识别"在迭代同一个
+  因子"的对齐锚。
+- `codex_assessment` 是 advisory，网页版 GPT 可推翻；它**不改** `preserve` /
+  `do_not` 硬约束，且 `recommended_directions` 必须全部落在 `do_not` 之外（不准
+  建议新增未注册字段 / `needs_extension` / Level3 / 换数据绕 validator）。
+- `try_next` 必须是 `codex_assessment` 的蒸馏，二者不得矛盾；探索阶段不 KILL，
+  最重只能 "drop for now"。
 
 禁止输出：
 

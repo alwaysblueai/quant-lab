@@ -8,14 +8,16 @@
 0. Stage 0 — Claude API 检索 + 分发                                 → 后端
 1. Stage 1 — Claude Code + Codex GUI 并行（任务相同，互不可见）     → 桌面 agent
 2. Stage 2 — 网页 GPT 综合两份输出 → 合同 + 接收 Stage 3 回执做迭代  → 网页 GPT
+2.5 Stage 2.5 — Claude Desktop vault-refine（可选加固，不跑实验）   → 桌面 agent
 3. Stage 3 — Codex GUI 后端快速迭代（validator + pipeline）         → 后端
 4. Stage 4 — 经验归档（不管成败都总结，由用户手工写入 vault）       → 后端 → vault
 5. Stage 5 — 晋升 + 前端完整报告（仅通过审核的候选）                → 前端
 ```
 
-**前端只做两件事**：
+**前端只做三件事**：
 
 - 输入模糊想法 + 复制 / 预览 Stage 0 产出文件
+- 接收网页 GPT 的 Stage 2 YAML，保存到 `ideas/<idea_id>/`，并生成 Codex GUI Stage 3 开场指令
 - 展示已通过审核的因子/模型的完整可视化报告
 
 其他全部在后端，每个 Stage 只产出**确定数量**的文件，不允许散落写。
@@ -108,7 +110,12 @@ mechanism_1:
 | 步骤 | 输入 | 输出 | 写入 |
 |---|---|---|---|
 | 2.1 reconcile | `stage1_claude.md` + `stage1_codex.md` + `retrieval_pack.md` | `stage1_reconcile_payload`（YAML） | `ideas/<idea_id>/stage1_reconcile.yaml` |
-| 2.2 candidate | reconcile payload + 用户取舍 | `factor_json_payload` 或 `model_candidate_payload`（含 provenance） | `ideas/<idea_id>/stage2_payload_v<n>.json` |
+| 2.2 candidate | reconcile payload + 用户取舍 | `factor_json_payload` 或 `model_candidate_payload`（含 provenance） | `ideas/<idea_id>/stage2_payload_v<n>.yaml` |
+
+单因子网页前端提供 Stage 2 intake 面板：用户把 `stage1_reconcile.yaml`
+和 `stage2_payload_v1.yaml` 粘贴进去，后端校验 `contract_version` /
+`stage` / `idea_id` 一致性，保存到对应 `ideas/<idea_id>/`，并返回固定
+Codex GUI Stage 3 指令。该面板只做交接规范化，不写 factor/model、不跑实验。
 
 ### Stage 2.1 综合规则
 
@@ -124,7 +131,29 @@ mechanism_1:
 
 ### 迭代回灌
 
-Stage 3 跑完之后，把后端实验摘要（见 Stage 3）**直接粘回**同一个 GPT 项目 → GPT 出 `stage2_payload_v<n+1>.json`。`idea_id` 不变，`stage2_payload_sha256` 更新。这是网页 GPT 的"正向迭代"路径，**不需要额外文件做中转**。
+Stage 3 跑完之后，把后端实验摘要（见 Stage 3）**直接粘回**同一个 GPT 项目 → GPT 出 `stage2_payload_v<n+1>.yaml`。`idea_id` 不变，`stage2_payload_sha256` 更新。这是网页 GPT 的"正向迭代"路径，**不需要额外文件做中转**。
+
+## Stage 2.5 — Vault-Refine（可选但正式）
+
+**定位**：Stage 2 已经产出合规 YAML 后，若用户希望在进入 Stage 3 前补一层 vault grounding，可把
+`stage1_reconcile.yaml` + `stage2_payload_v<n>.yaml` 交给 Claude Desktop 做知识一致性加固。
+本步只改写 Stage 2 两份 YAML，不跑实验、不写 `custom_factors/**` / `custom_models/**`、不写 case YAML。
+
+| lab | prompt | 加固对象 |
+|---|---|---|
+| single_factor | `docs/templates/stage2_vault_refine_prompt.md` | `factor_json_payload.code`、`required_columns`、PIT / alias / 方法卡一致性 |
+| model_factor | `docs/templates/model_stage2_vault_refine_prompt.md` | `model_candidate_payload.case_spec_payload`，含 feature 选择、target horizon、训练窗、正则、PIT |
+
+采纳加固结果时，仍按 Stage 2 文件槽保存：reconcile 保持 `stage1_reconcile.yaml`，payload 保存为当前
+`stage2_payload_v<n>.yaml` 或下一版 `stage2_payload_v<n+1>.yaml`。`stage2_payload` 仍是 Stage 3
+唯一机器事实；Claude 的变更日志只进人工审阅或 `research_log.md` 背景，不作为实现入口。
+
+硬规则：
+
+- vault-refine 是**增量加固，不推翻**；不许换机制身份，不许引入 Stage 1 ledger 从未出现过的新机制。
+- 所有实质改动必须引用驱动它的 vault 卡路径。
+- 一旦改动 payload，`stage2_payload_sha256` 置空，交 Stage 3 canonical-materialize 重算。
+- 禁止引入 Level 3 / execution / replay / fill simulation 语义。
 
 ## Stage 3 — 后端快速迭代
 
@@ -180,11 +209,28 @@ alpha-lab real-case model-factor run configs/.../<c>_v1.yaml \
 
 **关键定位**：多轮迭代结束后**一次性**产出经验总结（不是每轮都写）。无论 Stage 3 最终成功还是失败，都要写一份，把多轮散落的研究信号收敛成可被未来 idea 借用的经验。
 
-### 唯一产物
+### Repo 内最小产物
 
 ```
 ideas/<idea_id>/experiment_card.md
 ```
+
+这是 repo 侧的最小审计索引；正式知识库写回先进入 vault project 草稿区，不直接手工写
+`50_experiments/`。
+
+### 三源 writeback 模板
+
+Stage 4 正式写回由三类来源合并：网页版 GPT 机制侧总结、Claude Desktop Stage 2.5 / 合并侧总结、
+Codex GUI 实验事实总结。机器事实冲突时，以 Codex GUI 本地 artifacts 为准。
+
+| lab | 机制侧总结 | 实验事实总结 | 最终合并 | 写回 schema |
+|---|---|---|---|---|
+| single_factor | `docs/templates/web_gpt_factor_iteration_summary_prompt.md` | `docs/templates/codex_gui_factor_experiment_summary_prompt.md` | `docs/templates/claude_desktop_factor_writeback_merge_prompt.md` | `docs/templates/single_factor_iteration_writeback_template.md` |
+| model_factor | `docs/templates/web_gpt_model_iteration_summary_prompt.md` | `docs/templates/codex_gui_model_experiment_summary_prompt.md` | `docs/templates/claude_desktop_model_writeback_merge_prompt.md` | `docs/templates/model_lab_iteration_writeback_template.md` |
+
+最终草稿目标是 `55_projects/<project_slug>/50_writeback_drafts/`；审批后再通过
+alpha-lab export / apply-writeback 进入 `50_experiments/`。不保存原始聊天全文，只保存可复用的
+机制经验、失败边界、artifact 证据和 `emergent_moves`。
 
 ### 字段
 
@@ -222,7 +268,17 @@ final_metrics_sha256: <run_manifest 中的关键 hash 摘要>
 - 观察到的现象 / 经验 / 边界条件（错了也无所谓，给未来探索做素材）
 ```
 
-### 用户手工把这份 card 落到 vault
+### 正式归档路径
+
+三源 writeback 草稿先进入：
+
+```text
+55_projects/<project_slug>/50_writeback_drafts/
+```
+
+人工确认后，再通过 alpha-lab export / apply-writeback 写入 `50_experiments/`。如果只需要轻量的
+repo 实验卡归档，可继续用 `export_experiment_card` 导出 `ideas/<idea_id>/experiment_card.md`；
+正式知识写回不直接手工创建 `50_experiments/` 文件。
 
 ```python
 from alpha_lab.reporting import export_experiment_card
@@ -230,12 +286,12 @@ export_experiment_card(
     card_path="ideas/<idea_id>/experiment_card.md",
     name="signed-jump-reversal-202605",
 )
-# → /mnt/c/quant/vault/quant-knowledge/50_experiments/Exp - 202605 - signed-jump-reversal.md
+# 轻量 experiment-card 导出；正式 writeback 仍先走 50_writeback_drafts/ 审批
 ```
 
 ### Stage 4 写完即清理（**避免知识库膨胀的关键**）
 
-- 删除 `ideas/<idea_id>/stage1_*.md` / `stage2_payload_v*.json` / `prompt_*.md` / `retrieval_pack.md` / `stage2_input.md`（信息已沉淀在 `experiment_card.md` + vault）
+- 删除 `ideas/<idea_id>/stage1_*.md` / `stage2_payload_v*.yaml` / `prompt_*.md` / `retrieval_pack.md` / `stage2_input.md`（信息已沉淀在 `experiment_card.md` + 已审批 writeback/vault）
 - 保留 `ideas/<idea_id>/manifest.json` + `experiment_card.md`（idea_id 索引最小集）
 - 删除 `custom_factors/research/<f>/` 整个目录（若 outcome=killed/parked），或拷到 promoted 之后删（若 outcome=promoted）
 
@@ -260,8 +316,9 @@ alpha-lab web unified --vault-root /mnt/c/quant/vault/quant-knowledge
 ```
 
 - 首页：模糊想法输入框（→ Stage 0）+ Stage 0 文件预览/复制
+- Stage 2 intake：保存网页 GPT 输出的 YAML + 生成 Codex GUI Stage 3 指令
 - `/model-lab` Draft Candidates 面板：仅对 `promoted/` 候选生成完整 `default_research` 报告 + artifact 可视化
-- 不在前端做 Stage 1-4 任何工作
+- 不在前端做 Stage 1、Stage 3、Stage 4 的研究/实验工作
 
 ## 文件总量约束（一份完整流程跑完）
 
@@ -270,8 +327,9 @@ alpha-lab web unified --vault-root /mnt/c/quant/vault/quant-knowledge
 | 0 | 5 | 5 |
 | 1 | 2（两引擎各一份） | 7 |
 | 2 | 1 reconcile + 每轮 1 payload | 8+rounds |
+| 2.5 | 0（只加固/改写 Stage 2 YAML，不新增 artifact 类型） | 不变 |
 | 3 | 3（覆盖式写） | 11+rounds |
-| 4 | 1（experiment_card）+ **删除** Stage 0/1/2/3 中除 manifest 外的临时文件 | manifest + card + promoted（视情况） |
+| 4 | 1（repo 内 experiment_card）+ vault writeback 草稿（repo 外）+ **删除** Stage 0/1/2/3 中除 manifest 外的临时文件 | manifest + card + promoted（视情况） |
 | 5 | promoted/ 目录拷贝 + promotion_card.md（仅 outcome=promoted） | 上线 |
 
 **Stage 4 清理后**：每个 idea 在 repo 里只留 2 个文件 + 可选 promoted/，vault 经验只增不减。
@@ -295,6 +353,8 @@ alpha-lab web unified --vault-root /mnt/c/quant/vault/quant-knowledge
 | 晋升清单 | `docs/factor_promotion_checklist.md` |
 | Stage 3 执行硬约束 | `docs/templates/codex_gui_{,model_}stage3_execution_envelope.md` |
 | Stage 2 合同 | `docs/templates/<lab>_stage{1_reconcile,2_candidate}_contract.md` |
+| Stage 2.5 vault-refine | `docs/templates/stage2_vault_refine_prompt.md` / `docs/templates/model_stage2_vault_refine_prompt.md` |
+| Stage 4 三源 writeback | `docs/templates/*_iteration_summary_prompt.md` / `docs/templates/codex_gui_*_experiment_summary_prompt.md` / `docs/templates/claude_desktop_*_writeback_merge_prompt.md` |
 
 ## 三种"必须停下"的硬失败（任何阶段通用）
 
